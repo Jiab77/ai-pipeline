@@ -1,0 +1,133 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "Read the contents of a file. Optionally specify a 1-based line range. If append_loc is true, each line is prefixed with its line number (e.g. \"1→ ...\").",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Path to the file" },
+          "start_line": { "type": "integer", "description": "First line to read, 1-based (default: 1)" },
+          "end_line": { "type": "integer", "description": "Last line to read, 1-based inclusive (default: end of file)" },
+          "append_loc": { "type": "boolean", "description": "Prefix each line with its line number" }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file_glob_search",
+      "description": "Recursively search for files matching a glob pattern under a directory.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Base directory to search in" },
+          "include": { "type": "string", "description": "Glob pattern for files to include (e.g. \"**/*.cpp\"). Default: **" },
+          "exclude": { "type": "string", "description": "Glob pattern for files to exclude" }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "grep_search",
+      "description": "Search for a regex pattern in files under a path. Returns matching lines.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "File or directory to search in" },
+          "pattern": { "type": "string", "description": "Regular expression pattern to search for" },
+          "include": { "type": "string", "description": "Glob pattern to filter files (default: **)" },
+          "exclude": { "type": "string", "description": "Glob pattern to exclude files" },
+          "return_line_numbers": { "type": "boolean", "description": "If true, include line numbers in results" }
+        },
+        "required": ["path", "pattern"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "exec_shell_command",
+      "description": "Execute a shell command and return its output (stdout and stderr combined).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string", "description": "Shell command to execute" },
+          "timeout": { "type": "integer", "description": "Timeout in seconds (default 10, max 60)" },
+          "max_output_size": { "type": "integer", "description": "Maximum output size in bytes (default 16384)" }
+        },
+        "required": ["command"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write_file",
+      "description": "Write content to a file, creating it (including parent directories) if it does not exist. May use with edit_file for more complex edits.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Path of the file to write" },
+          "content": { "type": "string", "description": "Content to write" }
+        },
+        "required": ["path", "content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit_file",
+      "description": "Edit a file by applying a list of line-based changes. Each change targets a 1-based inclusive line range and has a mode: \"replace\" (replace lines with content), \"delete\" (remove lines, content must be empty string), \"append\" (insert content after line_end). Set line_start to -1 to target the end of file (line_end is ignored in that case). Changes must not overlap. They are applied in reverse line order automatically.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Path to the file to edit" },
+          "changes": {
+            "type": "array",
+            "description": "List of changes to apply",
+            "items": {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "description": "\"replace\", \"delete\", or \"append\"" },
+                "line_start": { "type": "integer", "description": "First line of the range (1-based); use -1 for end of file" },
+                "line_end": { "type": "integer", "description": "Last line of the range (1-based, inclusive); ignored when line_start is -1" },
+                "content": { "type": "string", "description": "Content to insert; must be empty string for delete mode" }
+              },
+              "required": ["mode", "line_start", "line_end", "content"]
+            }
+          }
+        },
+        "required": ["path", "changes"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "apply_diff",
+      "description": "Apply a unified diff to edit one or more files using git apply. Use this instead of edit_file when the changes are complex.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "diff": { "type": "string", "description": "Unified diff content in git diff format" }
+        },
+        "required": ["diff"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_datetime",
+      "description": "Returns the current date and time"
+    }
+  }
+]

@@ -11,6 +11,9 @@
 # Options
 # [[ -e $HOME/.debug ]] && set -x
 
+# Config
+LOG_FILE="$(basename "$0" .sh).log"
+
 # Arguments
 FUNC_NAME="$1"
 FUNC_ARGS="$2"
@@ -301,6 +304,9 @@ get_datetime() {
 
 # Bootstrap
 [[ $# -eq 0 ]] && error "Missing arguments.\nUsage: $(basename "$0") <function> <arguments>\n"
+
+# Logging
+echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nFunction: ${FUNC_NAME}\nArguments: ${FUNC_ARGS}" >> "$LOG_FILE"
 
 # Choix de la function (je n'aime pas coder en Français...)
 "$FUNC_NAME" "$FUNC_ARGS"

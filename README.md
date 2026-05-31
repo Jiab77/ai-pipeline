@@ -157,6 +157,9 @@ sudo apt update && sudo apt install -y curl jq tor glow
 
 # macOS (Homebrew)
 brew install jq glow tor
+
+# Arch Linux
+sudo pacman -Syu curl jq tor glow
 ```
 
 ### Authorization (For Gemini/OpenRouter API)

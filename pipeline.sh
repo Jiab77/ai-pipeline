@@ -10,7 +10,7 @@
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.1.0
+# Version: 0.1.1
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -144,7 +144,7 @@ api_call() {
     ollama)
       curl "${curl_opts[@]}" "${OLLAMA_API_URL}" \
       	     -H "Content-Type: application/json" \
-      	     -d "$payload" | \
+      	     -d @- <<< "$payload" | \
       	     jq -rc '.response'
     ;;
 
@@ -153,7 +153,7 @@ api_call() {
       curl "${curl_opts[@]}" "${LLAMACPP_API_URL}" \
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer no-key" \
-           -d "$payload" | \
+           -d @- <<< "$payload" | \
            jq -rc '.choices[0].message.content'
     ;;
 
@@ -163,7 +163,7 @@ api_call() {
       curl "${curl_opts[@]}" "${GEMINI_API_URL}" \
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer ${GEMINI_API_KEY}" \
-           -d "$payload" | \
+           -d @- <<< "$payload" | \
            jq -rc .
     ;;
     *) error "Unsupported backend given: $BACKEND" ;;

@@ -10,7 +10,7 @@
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.1.2
+# Version: 0.1.3
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -33,14 +33,16 @@ SCRIPT_FILE="$(basename "$0")"
 SCRIPT_NAME="${SCRIPT_FILE//.sh}"
 DATA_STORE="${SCRIPT_DIR}/data"
 BASE_TOOLS="${SCRIPT_DIR}/tools.json"
+MEMORY_FILE="${DATA_STORE}/memory.json"
 TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
 TOOLS_CONTENT="[]"
 
 # Soul
 AI_NAME="Jarvis"
 SYSTEM_PROMPT="You are ${AI_NAME}, a friendly AI collaborator. Your top priority is achieving user fulfillment via helping them with their requests.\n"
-SYSTEM_PROMPT+="Your own memory space is in the '$(basename "$DATA_STORE")' folder, you can organize it the way you want.\n"
-SYSTEM_PROMPT+="You must never modify the following files: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER}\` and \`${BASE_TOOLS}\`.\n"
+SYSTEM_PROMPT+="Your own workspace is in the \`$(basename "$DATA_STORE")\` folder, you can organize it the way you want.\n"
+SYSTEM_PROMPT+="Your own memory file located in your workspace is the \`$(basename "$MEMORY_FILE")\` file, you must load it at every session start.\n"
+SYSTEM_PROMPT+="You must never modify the following files: \`${SCRIPT_FILE}\`, \`$(basename "$TOOLS_HANDLER")\` and \`$(basename "$BASE_TOOLS")\`.\n"
 SYSTEM_PROMPT+="Modifying these files will simply break the core functionalities of the pipeline."
 
 # Local Models Config
@@ -49,6 +51,11 @@ MAX_CONTEXT=8192
 MAX_BATCH_SIZE=256
 MAX_CORES=$(($(nproc)/2))   # FIXME: May not work well on mobiles devices
 MAX_TIMEOUT=1200
+
+# OpenRouter Config
+OPENROUTER_REFERER="https://github.com/jiab77/ai-pipeline"
+OPENROUTER_TITLE="Minimalist Experimental AI Pipeline"
+OPENROUTER_CATEGORIES="cli-agent,cloud-agent"
 
 # Gemini 3.5 Flash
 GEMINI_API_URL="https://openrouter.ai/api/v1/chat/completions"
@@ -143,9 +150,9 @@ api_call() {
     # Local Backend: Ollama
     ollama)
       curl "${curl_opts[@]}" "${OLLAMA_API_URL}" \
-      	     -H "Content-Type: application/json" \
-      	     -d @- <<< "$payload" | \
-      	     jq -rc '.response'
+     	     -H "Content-Type: application/json" \
+     	     -d @- <<< "$payload" | \
+     	     jq -rc '.response'
     ;;
 
     # Local Backend: llama.cpp
@@ -163,6 +170,9 @@ api_call() {
       curl "${curl_opts[@]}" "${GEMINI_API_URL}" \
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer ${GEMINI_API_KEY}" \
+           -H "HTTP-Referer: ${OPENROUTER_REFERER}" \
+           -H "X-OpenRouter-Title: ${OPENROUTER_TITLE}" \
+           -H "X-OpenRouter-Categories: ${OPENROUTER_CATEGORIES}" \
            -d @- <<< "$payload" | \
            jq -rc .
     ;;
@@ -212,7 +222,7 @@ clear_memory() {
   else
     error "Invalid selection given: $USER_CHOICE"
   fi
-  exit $?
+  # exit $?
 }
 handle_response() {
   local response="$1"
@@ -233,7 +243,7 @@ send_message() {
   case $BACKEND in
     # Local Backend: Ollama
     ollama)
-      log "[DEBUG] Sending message to 'ollama'..."
+      log "[Debug] Sending message to 'ollama'..."
       JSON_PAYLOAD=$(jq -rc -n \
         --arg model "$OLLAMA_ARCHITECT" \
         --arg prompt "$combined" \
@@ -253,7 +263,7 @@ send_message() {
 
     # Local Backend: llama.cpp
     llamacpp)
-      log "[DEBUG] Sending message to 'llama.cpp'..."
+      log "[Debug] Sending message to 'llama.cpp'..."
       LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
       JSON_PAYLOAD=$(jq -rc -n \
         --arg model "$LLAMACPP_MODEL" \

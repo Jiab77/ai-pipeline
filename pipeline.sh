@@ -10,7 +10,7 @@
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.1.1
+# Version: 0.1.2
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -203,8 +203,15 @@ render_markdown() {
 }
 clear_memory() {
   log "\n[*] Cleaning memory...\n"
-  rm -f "${DATA_STORE}/${MEMORY_FILE}"
-  rm -f "${DATA_STORE}/${MESSAGES_FILE}"
+  read -rp "What do you want to clear? [1. Memory, 2. Messages]: " USER_CHOICE
+  [[ -z $USER_CHOICE ]] && error "No selection given. Nothing deleted."
+  if [[ $USER_CHOICE == 1 ]]; then
+    rm -f "${DATA_STORE}/${MEMORY_FILE}"
+  elif [[ $USER_CHOICE == 2 ]]; then
+    rm -f "${DATA_STORE}/${MESSAGES_FILE}"
+  else
+    error "Invalid selection given: $USER_CHOICE"
+  fi
   exit $?
 }
 handle_response() {
@@ -272,7 +279,7 @@ send_message() {
 
     # External Backend: OpenRouter / Gemini
     gemini)
-      log "[DEBUG] Sending message to 'gemini'..."
+      log "\n[Debug] Sending message to 'gemini'..."
 
       # Loading history file if exist or start from zero
       if [[ -r "${DATA_STORE}/${MESSAGES_FILE}" ]]; then
@@ -337,8 +344,8 @@ send_message() {
 
 		    # Handling model requested tools (Multi-Parallel Support)
 		    if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
-			    log "\n\n[SYS] Tools:\n\n"
-			    echo "$TOOLS" | jq .
+			    # log "\n\n[SYS] Tools:\n\n"
+			    # echo "$TOOLS" | jq .
 
           # 1. Grab assistant command message and push to history
           ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<$RAW_RESPONSE)
@@ -346,7 +353,7 @@ send_message() {
 
           # 2. Extract and iterate over all requested parallel tools
           NUM_TOOLS=$(jq -rc '. | length' <<<$TOOLS)
-          log "\n[+] Executing $NUM_TOOLS parallel tool(s)...\n"
+          log "\n[+] Executing $NUM_TOOLS parallel tool(s)..."
 
           # Looping throught all requested tools
           for ((i=0; i<NUM_TOOLS; i++)); do
@@ -397,8 +404,14 @@ send_message() {
 
 		    # Handling model usage
 		    if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-			    log "\n\n[SYS] Usage:\n\n"
-			    echo "$USAGE" | jq .
+			    log "[+] Usage:"
+			    log "  - Prompt Tokens: $(jq -rc .prompt_tokens <<<$USAGE)"
+			    log "  - Cached Tokens: $(jq -rc .prompt_tokens_details.cached_tokens <<<$USAGE)"
+			    log "  - Completion Tokens: $(jq -rc .completion_tokens <<<$USAGE)"
+			    log "  - Reasoning Tokens: $(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<$USAGE)"
+			    log "  - Total Tokens: $(jq -rc .total_tokens <<<$USAGE)"
+			    log "  - Cost: $(jq -rc .cost <<<$USAGE)"
+			    # jq . <<<$USAGE
 		    fi
 	    done
     ;;

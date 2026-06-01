@@ -1,26 +1,31 @@
 #!/usr/bin/env bash
 
 # ==============================================================================
-# SCRIPT D'OUTILS POUR AGENT LOCAL (Conforme aux contraintes strictes du schéma)
+# TOOLS SCRIPT FOR LOCAL AGENT (Strictly conforming to schema constraints)
 # ==============================================================================
 #
 # Made by Gemini 3.5 Flash Extended / Improved by Jiab77
 #
-# Version 0.0.0
+# Version 0.1.0
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
 
 # Config
 LOG_FILE="$(basename "$0" .sh).log"
+PIPELINE_FILE="pipeline.sh"
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+
+# Internals
+BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
 
 # Arguments
 FUNC_NAME="$1"
 FUNC_ARGS="$2"
 
-# Fonctions Internes
+# Internal Functions
 log() {
-	echo -e "$*" >&2
+  echo -e "$*" >&2
 }
 error() {
   echo -e "\nError: $*\n" >&2
@@ -31,20 +36,22 @@ parse_args() {
   jq -rc ".${key}" <<<$FUNC_ARGS
 }
 
-# Fonctions Publiques
-# 1. Lire le contenu d'un fichier avec plage de lignes optionnelle
+# Pure Bash URL Decoder
+urldecode() {
+  local encoded="${1//+/ }"
+  printf '%b' "${encoded//%/\\x}"
+}
+
+# Public Functions
+# 1. Read file contents with optional line range and line-number prefixing
 read_file() {
-  # local path="$1"
-  # local start_line="${2:-1}"
-  # local end_line="${3:-}"
-  # local append_loc="${4:-false}"
-  
   local path="."
   local start_line=1
   local end_line
   local append_loc=false
+  local total_lines
   local x
-  
+
   if [[ -n $FUNC_ARGS ]]; then
     x=$(parse_args "path") ; [[ -n $x && ! $x == "null" ]] && path="$x"
     x=$(parse_args "start_line") ; [[ -n $x && ! $x == "null" ]] && start_line="$x"
@@ -52,17 +59,12 @@ read_file() {
     x=$(parse_args "append_loc") ; [[ -n $x && ! $x == "null" ]] && append_loc="$x"
   fi
 
-  if [ ! -f "$path" ]; then
-    echo "Error: File not found at $path" >&2
-    return 1
-  fi
+  [[ ! -f $path ]] && error "File not found at $path"
 
-  local total_lines=$(wc -l < "$path")
-  if [ -z "$end_line" ]; then
-    end_line=$total_lines
-  fi
+  total_lines=$(wc -l < "$path")
+  [[ -z $end_line ]] && end_line=$total_lines
 
-  if [ "$append_loc" = "true" ]; then
+  if [[ $append_loc == true ]]; then
     awk -v start="$start_line" -v end="$end_line" '
         NR >= start && NR <= end { printf "%d→ %s\n", NR, $0 }
     ' "$path"
@@ -73,50 +75,38 @@ read_file() {
   fi
 }
 
-# 2. Recherche récursive de fichiers via glob pattern
+# 2. Recursively search for files matching a glob pattern under a folder
 file_glob_search() {
-  # local path="$1"
-  # local include="${2:-*}"
-  # local exclude="${3:-}"
-
-	local path="."
+  local path="."
   local include="*"
   local exclude
   local x
-  
+
   if [[ -n "$FUNC_ARGS" ]]; then
     x=$(parse_args "path") ; [[ -n $x && ! $x == "null" ]] && path="$x"
     x=$(parse_args "include") ; [[ -n $x && ! $x == "null" ]] && include="$x"
     x=$(parse_args "exclude") ; [[ -n $x && ! $x == "null" ]] && exclude="$x"
   fi
 
-  if [ ! -d "$path" ]; then
-    echo "Error: Directory not found at $path" >&2
-    return 1
-  fi
+  [[ ! -d $path ]] && error "Directory not found at $path"
 
-  if [ -n "$exclude" ]; then
-    find "$path" -maxdepth 10 -type f -wholename "$include" ! -name "$exclude"
+  if [[ -n $exclude ]]; then
+    find "$path" -maxdepth 10 -type f -wholename "$include" ! -wholename "$exclude"
   else
     find "$path" -maxdepth 10 -type f -wholename "$include"
   fi
 }
 
-# 3. Recherche par Regex (Grep) dans un chemin (fichier ou dossier)
+# 3. Search for a regex pattern in files (grep)
 grep_search() {
-  # local path="$1"
-  # local pattern="$2"
-  # local include="${3:-*}"
-  # local exclude="${4:-}"
-  # local return_line_numbers="${5:-false}"
-
   local path="."
   local pattern
   local include="*"
   local exclude
   local return_line_numbers=false
+  local grep_opts="-E"
   local x
-  
+
   if [[ -n "$FUNC_ARGS" ]]; then
     x=$(parse_args "path") ; [[ -n $x && ! $x == "null" ]] && path="$x"
     x=$(parse_args "pattern") ; [[ -n $x && ! $x == "null" ]] && pattern="$x"
@@ -125,133 +115,122 @@ grep_search() {
     x=$(parse_args "return_line_numbers") ; [[ -n $x && ! $x == "null" ]] && return_line_numbers="$x"
   fi
 
-  local grep_opts="-E"
-  if [ "$return_line_numbers" = "true" ]; then
-    grep_opts="${grep_opts} -n"
-  fi
+  [[ $return_line_numbers == true ]] && grep_opts="${grep_opts} -n"
 
-  if [ -d "$path" ]; then
-    # Recherche récursive dans un dossier
-    if [ -n "$exclude" ]; then
-      grep ${grep_opts} -r --include="$include" --exclude="$exclude" "$pattern" "$path"
+  if [[ -d $path ]]; then
+    if [[ -n $exclude ]]; then
+      grep $grep_opts -r --include="$include" --exclude="$exclude" "$pattern" "$path"
     else
-      grep ${grep_opts} -r --include="$include" "$pattern" "$path"
+      grep $grep_opts -r --include="$include" "$pattern" "$path"
     fi
-  elif [ -f "$path" ]; then
-    # Recherche dans un fichier unique
-    grep ${grep_opts} "$pattern" "$path"
+  elif [[ -f $path ]]; then
+    grep $grep_opts "$pattern" "$path"
   else
-    echo "Error: Invalid path $path" >&2
-    return 1
+    error "Invalid path $path"
   fi
 }
 
-# 4. Exécuter une commande système avec Timeout et troncature stricte
+# 4. Execute a system shell command with timeout and strict truncation
 exec_shell_command() {
-  # local command="$1"
-  # local timeout_val="${2:-10}"
-  # local max_output_size="${3:-16384}"
-
   local command="null"
-  local timeout_val=10
+  local timeout=10
   local max_output_size=16384
-  local x
-  
-  if [[ -n $FUNC_ARGS ]]; then
-		x=$(parse_args "command") ; [[ -n $x && ! $x == "null" ]] && command="$x"
-		x=$(parse_args "timeout_val") ; [[ -n $x && ! $x == "null" ]] && timeout_val="$x"
-		x=$(parse_args "max_output_size") ; [[ -n $x && ! $x == "null" ]] && max_output_size="$x"
-  fi
-  
-  # Avoid running the pipeline itself...
-  [[ $(grep -ci "pipeline.sh" <<<$command) -ne 0 ]] && error "Dear model, don't try to run the pipeline itself, it's not made for that. Thank you."
-
-  # Sécurité sur les bornes du timeout
-  if [ "$timeout_val" -lt 1 ] || [ "$timeout_val" -gt 60 ]; then timeout_val=10; fi
-
   local output
-  output=$(timeout "$timeout_val" sh -c "$command" 2>&1)
-  local exit_code=$?
+  local exit_code
+  local x
 
-  if [ $exit_code -eq 124 ]; then
-    echo "Command timed out after $timeout_val seconds."
+  if [[ -n $FUNC_ARGS ]]; then
+    x=$(parse_args "command") ; [[ -n $x && ! $x == "null" ]] && command="$x"
+    x=$(parse_args "timeout") ; [[ -n $x && ! $x == "null" ]] && timeout="$x"
+    x=$(parse_args "max_output_size") ; [[ -n $x && ! $x == "null" ]] && max_output_size="$x"
   fi
 
-  # Troncature propre en octets via Bash (sans fuite mémoire)
-  if [ ${#output} -gt "$max_output_size" ]; then
+  # Avoid running the pipeline itself while it is running
+  [[ $(grep -ci "$PIPELINE_FILE" <<< "$command") -ne 0 ]] && error "Dear model, don't try to run the pipeline itself, it's not made for that. Thank you."
+
+  [[ $timeout -lt 1 || $timeout -gt 60 ]] && timeout=10
+
+  output=$(timeout "$timeout" sh -c "$command" 2>&1)
+  exit_code=$?
+
+  [[ $exit_code -eq 124 ]] && echo "Command timed out after $timeout_val seconds."
+
+  if [[ ${#output} -gt $max_output_size ]]; then
     echo "${output:0:$max_output_size}"
     echo -e "\n[Output truncated: exceeded $max_output_size bytes]"
   else
     echo "$output"
   fi
-  return $exit_code
+  exit $exit_code
 }
 
-# 5. Écrire ou écraser un fichier (crée les dossiers parents si nécessaire)
+# 5. Write or overwrite a file (creates parent directories dynamically)
 write_file() {
-  # local path="$1"
-  # local content="$2"
-
   local path="."
   local content
   local x
-  
+
   if [[ -n $FUNC_ARGS ]]; then
-		x=$(parse_args "path") ; [[ -n $x && ! $x == "null" ]] && path="$x"
-		x=$(parse_args "content") ; [[ -n $x && ! $x == "null" ]] && content="$x"
+    x=$(parse_args "path") ; [[ -n $x && ! $x == "null" ]] && path="$x"
+    x=$(parse_args "content") ; [[ -n $x && ! $x == "null" ]] && content="$x"
   fi
+
+  # Avoid writing to the pipeline itself while it is running
+  [[ $(grep -ci "$PIPELINE_FILE" <<< "$path") -ne 0 ]] && error "Dear model, don't try to write to the pipeline itself, it's not made for that. Thank you."
 
   mkdir -p "$(dirname "$path")"
   echo -n "$content" > "$path"
 }
 
-# 6. ÉDITION CHIRURGICALE VIA PARSING JSON (L'outil critique demandé)
+# 6. Surgical file editing using line-based changes
 edit_file() {
-  # local path="$1"
-  # local json_changes="$2"
-
   local path="."
-  local json_changes
+  local changes
+  local sorted_changes
+  local tmp_file
+  local mode
+  local line_start
+  local line_end
+  local content
+  local total_lines
   local x
-  
+
   if [[ -n $FUNC_ARGS ]]; then
-		x=$(parse_args "path") ; [[ -n $x && ! $x == "null" ]] && path="$x"
-		x=$(parse_args "json_changes") ; [[ -n $x && ! $x == "null" ]] && json_changes="$x"
+    x=$(parse_args "path") ; [[ -n $x && ! $x == "null" ]] && path="$x"
+    x=$(parse_args "changes") ; [[ -n $x && ! $x == "null" ]] && changes="$x"
   fi
 
-  if [ ! -f "$path" ]; then
-    echo "Error: File not found at $path" >&2
-    return 1
-  fi
+  [[ ! -f $path ]] && error "File not found at $path"
 
-  # Vérification de la validité du JSON reçu
-  if ! echo "$json_changes" | jq empty 2>/dev/null; then
+  # Avoid editing the pipeline itself while it is running
+  [[ $(grep -ci "$PIPELINE_FILE" <<< "$path") -ne 0 ]] && error "Dear model, don't try to edit the pipeline itself, it's not made for that. Thank you."
+
+  if ! jq empty 2>/dev/null <<< "$changes"; then
     echo "Error: Invalid JSON array provided to edit_file" >&2
     return 1
   fi
 
-  # Extraction et tri des modifications par ligne décroissante (Reverse Order pour préserver les index)
-  local sorted_changes
-  sorted_changes=$(echo "$json_changes" | jq -c 'sort_by(.line_start) | reverse | .[]')
+  # Extract and sort changes in descending line start order (prevents breaking subsequent target index alignment)
+  sorted_changes=$(jq -c 'sort_by(.line_start) | reverse | .[]' <<< "$changes")
 
-  # Création d'un fichier temporaire de travail
-  local tmp_file
+  # Create backup to temp file
   tmp_file=$(mktemp)
   cp "$path" "$tmp_file"
 
+  # Loop through changes
   while read -r change; do
-    if [ -z "$change" ]; then continue; fi
+    [[ -z $change ]] && continue
 
-    local mode=$(echo "$change" | jq -r '.mode')
-    local line_start=$(echo "$change" | jq -r '.line_start')
-    local line_end=$(echo "$change" | jq -r '.line_end')
-    local content=$(echo "$change" | jq -r '.content')
-    local total_lines=$(wc -l < "$tmp_file")
+    mode=$(jq -rc '.mode' <<< "$change")
+    line_start=$(jq -rc '.line_start' <<< "$change")
+    line_end=$(jq -rc '.line_end' <<< "$change")
+    content=$(jq -rc '.content' <<< "$change")
+    total_lines=$(wc -l < "$tmp_file")
 
-    # Gestion de l'écriture en fin de fichier (line_start = -1)
-    if [ "$line_start" -eq -1 ]; then
-      if [ "$mode" = "append" ] || [ "$mode" = "replace" ]; then
-        echo -e "\n$content" >> "$tmp_file"
+    # Handle write at end of file (line_start = -1)
+    if [[ $line_start -eq -1 ]]; then
+      if [[ $mode == "append" || $mode == "replace" ]]; then
+        echo -e "\n${content}" >> "$tmp_file"
       fi
       continue
     fi
@@ -279,27 +258,86 @@ edit_file() {
     esac
   done <<< "$sorted_changes"
 
-  # Sauvegarde finale
   mv "$tmp_file" "$path"
 }
 
-# 7. Appliquer un Diff Git unifié
+# 7. Apply a unified Git diff template
 apply_diff() {
-  # local diff_content="$1"
-
-	local diff_content
+  local diff_content
   local x
-  
+
   if [[ -n $FUNC_ARGS ]]; then
-		x=$(parse_args "diff_content") ; [[ -n $x && ! $x == "null" ]] && diff_content="$x"
+    x=$(parse_args "diff_content") ; [[ -n $x && ! $x == "null" ]] && diff_content="$x"
   fi
 
   echo "$diff_content" | git apply --whitespace=fix -
 }
 
-# 8. Obtenir la date courante
+# 8. Retrieve the current system date and time
 get_datetime() {
   date '+%Y-%m-%d %H:%M:%S'
+}
+
+# 9. Perform an anonymous web search query on DuckDuckGo using Tor
+web_search() {
+  local query
+  local encoded_query
+  local html_data
+  local results_json="[]"
+  local curl_opts=("-sfSL" "-A" "$USER_AGENT")
+  local search_url="https://html.duckduckgo.com"
+  local temp_url
+  local final_url
+  local clean_title
+  local clean_snippet
+  local x
+
+  [[ -z $BIN_HTMLQ ]] && error "htmlq is required to run web search queries."
+
+  if [[ -n $FUNC_ARGS ]]; then
+    x=$(parse_args "query") ; [[ -n $x && ! $x == "null" ]] && query="$x"
+  fi
+
+  [[ -z $query ]] && error "The search query is required."
+
+  # URL encode the search term natively inside JQ
+  encoded_query=$(jq -nrc --arg q "$query" '$q | @uri')
+
+  # Outbound curl options (socks5h proxy if Tor is active in backend, else direct)
+  if timeout 2 bash -c '</dev/tcp/127.0.0.1/9050' &>/dev/null; then
+    search_url="https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion"
+    curl_opts+=("-x" "socks5h://127.0.0.1:9050")
+  fi
+
+  # Run search query
+  html_data=$(curl "${curl_opts[@]}" "${search_url}/html?q=${encoded_query}")
+  [[ -z $html_data ]] && error "Could not retrieve search data from DuckDuckGo."
+
+  # Align-extract data streams
+  mapfile -t titles < <(htmlq ".result__a" --text <<< "$html_data")
+  mapfile -t raw_urls < <(htmlq ".result__a" --attribute href <<< "$html_data")
+  mapfile -t snippets < <(htmlq ".result__snippet" --text <<< "$html_data")
+
+  # Loop through search results
+  for i in "${!titles[@]}"; do
+    temp_url="${raw_urls[$i]}"
+    final_url="$temp_url"
+
+    # Decode DuckDuckGo redirections (uddg=...) natively in pure built-in Bash (0 subshells!)
+    [[ "$temp_url" =~ uddg=(.*)\& ]] && final_url=$(urldecode "${BASH_REMATCH[1]}")
+
+    # Trim whitespace
+    clean_title=$(echo "${titles[$i]}" | xargs)
+    clean_snippet=$(echo "${snippets[$i]}" | xargs)
+
+    results_json=$(jq -rc \
+      --arg title "$clean_title" \
+      --arg url "$final_url" \
+      --arg snippet "$clean_snippet" \
+      '. + [{"title": $title, "url": $url, "snippet": $snippet}]' <<< "$results_json")
+  done
+
+  echo "$results_json"
 }
 
 # Bootstrap
@@ -308,5 +346,5 @@ get_datetime() {
 # Logging
 echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nFunction: ${FUNC_NAME}\nArguments: ${FUNC_ARGS}" >> "$LOG_FILE"
 
-# Choix de la function (je n'aime pas coder en Français...)
+# Dispatcher execution
 "$FUNC_NAME" "$FUNC_ARGS"

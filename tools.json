@@ -7,12 +7,26 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "path": { "type": "string", "description": "Path to the file" },
-          "start_line": { "type": "integer", "description": "First line to read, 1-based (default: 1)" },
-          "end_line": { "type": "integer", "description": "Last line to read, 1-based inclusive (default: end of file)" },
-          "append_loc": { "type": "boolean", "description": "Prefix each line with its line number" }
+          "append_loc": {
+            "type": "boolean",
+            "description": "Prefix each line with its line number"
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "Last line to read, 1-based inclusive (default: end of file)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path to the file"
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "First line to read, 1-based (default: 1)"
+          }
         },
-        "required": ["path"]
+        "required": [
+          "path"
+        ]
       }
     }
   },
@@ -24,11 +38,22 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "path": { "type": "string", "description": "Base directory to search in" },
-          "include": { "type": "string", "description": "Glob pattern for files to include (e.g. \"**/*.cpp\"). Default: **" },
-          "exclude": { "type": "string", "description": "Glob pattern for files to exclude" }
+          "exclude": {
+            "type": "string",
+            "description": "Glob pattern for files to exclude"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob pattern for files to include (e.g. \"**/*.cpp\"). Default: **"
+          },
+          "path": {
+            "type": "string",
+            "description": "Base directory to search in"
+          }
         },
-        "required": ["path"]
+        "required": [
+          "path"
+        ]
       }
     }
   },
@@ -40,13 +65,31 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "path": { "type": "string", "description": "File or directory to search in" },
-          "pattern": { "type": "string", "description": "Regular expression pattern to search for" },
-          "include": { "type": "string", "description": "Glob pattern to filter files (default: **)" },
-          "exclude": { "type": "string", "description": "Glob pattern to exclude files" },
-          "return_line_numbers": { "type": "boolean", "description": "If true, include line numbers in results" }
+          "exclude": {
+            "type": "string",
+            "description": "Glob pattern to exclude files"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob pattern to filter files (default: **)"
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search in"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression pattern to search for"
+          },
+          "return_line_numbers": {
+            "type": "boolean",
+            "description": "If true, include line numbers in results"
+          }
         },
-        "required": ["path", "pattern"]
+        "required": [
+          "path",
+          "pattern"
+        ]
       }
     }
   },
@@ -58,11 +101,22 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "command": { "type": "string", "description": "Shell command to execute" },
-          "timeout": { "type": "integer", "description": "Timeout in seconds (default 10, max 60)" },
-          "max_output_size": { "type": "integer", "description": "Maximum output size in bytes (default 16384)" }
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute"
+          },
+          "max_output_size": {
+            "type": "integer",
+            "description": "Maximum output size in bytes (default 16384)"
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Timeout in seconds (default 10, max 60)"
+          }
         },
-        "required": ["command"]
+        "required": [
+          "command"
+        ]
       }
     }
   },
@@ -74,10 +128,19 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "path": { "type": "string", "description": "Path of the file to write" },
-          "content": { "type": "string", "description": "Content to write" }
+          "content": {
+            "type": "string",
+            "description": "Content to write"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path of the file to write"
+          }
         },
-        "required": ["path", "content"]
+        "required": [
+          "path",
+          "content"
+        ]
       }
     }
   },
@@ -89,23 +152,45 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "path": { "type": "string", "description": "Path to the file to edit" },
           "changes": {
             "type": "array",
-            "description": "List of changes to apply",
             "items": {
               "type": "object",
               "properties": {
-                "mode": { "type": "string", "description": "\"replace\", \"delete\", or \"append\"" },
-                "line_start": { "type": "integer", "description": "First line of the range (1-based); use -1 for end of file" },
-                "line_end": { "type": "integer", "description": "Last line of the range (1-based, inclusive); ignored when line_start is -1" },
-                "content": { "type": "string", "description": "Content to insert; must be empty string for delete mode" }
+                "content": {
+                  "type": "string",
+                  "description": "Content to insert; must be empty string for delete mode"
+                },
+                "line_end": {
+                  "type": "integer",
+                  "description": "Last line of the range (1-based, inclusive); ignored when line_start is -1"
+                },
+                "line_start": {
+                  "type": "integer",
+                  "description": "First line of the range (1-based); use -1 for end of file"
+                },
+                "mode": {
+                  "type": "string",
+                  "description": "\"replace\", \"delete\", or \"append\""
+                }
               },
-              "required": ["mode", "line_start", "line_end", "content"]
+              "required": [
+                "mode",
+                "line_start",
+                "line_end",
+                "content"
+              ]
             }
+          },
+          "path": {
+            "type": "string",
+            "description": "Path to the file to edit"
           }
         },
-        "required": ["path", "changes"]
+        "required": [
+          "path",
+          "changes"
+        ]
       }
     }
   },
@@ -117,9 +202,14 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "diff": { "type": "string", "description": "Unified diff content in git diff format" }
+          "diff": {
+            "type": "string",
+            "description": "Unified diff content in git diff format"
+          }
         },
-        "required": ["diff"]
+        "required": [
+          "diff"
+        ]
       }
     }
   },
@@ -127,7 +217,30 @@
     "type": "function",
     "function": {
       "name": "get_datetime",
-      "description": "Returns the current date and time"
+      "description": "Returns the current date and time",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_search",
+      "description": "Perform an anonymous web search query through DuckDuckGo HTML using Tor and htmlq, returning a JSON array of search result objects containing title, url and snippet.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query terms to lock up (e.g. 'cachyos arch linux')"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
     }
   }
 ]

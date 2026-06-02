@@ -1,5 +1,10 @@
 # ⚡ Unified Quick PHP Web Server
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
+[![PHP Version](https://img.shields.io/badge/PHP-%3E%3D%207.4-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20Windows-lightgrey.svg)](https://www.php.net/)
+[![Based on simple-php-webserver](https://img.shields.io/badge/Based%20on-simple--php--webserver-blueviolet.svg?logo=github)](https://github.com/Jiab77/simple-php-webserver)
+
 A high-performance, single-file development web server powered by PHP. 
 
 This project is built upon and inspired by **[simple-php-webserver](https://github.com/Jiab77/simple-php-webserver)**. It represents an optimized and unified version that merges **Linux & macOS implementations** into a single, highly portable, cross-platform utility. It works flawlessly under **Linux, MacOS, BSD, and Windows/Termux**.

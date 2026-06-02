@@ -66,12 +66,13 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 ## ✨ Key Capabilities
 
 - 💬 **Interactive Chat Loop**: Features a fully immersive, conversational terminal flow powered by persistent JSON state history.
-- 🛠️ **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, or execute sandboxed shell commands.
+- 🧠 **Cognitive Heartbeat Pacemaker**: Dynamic background consolidation. Automatically tracks message lengths and executes active context compression into long-term structures once a threshold is met (default: 15 messages), pruning active logs cleanly to maintain high performance with zero amnesia.
+- 🔍 **Tor-Based Anonymous Web Search**: Secure, fully-parsed, zero-subshell Onion DuckDuckGo lookup queries executed directly over SOCKS5 proxying to fetch clean search listings using `htmlq`.
+- 🛠️ **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, or execute sandboxed shell commands.
 - 🧅 **Tor Proxy Support**: Outbound connections to `openrouter.ai` can automatically be routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) for secure, private, and geo-independent requests.
 - 💾 **Structured JSON Memory**: Keeps a running context of your conversation in `data/messages.json` and persistent user/system profile rules in `data/memory.json`.
 - 🤖 **Local-First & Hybrid Approach**: Switch seamlessly between local inference servers (Ollama, llama.cpp running on GPU/CPU machines) and highly optimized cloud APIs (Google Gemini via OpenRouter).
 - 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, and `bash`.
-
 ---
 
 ## 📂 Core Files
@@ -79,9 +80,8 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 | File | Description |
 | :--- | :--- |
 | [`pipeline.sh`](pipeline.sh) | **Core Orchestrator**: Manages arguments, parses intent, builds JSON payloads, runs the interactive chat session, issues requests to Ollama/llama.cpp/OpenRouter, and manages memory. |
-| [`run-tools.sh`](run-tools.sh) | **Execution Runner**: Parses JSON payload parameters and implements 8 core system manipulation functions carefully mapped to standard GNU binaries. |
+| [`run-tools.sh`](run-tools.sh) | **Execution Runner**: Parses JSON payload parameters and implements 9 core system manipulation and retrieval functions carefully mapped to standard GNU binaries. |
 | [`tools.json`](tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for Function Calling (matching the OpenRouter model spec). |
-
 ---
 
 ## 💬 Interactive Chat Mode (Default)
@@ -98,14 +98,13 @@ During the chat session, you can invoke special control actions using slash pref
 | :--- | :--- |
 | `/help` | Prints a guide showing all available interactive commands. |
 | `/clear` | Cleans up the pipeline memory by wiping the session history and user files inside the `data/` directory. |
+| `/commit` | Manually triggers the Cognitive Heartbeat Pacemaker, consolidating outstanding learnings/milestones to `memory.json` and pruning active contexts. |
 | `/start` | Escapes the standard conversational loop to query a pipeline prompt with file contexts interactively. |
 | `/quit` | Exits the chat loop and returns to your system shell. |
-
 ---
-
 ## 🛠️ Tool-Calling Engine (Agentic Capability)
 
-The pipeline integrates 8 standard agentic actions declared in `tools.json`. When the model returns a tool request, `pipeline.sh` parses it and spawns `run-tools.sh` with the extracted arguments before feeding the results back.
+The pipeline integrates 9 standard agentic actions declared in `tools.json`. When the model returns a tool request, `pipeline.sh` parses it and spawns `run-tools.sh` with the extracted arguments before feeding the results back.
 
 1. **`read_file`**: Reads partial or full contents of any file. Supports custom line indices (1-indexed start/end lines) and prefixes output lines with their line numbers for precise target selection.
 2. **`file_glob_search`**: Recursively discovers files using customized include/exclude patterns up to a depth of 10 directories.
@@ -117,7 +116,7 @@ The pipeline integrates 8 standard agentic actions declared in `tools.json`. Whe
    - ⚡ *Index integrity protection*: Parses instruction blocks and processes them in reverse line order so that editing lines earlier in the file doesn't break line alignment of subsequent edits.
 7. **`apply_diff`**: Applies unified differences in standard Git format, useful for complex or multi-file edits.
 8. **`get_datetime`**: Retrieves the system date and time, providing real-time situational awareness.
-
+9. **`web_search`**: High-fidelity, anonymous DuckDuckGo search queries executed across Onion routes using local Tor/SOCKS5 connections and cleanly filtered into structural JSON with `htmlq`. Zero-subshell architecture ensuring security and confidentiality.
 ---
 
 ## 🤖 Supported Backends & Configured Models
@@ -153,13 +152,16 @@ You can configure the active engine inside `pipeline.sh` by modifying the `BACKE
 Ensure you have standard system packages installed:
 ```bash
 # Debian / Ubuntu / Mint
-sudo apt update && sudo apt install -y curl jq tor glow
+sudo apt update && sudo apt install -y curl jq tor glow cargo
+cargo install htmlq
 
 # macOS (Homebrew)
-brew install jq glow tor
+brew install jq glow tor htmlq
 
 # Arch Linux
 sudo pacman -Syu curl jq tor glow
+# htmlq can be installed via AUR (e.g. yay -S htmlq) or Cargo:
+cargo install htmlq
 ```
 
 ### Authorization (For Gemini/OpenRouter API)
@@ -207,14 +209,22 @@ Clear cached chat history and profile structures:
 ./pipeline.sh --clear
 ```
 
+### D. Manual Cognitive Consolidation
+Force immediate session context compression and memory syncing:
+```bash
+./pipeline.sh --commit
+```
 ---
 
-## 💾 Pipeline Memory & State Logging
+The pipeline's active memory and automated housekeeping are divided inside the `data/` subdirectory:
 
-The pipeline's active memory is divided into two parts inside the `data/` subdirectory:
-1. **`data/messages.json`**: An array of objects keeping the chronological sequence of conversation logs. The orchestrator reconstructs your full interaction history on every new query, allowing realistic back-and-forth communication.
-2. **`data/memory.json`**: Long-term rules, configurations, and core guidelines (such as strict permission boundaries preventing dangerous adjustments onto key script files).
-
+1. **`data/messages.json`**: An array of objects keeping the chronological sequence of active conversation logs. The orchestrator reconstructs your full interaction history on every new query, allowing realistic back-and-forth communication.
+2. **`data/memory.json`**: A deep, persistent JSON-based profile memory containing long-term achievements/milestones, technical stacks, user guidelines, configurations, and future roadmaps.
+3. **🧠 Cognitive Heartbeat Pacemaker (Housekeeping)**: Controlled by the `HEARTBEAT_THRESHOLD` variable (default: `15`).
+   - When active messages in `messages.json` reach the threshold, the orchestrator triggers an automatic, background, lossless consolidation process.
+   - It invokes the active reasoning LLM to synthesize fresh developments (accomplishments, stack additions, roadmaps) directly into `data/memory.json`.
+   - It then prunes `data/messages.json`, preserving only the foundational system prompt and the **4 most recent messages** to guarantee seamless flow with a feather-light context window.
+   - This process can also be triggered manually using either the `/commit` slash command inside interactive mode or the `--commit` CLI option.
 ---
 
 ## 👥 Credits

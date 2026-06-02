@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-
+# shellcheck disable=SC2086
+#
 # ==============================================================================
 # TOOLS SCRIPT FOR LOCAL AGENT (Strictly conforming to schema constraints)
 # ==============================================================================
 #
 # Made by Gemini 3.5 Flash Extended / Improved by Jiab77
 #
-# Version 0.1.0
+# Version 0.1.1
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
@@ -153,7 +154,7 @@ exec_shell_command() {
   output=$(timeout "$timeout" sh -c "$command" 2>&1)
   exit_code=$?
 
-  [[ $exit_code -eq 124 ]] && echo "Command timed out after $timeout_val seconds."
+  [[ $exit_code -eq 124 ]] && echo "Command timed out after $timeout seconds."
 
   if [[ ${#output} -gt $max_output_size ]]; then
     echo "${output:0:$max_output_size}"

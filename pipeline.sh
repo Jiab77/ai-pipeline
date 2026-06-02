@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-
+# shellcheck disable=SC2034
+#
 # Minimalist Experimental AI Pipeline by Jiab77
 #
 # This script handles 'ollama', 'llama.cpp' and 'openrouter' backends.
@@ -10,7 +11,7 @@
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.1.4
+# Version: 0.2.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -19,10 +20,9 @@
 RULES="Don't cut or break lines."
 RUN_MODE="chat"    # Expected values: simple, multi, chat
 BACKEND="gemini"    # Expected values: ollama, llamacpp or gemini
+HEARTBEAT_THRESHOLD=15    # Trigger context consolidation to avoid amnesia and keep context extremely light
 CREDENTIALS="${HOME}/.creds"    # Or any other location or filename you prefer.
 MESSAGES_FILE="messages.json"
-ASSISTANT_FILE="assistant.json"
-RESPONSE_FILE="response.json"
 MEMORY_FILE="memory.json"
 PULL_MODELS=false
 USE_TOR=true
@@ -33,7 +33,9 @@ SCRIPT_FILE="$(basename "$0")"
 SCRIPT_NAME="${SCRIPT_FILE//.sh}"
 DATA_STORE="${SCRIPT_DIR}/data"
 BASE_TOOLS="${SCRIPT_DIR}/tools.json"
-MEMORY_FILE="${DATA_STORE}/memory.json"
+TEMP_MEMORY_SYSTEM="${DATA_STORE}/tmp_memory_sys.txt"
+TEMP_MEMORY_USER="${DATA_STORE}/tmp_memory_usr.txt"
+TEMP_TOOLS_OUTPUT="${DATA_STORE}/tmp_tools_output.json"
 TOOLS_OUTPUT="${DATA_STORE}/tools-output.txt"
 TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
 TOOLS_CONTENT="[]"
@@ -102,6 +104,7 @@ Flags:
 
   -h | --help       Print this message and exit
   --clear           Clear pipeline memory
+  --commit          Manually consolidate messages history with permanent memory
   --chat            Start in 'chat' mode
   --simple          Start in 'simple' mode
   --multi           Start in 'multi' mode
@@ -111,7 +114,8 @@ EOF
 }
 print_usage() {
   log "\nUsage: $SCRIPT_FILE <prompt> <input-file-1> <input-file-2>\n"
-  log "To clear the memory: --clear\n"
+  log "To clear the memory: --clear"
+  log "To consolidate the memory: --commit\n"
   exit 1
 }
 serve() {
@@ -130,14 +134,14 @@ serve() {
         --jinja \
         -fa on \
         --swa-full \
-        -c $MAX_CONTEXT \
-        -t $MAX_CORES \
-        -tb $MAX_CORES \
-        -b $MAX_BATCH_SIZE \
-        -ub $MAX_BATCH_SIZE \
-        -ctk $QUANTIZATION \
-        -ctv $QUANTIZATION \
-        --timeout $MAX_TIMEOUT
+        -c "$MAX_CONTEXT" \
+        -t "$MAX_CORES" \
+        -tb "$MAX_CORES" \
+        -b "$MAX_BATCH_SIZE" \
+        -ub "$MAX_BATCH_SIZE" \
+        -ctk "$QUANTIZATION" \
+        -ctv "$QUANTIZATION" \
+        --timeout "$MAX_TIMEOUT"
     ;;
     *) error "Unsupported backend given: $BACKEND" ;;
   esac
@@ -224,6 +228,7 @@ clear_memory() {
     error "Invalid selection given: $USER_CHOICE"
   fi
   # exit $?
+  return
 }
 handle_response() {
   local response="$1"
@@ -233,6 +238,131 @@ handle_response() {
   if [[ -n $response && ! $response == "null" ]]; then
     log "\n\n=== $label ===\n\n"
     echo "$response" | render_markdown
+  fi
+}
+check_and_trigger_heartbeat() {
+  local force="${1:-false}"
+  local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
+  local messages_filename ; messages_filename="$(basename "$MESSAGES_FILE")"
+  local memory_path="${DATA_STORE}/${MEMORY_FILE}"
+  local memory_filename ; memory_filename="$(basename "$MEMORY_FILE")"
+  local memory_user_payload
+  local memory_system_prompt
+  local current_memory
+  local current_messages
+  local messages_count
+  local consolidated_json
+  local raw_response
+  local payload
+
+  # Ensure the messages file exists and is readable
+  [[ ! -r $messages_path ]] && return
+
+  # Count the messages inside messages.json
+  messages_count=$(jq -rc '. | length' "$messages_path" 2>/dev/null)
+
+  # Validate that messages_count is indeed a number
+  [[ ! $messages_count =~ ^[0-9]+$ ]] && return
+
+  # Check if quantity of messages exceeds our heartbeat threshold OR if we are forcing execution
+  if [[ $force == "true" ]] || (( messages_count >= HEARTBEAT_THRESHOLD )); then
+    log "\n[🧠] Heartbeat threshold pulsing (Messages: ${messages_count}/${HEARTBEAT_THRESHOLD} | Force: ${force})."
+    log "[🧠] Automatically consolidating session context into ${memory_filename}..."
+
+    if [[ -r $memory_path ]]; then
+      current_memory=$(<"$memory_path")
+    else
+      current_memory='{}'
+    fi
+
+    current_messages=$(<"$messages_path")
+
+    # Construct the instruction and user payload to summarize and update the JSON memory structure
+    memory_system_prompt="$(cat <<EOF
+You are ${AI_NAME}'s Cognitive Memory Engine. Your goal is to consolidate active chat history into the permanent memory file ($memory_filename).
+You will receive the current '$memory_filename' and the active conversation log.
+Analyze what milestones, accomplishments, user configurations, personal traits, technical stacks, or tools have been decided, added, or modified in the conversation.
+Merge these learnings with absolute fidelity into '$memory_filename':
+- user_profile/technical_stack_additions/installed_utils: append new utilities mentioned
+- milestones: append new landmarks or successes as objects with 'event' and 'description' (do NOT duplicate existing milestones)
+- last_updated: format as 'YYYY-MM-DD (Event description)'
+- future_roadmap: update listed goals. If a roadmapped goal has been achieved, remove it from the future_roadmap and add it to milestones. Add any new goals or priorities that were agreed on in the conversation.
+
+CRITICAL REQUIREMENT:
+- You must output the ENTIRE updated JSON structure matching '$memory_filename' EXACTLY.
+- Output ONLY valid raw JSON.
+- DO NOT wrap the output in markdown code blocks like \`\`\`json. Just raw, unescaped, parsed JSON.
+- Maintain other preexisting properties in $memory_filename unchanged.
+EOF
+)"
+
+    memory_user_payload="$(cat <<EOF
+Current $memory_filename:
+<memory>
+${current_memory}
+</memory>
+
+Active context $messages_filename:
+<messages>
+${current_messages}
+</messages>
+EOF
+)"
+
+    # Prepare payload for API call
+    # Save prompts to temporary files to avoid ARG_MAX errors with large chat history
+    echo "$memory_system_prompt" > "$TEMP_MEMORY_SYSTEM"
+    echo "$memory_user_payload" > "$TEMP_MEMORY_USER"
+
+    # Prepare payload for API call (using --rawfile to bypass ARG_MAX)
+    payload=$(jq -rc -n \
+      --arg model "$GEMINI_API_MODEL" \
+      --rawfile sys "$TEMP_MEMORY_SYSTEM" \
+      --rawfile usr "$TEMP_MEMORY_USER" \
+      '{
+        model: $model,
+        messages: [
+          {role: "system", content: $sys},
+          {role: "user", content: $usr}
+        ],
+        temperature: 0.1,
+        stream: false
+      }'
+    )
+
+    # Clean up temporary files immediately
+    rm -f "$TEMP_MEMORY_SYSTEM" "$TEMP_MEMORY_USER"
+
+    log "[🧠] Invoking $GEMINI_API_MODEL for synthesis..."
+    raw_response=$(api_call "$payload")
+    if [[ -z $raw_response || $raw_response == "null" ]]; then
+      log "[!] Warning: Memory consolidation API call returned empty response."
+      return
+    fi
+
+    # Extract assistant's message content
+    consolidated_json=$(jq -rc '.choices[0].message.content' <<<"$raw_response")
+
+    # Sanitize markdown block wrappers if the model accidentally included them
+    if [[ $consolidated_json =~ ^\`\`\` ]]; then
+      consolidated_json=$(sed -e 's/^```json//g' -e 's/^```//g' -e 's/```$//g' <<<"$consolidated_json")
+    fi
+
+    # Strictly validate that the output is valid JSON
+    if jq -e . <<<"$consolidated_json" &>/dev/null; then
+      # Write updated memory to memory.json
+      echo "$consolidated_json" > "$memory_path"
+      log "[🧠] Permanent '$memory_filename' successfully consolidated & synchronized!"
+
+      # Truncate messages.json to keep only the System Prompt (index 0) and the last 4 messages to preserve flow.
+      log "[🧠] Pruning '$messages_filename' to free up conversational context tokens..."
+      jq -rc '[.[0]] + .[-4:]' "$messages_path" > "${messages_path}.tmp"
+      mv -f "${messages_path}.tmp" "$messages_path"
+      log "[🧠] $messages_filename successfully pruned! Context is now ultra-light and ready to resume."
+    else
+      log "[!] Error: Consolidated output was not valid JSON. Memory consolidation aborted to prevent corruption."
+      log "[Debug] Raw response payload was: ${consolidated_json:0:400}..."
+    fi
   fi
 }
 send_message() {
@@ -259,7 +389,7 @@ send_message() {
       RESPONSE=$(api_call "$JSON_PAYLOAD")
       # RESPONSE=$(curl -sfSL "${OLLAMA_API_URL}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" | jq -rc '.response')
       # RESPONSE=$(ollama run $OLLAMA_FLAGS "$OLLAMA_ARCHITECT" <<<$SIMPLE_PROMPT | grep "Response:" | tail -n 1 | cut -d' ' -f2)
-      echo "[AI] $(jq -rc '.response' <<<$RESPONSE)" | render_markdown
+      echo "[AI] $(jq -rc '.response' <<<"$RESPONSE")" | render_markdown
     ;;
 
     # Local Backend: llama.cpp
@@ -285,7 +415,7 @@ send_message() {
       RESPONSE=$(api_call "$JSON_PAYLOAD")
       # RESPONSE=$(curl -sfSL "${LLAMACPP_API_URL}" -H "Content-Type: application/json" -H "Authorization: Bearer no-key" -d "$JSON_PAYLOAD" | jq -rc '.choices[0].message.content')
       # RESPONSE=$(LLAMA_CACHE="$LLAMACPP_CACHE" llama-cli -hf "$LLAMACPP_ARCHITECT" $LLAMACPP_FLAGS --temp 0.2 -rea off -p "$SIMPLE_PROMPT" 2>&1 | grep -v '>' | grep "Response:" | tail -n 1 | cut -d' ' -f2)
-      echo "[AI] $(jq -rc '.choices[0].message.content' <<<$RESPONSE)" | render_markdown
+      echo "[AI] $(jq -rc '.choices[0].message.content' <<<"$RESPONSE")" | render_markdown
     ;;
 
     # External Backend: OpenRouter / Gemini
@@ -300,7 +430,7 @@ send_message() {
       fi
 
       # Adding new user message
-      ALL_MESSAGES=$(jq -rc --arg user "$prompt" '. + [{role: "user", content: $user}]' <<<$ALL_MESSAGES)
+      ALL_MESSAGES=$(jq -rc --arg user "$prompt" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES")
 
       # The Magic Loop
       while true; do
@@ -321,20 +451,20 @@ send_message() {
         # Handling raw response
         if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
           # log "\n\n=== RAW RESPONSE ===\n\n"
-          # echo "$RAW_RESPONSE" | jq .
+          # jq . <<<"$RAW_RESPONSE"
 
           # Check for errors before continuing
-          if jq -e '.error' <<<$RAW_RESPONSE &>/dev/null; then
-            err_msg=$(jq -rc '.error.message' <<<$RAW_RESPONSE)
+          if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
+            err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
             error "API Error: $err_msg"
           fi
 
           # Store relevant data
-          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
-          RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
-          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
-          TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<$RAW_RESPONSE)
-          USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
+          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE")
+          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE")
+          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE")
+          TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE")
+          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE")
         fi
 
         # Handling model reasoning
@@ -356,60 +486,73 @@ send_message() {
         # Handling model requested tools (Multi-Parallel Support)
         if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
           # log "\n\n[SYS] Tools:\n\n"
-          # echo "$TOOLS" | jq .
+          # jq . <<<"$TOOLS"
 
           # 1. Grab assistant command message and push to history
-          ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<$RAW_RESPONSE)
-          ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<$ALL_MESSAGES)
+          ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
+          ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
 
           # 2. Extract and iterate over all requested parallel tools
-          NUM_TOOLS=$(jq -rc '. | length' <<<$TOOLS)
+          NUM_TOOLS=$(jq -rc '. | length' <<<"$TOOLS")
           log "\n[+] Executing $NUM_TOOLS parallel tool(s)..."
 
           # Looping throught all requested tools
           for ((i=0; i<NUM_TOOLS; i++)); do
             # Store requested tool
-            TOOL_NAME=$(jq -rc ".[$i].function.name" <<<$TOOLS)
-            TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<$TOOLS)
-            TOOL_ID=$(jq -rc ".[$i].id" <<<$TOOLS)
+            TOOL_NAME=$(jq -rc ".[$i].function.name" <<<"$TOOLS")
+            TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<"$TOOLS")
+            TOOL_ID=$(jq -rc ".[$i].id" <<<"$TOOLS")
             log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
 
             # 3. Check and execute tool handler
             if [[ -x $TOOLS_HANDLER ]]; then
-              # TOOL_OUTPUT=$("$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" 2>&1)
               "$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" &> "$TOOLS_OUTPUT"
             else
-              # TOOL_OUTPUT="Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing."
               echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
               log "[!] Warning: Tool handler not executable."
             fi
 
             # 4. Fallback safeguard for empty output
-            # if [[ -z $TOOL_OUTPUT ]]; then
             if [[ ! -s $TOOLS_OUTPUT ]]; then
-              # TOOL_OUTPUT="(Tool executed successfully and returned empty stdout)"
               echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
             fi
 
             # 5. Format according to OpenAI guidelines
-            # TOOL_RESPONSE_MSG=$(jq -rc -n \
-            #   --arg id "$TOOL_ID" \
-            #   --arg name "$TOOL_NAME" \
-            #   --arg content "$TOOL_OUTPUT" \
-            #   '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
-            # )
-            TOOL_RESPONSE_MSG=$(jq -rc -n \
-              --arg id "$TOOL_ID" \
-              --arg name "$TOOL_NAME" \
-              --rawfile content "$TOOLS_OUTPUT" \
-              '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
-            )
+            # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
+            iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
+            if jq -rc -n --arg id "$TOOL_ID" --arg name "$TOOL_NAME" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+              # Clear tools output file
+              rm -f "$TOOLS_OUTPUT"
 
-            # Clear tools output file
-            rm -f "$TOOLS_OUTPUT"
+              # 6. Append tool output to messages array safely
+              if NEW_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
+                ALL_MESSAGES="$NEW_MESSAGES"
+              else
+                log "[!] Warning: fromjson failed, using fallback --arg serialization"
+                ALL_MESSAGES=$(jq -rc \
+                  --arg id "$TOOL_ID" \
+                  --arg name "$TOOL_NAME" \
+                  --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
+                  '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+                )
+              fi
 
-            # 6. Append tool output to messages array
-            ALL_MESSAGES=$(jq -rc --argjson tool "$TOOL_RESPONSE_MSG" '. + [$tool]' <<<$ALL_MESSAGES)
+              # Clear temporary tools output file
+              rm -f "$TEMP_TOOLS_OUTPUT"
+            else
+              log "[!] Warning: Unable to parse tool output with rawfile, using fallback formatting"
+              local fallback_content
+              fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
+              ALL_MESSAGES=$(jq -rc \
+                --arg id "$TOOL_ID" \
+                --arg name "$TOOL_NAME" \
+                --arg content "$fallback_content" \
+                '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+              )
+
+              # Clear tools output file
+              rm -f "$TOOLS_OUTPUT"
+            fi
           done
           # echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
 
@@ -420,26 +563,29 @@ send_message() {
             echo "[AI] $RESPONSE" | render_markdown
 
             # Store final AI response
-            ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<$ALL_MESSAGES)
+            ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<"$ALL_MESSAGES")
             echo "$ALL_MESSAGES" > "${DATA_STORE}/${MESSAGES_FILE}"
           fi
-          break		# Leaving the loop
+          break   # Leaving the loop
         fi
 
         # Handling model usage
         if [[ -n $USAGE && ! $USAGE == "null" ]]; then
           log "[+] Usage:"
-          log "  - Prompt Tokens: $(jq -rc .prompt_tokens <<<$USAGE)"
-          log "  - Cached Tokens: $(jq -rc .prompt_tokens_details.cached_tokens <<<$USAGE)"
-          log "  - Completion Tokens: $(jq -rc .completion_tokens <<<$USAGE)"
-          log "  - Reasoning Tokens: $(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<$USAGE)"
-          log "  - Total Tokens: $(jq -rc .total_tokens <<<$USAGE)"
-          log "  - Cost: $(jq -rc .cost <<<$USAGE)"
-          # jq . <<<$USAGE
+          log "  - Prompt Tokens: $(jq -rc .prompt_tokens <<<"$USAGE")"
+          log "  - Cached Tokens: $(jq -rc .prompt_tokens_details.cached_tokens <<<"$USAGE")"
+          log "  - Completion Tokens: $(jq -rc .completion_tokens <<<"$USAGE")"
+          log "  - Reasoning Tokens: $(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE")"
+          log "  - Total Tokens: $(jq -rc .total_tokens <<<"$USAGE")"
+          log "  - Cost: $(jq -rc .cost <<<"$USAGE")"
+          # jq . <<<"$USAGE"
         fi
       done
     ;;
   esac
+
+  # Autonomous Memory Consolidation Heartbeat
+  check_and_trigger_heartbeat
 }
 run_chat() {
   log "\n[+] Starting 'chat' mode...\n"
@@ -457,12 +603,14 @@ Here is all supported commands:
 
   /help       Print this screen
   /clear      Clear pipeline memory
+  /commit     Commit session history to long-term memory immediately
   /start      Start pipeline and exit
   /quit       Exit
 
 EOF
         ;;
         "/clear") clear_memory ;;
+        "/commit") check_and_trigger_heartbeat "true" ;;
         "/start")
           read -rp "Enter your pipeline prompt: " PIPELINE_PROMPT
           if [[ -n $PIPELINE_PROMPT ]]; then
@@ -585,20 +733,20 @@ run_pipeline() {
           # Handling raw response
           if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
             log "\n\n=== RAW RESPONSE ===\n\n"
-            echo "$RAW_RESPONSE" | jq .
+            jq . <<<"$RAW_RESPONSE"
 
             # Check for errors before continuing
-            if jq -e '.error' <<<$RAW_RESPONSE &>/dev/null; then
-              err_msg=$(jq -rc '.error.message' <<<$RAW_RESPONSE)
+            if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
+              err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
               error "API Error: $err_msg"
             fi
 
             # Store relevant data
-            REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
-            RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
-            REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
-            TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<$RAW_RESPONSE)
-            USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
+            REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE")
+            RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE")
+            REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE")
+            TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE")
+            USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE")
           fi
 
           # Handling model reasoning
@@ -622,60 +770,73 @@ run_pipeline() {
           # Handling model requested tools (Multi-Parallel Support)
           if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
             log "\n\n=== TOOLS REQUEST ===\n\n"
-            echo "$TOOLS" | jq .
+            jq . <<<"$TOOLS"
 
             # 1. Grab assistant command message and push to history
-            ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<$RAW_RESPONSE)
-            ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<$ALL_MESSAGES)
+            ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
+            ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
 
             # 2. Extract and iterate over all requested parallel tools
-            NUM_TOOLS=$(jq -rc '. | length' <<<$TOOLS)
+            NUM_TOOLS=$(jq -rc '. | length' <<<"$TOOLS")
             log "\n[+] Executing $NUM_TOOLS parallel tool(s)...\n"
 
             # Looping throught all requested tools
             for ((i=0; i<NUM_TOOLS; i++)); do
               # Store requested tool
-              TOOL_NAME=$(jq -rc ".[$i].function.name" <<<$TOOLS)
-              TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<$TOOLS)
-              TOOL_ID=$(jq -rc ".[$i].id" <<<$TOOLS)
+              TOOL_NAME=$(jq -rc ".[$i].function.name" <<<"$TOOLS")
+              TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<"$TOOLS")
+              TOOL_ID=$(jq -rc ".[$i].id" <<<"$TOOLS")
               log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
 
               # 3. Check and execute tool handler
               if [[ -x $TOOLS_HANDLER ]]; then
-                # TOOL_OUTPUT=$("$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" 2>&1)
                 "$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" &> "$TOOLS_OUTPUT"
               else
-                # TOOL_OUTPUT="Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing."
                 echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
                 log "[!] Warning: Tool handler not executable."
               fi
 
               # 4. Fallback safeguard for empty output
-              # if [[ -z $TOOL_OUTPUT ]]; then
               if [[ ! -s $TOOLS_OUTPUT ]]; then
-                # TOOL_OUTPUT="(Tool executed successfully and returned empty stdout)"
                 echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
               fi
 
               # 5. Format according to OpenAI guidelines
-              # TOOL_RESPONSE_MSG=$(jq -rc -n \
-              #   --arg id "$TOOL_ID" \
-              #   --arg name "$TOOL_NAME" \
-              #   --arg content "$TOOL_OUTPUT" \
-              #   '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
-              # )
-              TOOL_RESPONSE_MSG=$(jq -rc -n \
-                --arg id "$TOOL_ID" \
-                --arg name "$TOOL_NAME" \
-                --rawfile content "$TOOLS_OUTPUT" \
-                '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
-              )
+              # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
+              iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
+              if jq -rc -n --arg id "$TOOL_ID" --arg name "$TOOL_NAME" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+                # Clear tools output file
+                rm -f "$TOOLS_OUTPUT"
 
-              # Clear tools output file
-              rm -f "$TOOLS_OUTPUT"
+                # 6. Append tool output to messages array safely
+                if NEW_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
+                  ALL_MESSAGES="$NEW_MESSAGES"
+                else
+                  log "[!] Warning: fromjson failed, using fallback --arg serialization"
+                  ALL_MESSAGES=$(jq -rc \
+                    --arg id "$TOOL_ID" \
+                    --arg name "$TOOL_NAME" \
+                    --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
+                    '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+                  )
+                fi
 
-              # 6. Append tool output to messages array
-              ALL_MESSAGES=$(jq -rc --argjson tool "$TOOL_RESPONSE_MSG" '. + [$tool]' <<<$ALL_MESSAGES)
+                # Clear temporary tools output file
+                rm -f "$TEMP_TOOLS_OUTPUT"
+              else
+                log "[!] Warning: Unable to parse tool output with rawfile, using fallback formatting"
+                local fallback_content
+                fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
+                ALL_MESSAGES=$(jq -rc \
+                  --arg id "$TOOL_ID" \
+                  --arg name "$TOOL_NAME" \
+                  --arg content "$fallback_content" \
+                  '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+                )
+
+                # Clear tools output file
+                rm -f "$TOOLS_OUTPUT"
+              fi
             done
             echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
 
@@ -685,19 +846,19 @@ run_pipeline() {
               log "\n\n=== FINAL RESPONSE ===\n\n"
               echo "$RESPONSE" | render_markdown
             fi
-            break		# Leaving the loop
+            break   # Leaving the loop
           fi
 
           # Handling model usage
           if [[ -n $USAGE && ! $USAGE == "null" ]]; then
             log "\n\n=== USAGE ===\n\n"
-            echo "$USAGE" | jq .
+            jq . <<<"$USAGE"
           fi
         done
       ;;
       *) error "Unsupported backend given: $BACKEND" ;;
     esac
-    exit $?		# End of Question Mode
+    exit $?   # End of Question Mode
 
   # Route B: Compare Mode
   elif [[ "${INTENT,,}" == "compare" ]]; then
@@ -775,19 +936,19 @@ run_pipeline() {
         # Handling raw response
         if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
           log "\n\n=== RAW RESPONSE ===\n\n"
-          echo "$RAW_RESPONSE" | jq .
+          jq . <<<"$RAW_RESPONSE"
 
           # Check for errors before continuing
-          if jq -e '.error' <<<$RAW_RESPONSE &>/dev/null; then
-            err_msg=$(jq -rc '.error.message' <<<$RAW_RESPONSE)
+          if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
+            err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
             error "API Error: $err_msg"
           fi
 
           # Store relevant data
-          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
-          RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
-          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
-          USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
+          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE")
+          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE")
+          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE")
+          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE")
         fi
 
         # Handling model reasoning
@@ -811,12 +972,12 @@ run_pipeline() {
         # Handling model usage
         if [[ -n $USAGE && ! $USAGE == "null" ]]; then
           log "\n\n=== USAGE ===\n\n"
-          echo "$USAGE" | jq .
+          jq . <<<"$USAGE"
         fi
       ;;
       *) error "Unsupported backend given: $BACKEND" ;;
     esac
-    exit $?		# End of Compare Mode
+    exit $?   # End of Compare Mode
 
   # Route C: Task Mode
   else
@@ -829,13 +990,13 @@ run_pipeline() {
       if [[ $BACKEND == "ollama" ]]; then
         log "[1/3] The Architect ($OLLAMA_ARCHITECT) will prepare the plan...\n"
         ARCHITECT_PROMPT="The user wants to make some changes: $USER_PROMPT. Analyze the file and create an action plan for the coder model.\n\nContext:\n$CONTEXT_DATA"
-        ACTION_PLAN=$(ollama run $OLLAMA_FLAGS "$OLLAMA_ARCHITECT" <<<$ARCHITECT_PROMPT)
+        ACTION_PLAN=$(ollama run $OLLAMA_FLAGS "$OLLAMA_ARCHITECT" <<<"$ARCHITECT_PROMPT")
         log "\n[2/3] The Coder ($OLLAMA_CODER) will write the code...\n"
         CODER_PROMPT="Follow this action plan on the given file ($INPUT_FILE). Return only the updated code without anything else. Don't use Markdown.\n\nPlan:\n$ACTION_PLAN\n\nContext:\n$CONTEXT_DATA"
-        RETURNED_CODE=$(ollama run $OLLAMA_FLAGS "$OLLAMA_CODER" <<<$CODER_PROMPT | sed '1d;$d')
+        RETURNED_CODE=$(ollama run $OLLAMA_FLAGS "$OLLAMA_CODER" <<<"$CODER_PROMPT" | sed '1d;$d')
         log "\n[3/3] The Judge ($OLLAMA_JUDGE) will inspect the changes...\n"
         JUDGE_PROMPT="Verify that there is no syntax errors or regressions in the updated code compared to the original.\n\nOriginal:\n$CONTEXT_DATA\n\nUpdated:\n$RETURNED_CODE"
-        FINAL_REPORT=$(ollama run $OLLAMA_FLAGS "$OLLAMA_JUDGE" <<<$JUDGE_PROMPT)
+        FINAL_REPORT=$(ollama run $OLLAMA_FLAGS "$OLLAMA_JUDGE" <<<"$JUDGE_PROMPT")
       fi
       log "\n\n=== JUDGE REPORT ===\n\n"
       echo "$FINAL_REPORT" | handle_markdown
@@ -853,7 +1014,7 @@ run_pipeline() {
     else
       log "\n[Done]\n"
     fi
-    exit $?		# End of Task Mode
+    exit $?   # End of Task Mode
   fi
 }
 
@@ -864,15 +1025,13 @@ run_pipeline() {
 while [[ $# -ne 0 ]]; do
   case $1 in
     # Help
-    # TODO: Make a better help screen
-    -h|--help)
-      log "\nUsage: $(basename "$0") <prompt> <input-file-1> <input-file-2>\n"
-      log "To clear the memory: --clear\n"
-      exit
-    ;;
+    -h|--help) print_help ;;
 
     # Clean
     --clear) clear_memory ;;
+
+    # Consolidate
+    --commit) check_and_trigger_heartbeat "true" ;;
 
     # Modes
     --chat)
@@ -901,7 +1060,7 @@ INPUT_FILE2="$3"
 
 # Init
 mkdir -p "$DATA_STORE"
-[[ -r $BASE_TOOLS ]] && TOOLS_CONTENT=$(<$BASE_TOOLS)
+[[ -r $BASE_TOOLS ]] && TOOLS_CONTENT=$(<"$BASE_TOOLS")
 if [[ $USE_TOR == true && $BACKEND == "gemini" ]]; then
   log "\n[*] Checking Tor service...\n"
   if ! timeout 2 bash -c '</dev/tcp/127.0.0.1/9050' &>/dev/null; then
@@ -909,7 +1068,7 @@ if [[ $USE_TOR == true && $BACKEND == "gemini" ]]; then
   fi
 fi
 if [[ $BACKEND == "gemini" ]]; then
-  [[ -r $CREDENTIALS ]] && GEMINI_API_KEY=$(<$CREDENTIALS)
+  [[ -r $CREDENTIALS ]] && GEMINI_API_KEY=$(<"$CREDENTIALS")
   [[ -z $GEMINI_API_KEY ]] && error "Missing API Key. Set 'GEMINI_API_KEY' or Create a '.creds' file with your API key inside and try again."
 fi
 

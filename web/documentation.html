@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Documentation • Simple PHP Web Server</title>
+
+    <!-- Fomantic UI CSS v2.9.4 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/fomantic-ui/2.9.4/semantic.min.css" integrity="sha512-ySrYzxj+EI1e9xj/kRYqeDL5l1wW0IWY8pzHNTIZ+vc1D3Z14UDNPbwup4yOUmlRemYjgUXsUZ/xvCQU2ThEAw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <style>
+        body {
+            background-color: #0c0e17;
+            color: #e1e7f0;
+            font-family: 'Lato', 'Helvetica Neue', Arial, Helvetica, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .main-container {
+            margin-top: 3rem;
+            margin-bottom: 5rem;
+        }
+
+        .premium-card {
+            background: rgba(17, 20, 34, 0.85) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
+            border-radius: 12px !important;
+            backdrop-filter: blur(10px);
+        }
+
+        .neon-divider {
+            height: 1px;
+            background: linear-gradient(90deg, rgba(0, 181, 142, 0) 0%, rgba(0, 181, 142, 0.4) 50%, rgba(0, 181, 142, 0) 100%);
+            margin: 2rem 0;
+        }
+
+        .glow-teal {
+            text-shadow: 0 0 15px rgba(0, 181, 173, 0.5);
+            color: #00b5ad !important;
+        }
+
+        pre {
+            background: #111422 !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-radius: 6px;
+            padding: 1.25rem !important;
+            color: #a5d6ff !important;
+            font-family: monospace;
+            overflow-x: auto;
+        }
+
+        code {
+            background: rgba(255, 255, 255, 0.07);
+            color: #ff7b72;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .footer-text {
+            color: #5a6578;
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 2rem 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.03);
+            background: #090b11;
+        }
+
+        .features-list i.icon {
+            color: #00b5ad !important;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Menu Bar -->
+    <div class="ui container" style="margin-top: 2rem;">
+        <div class="ui secondary menu inverted">
+            <span class="active item" style="font-weight: bold; font-size: 1.2rem; background: transparent !important; color: #00b5ad !important;">
+                <i class="server icon" style="margin-right: 8px;"></i> Simple PHP Server
+            </span>
+            <div class="right menu">
+                <a href="/" class="item" style="color: #64b5f6 !important;"><i class="tachometer alternate icon"></i> Dashboard</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="ui container main-container">
+        <div class="ui inverted segment padded premium-card">
+            
+            <h1 class="ui header inverted">
+                <i class="book icon glow-teal"></i>
+                <div class="content glow-teal">
+                    Documentation
+                    <div class="sub header" style="color: #8b9bb4; font-size: 1rem; margin-top: 0.4rem;">Get running with the ultimate lightweight web server pipeline</div>
+                </div>
+            </h1>
+
+            <div class="neon-divider"></div>
+
+            <div class="ui grid stackable">
+                <div class="row">
+                    <!-- Left Menu Quick-Jump-Links -->
+                    <div class="four wide column" style="border-right: 1px solid rgba(255, 255, 255, 0.08);">
+                        <div class="ui vertical secondary fluid menu inverted" style="background: transparent;">
+                            <a class="item active" href="#overview" style="color: #00b5ad !important;"><i class="rocket icon"></i> Overview</a>
+                            <a class="item" href="#cli-flags" style="color: #64b5f6 !important;"><i class="options icon"></i> CLI Flags</a>
+                            <a class="item" href="#concurrency" style="color: #a5d6ff !important;"><i class="tasks icon"></i> Concurrency</a>
+                            <a class="item" href="#streaming" style="color: #9b5de5 !important;"><i class="play icon"></i> Asset Streaming</a>
+                            <a class="item" href="#routing" style="color: #2ecc71 !important;"><i class="route icon"></i> Custom Routing</a>
+                        </div>
+                    </div>
+
+                    <!-- Right Main Docs Content -->
+                    <div class="twelve wide column" style="padding-left: 2.5rem;">
+                        
+                        <!-- Overview -->
+                        <div id="overview" class="ui segment basic inverted" style="padding: 0;">
+                            <h3 class="ui header inverted teal"><i class="paper plane icon"></i> Overview</h3>
+                            <p style="line-height: 1.6; color: #b0bec5; font-size: 1.1rem;">
+                                This <strong>Simple PHP Web Server</strong> is an ultra-lightweight, single-file server designed to streamline development and offline work without having to spin up bloated modern local environments.
+                            </p>
+                            <p style="line-height: 1.6; color: #b0bec5; font-size: 1.1rem;">
+                                In less than 1,000 lines of highly optimized, clean PHP code, it packs premium capabilities, such as multi-threaded concurrency, clean automated routing fallback, advanced custom asset streaming, and built-in failure recovery.
+                            </p>
+                        </div>
+
+                        <div class="ui divider inverted" style="opacity: 0.1; margin: 2rem 0;"></div>
+
+                        <!-- Command Flags -->
+                        <div id="cli-flags" class="ui segment basic inverted" style="padding: 0;">
+                            <h3 class="ui header inverted teal"><i class="terminal icon"></i> CLI Command Flags</h3>
+                            <p style="color: #b0bec5; font-size: 1.1rem;">Run your server easily with full configuration control:</p>
+                            
+                            <table class="ui basic table celled inverted" style="background: transparent;">
+                                <thead>
+                                    <tr>
+                                        <th>Flag</th>
+                                        <th>Alternative</th>
+                                        <th>Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td><code>--port=[number]</code></td>
+                                        <td><code>-p [number]</code></td>
+                                        <td>Define target listening port. Defaults to <code>8000</code>. Dynamic increments if occupied.</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>--host=[address]</code></td>
+                                        <td><code>-h [address]</code></td>
+                                        <td>Binding address interface. Defaults to <code>127.0.0.1</code>.</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>--root=[path]</code></td>
+                                        <td><code>-t [path]</code></td>
+                                        <td>Document directory root mapping. Defaults to server's own folder.</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>--workers=[number]</code></td>
+                                        <td><code>-w [number]</code></td>
+                                        <td>Sets concurrency threads. Defaults to total detected CPU logical cores.</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>--debug</code></td>
+                                        <td><code>-d</code></td>
+                                        <td>Output profiling diagnostic and environment variables in the console logs.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <h4 class="ui header inverted">Example usage:</h4>
+                            <pre>php web/server.php --port=8080 --workers=4 --debug</pre>
+                        </div>
+
+                        <div class="ui divider inverted" style="opacity: 0.1; margin: 2rem 0;"></div>
+
+                        <!-- Concurrency -->
+                        <div id="concurrency" class="ui segment basic inverted" style="padding: 0;">
+                            <h3 class="ui header inverted teal"><i class="tasks icon"></i> Concurrency Capabilities</h3>
+                            <p style="line-height: 1.6; color: #b0bec5; font-size: 1.1rem;">
+                                PHP standard built-in server is normally single-threaded, meaning assets (JS, CSS, images) block each other when loaded simultaneously.
+                            </p>
+                            <p style="line-height: 1.6; color: #b0bec5; font-size: 1.1rem;">
+                                This engine leverages <code>PHP_CLI_SERVER_WORKERS</code> (supported natively on PHP 7.4+) to orchestrate worker pools running on independent native threads corresponding to your CPU count. This guarantees instantaneous, lag-free loading, even for heavy assets!
+                            </p>
+                        </div>
+
+                        <div class="ui divider inverted" style="opacity: 0.1; margin: 2rem 0;"></div>
+
+                        <!-- Asset Streaming -->
+                        <div id="streaming" class="ui segment basic inverted" style="padding: 0;">
+                            <h3 class="ui header inverted teal"><i class="file code outline icon"></i> Intelligent Asset Streaming</h3>
+                            <p style="line-height: 1.6; color: #b0bec5; font-size: 1.1rem;">
+                                Serving text files is easy, but streaming binary content smoothly requires precise headers. The engine houses built-in MIME detection supporting over 30 file formats (from standard SVGs, WebPs, stylesheets up to TTFs/WOFF2 font structures and media clips).
+                            </p>
+                            <p style="line-height: 1.6; color: #b0bec5; font-size: 1.1rem;">
+                                In addition, it employs chunked binary piping read limits to prevent RAM exhaustion when streaming larger files.
+                            </p>
+                        </div>
+
+                        <div class="ui divider inverted" style="opacity: 0.1; margin: 2rem 0;"></div>
+
+                        <!-- Routing Fallback -->
+                        <div id="routing" class="ui segment basic inverted" style="padding: 0;">
+                            <h3 class="ui header inverted teal"><i class="route icon"></i> Clean Routing Fallbacks</h3>
+                            <p style="line-height: 1.6; color: #b0bec5; font-size: 1.1rem;">
+                                Standard built-in servers break when users hit non-existent folders or try custom URLs. This engine implements safe router fallbacks:
+                            </p>
+                            <div class="ui bulleted list inverted features-list" style="margin-left: 1.5rem; color: #b0bec5; font-size: 1.05rem; line-height: 1.6;">
+                                <div class="item">Translates dynamic routes safely into root base matching.</div>
+                                <div class="item">Generates a beautiful live dashboard if root base index files are missing.</div>
+                                <div class="item">Graccfully drops to the premium custom-styled 404 page rather than showing raw system errors.</div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer-text">
+        ⚡ Engine powered by <strong>Simple PHP Web Server</strong> • Crafted with extreme focus & precision <br>
+        <span style="font-size: 0.8rem; margin-top: 0.5rem; display: inline-block; opacity: 0.5;">Fomantic UI v2.9.4 Secured via SRI Subresource Integrity</span>
+    </div>
+
+    <!-- jQuery and Fomantic UI Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fomantic-ui/2.9.4/semantic.min.js" integrity="sha512-Y/wIVu+S+XJsDL7I+nL50kAVFLMqSdvuLqF2vMoRqiMkmvcqFjEpEgeu6Rx8tpZXKp77J8OUpMKy0m3jLYhbbw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</body>
+</html>

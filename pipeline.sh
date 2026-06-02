@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034
+# shellcheck disable=SC2034,SC2329
 #
 # Minimalist Experimental AI Pipeline by Jiab77
 #
 # This script handles 'ollama', 'llama.cpp' and 'openrouter' backends.
 #
 # Lead: Jiab77
-# Reviewer: Gemini
+# AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.2.0
+# Version: 0.2.1
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -22,6 +22,8 @@ RUN_MODE="chat"    # Expected values: simple, multi, chat
 BACKEND="gemini"    # Expected values: ollama, llamacpp or gemini
 HEARTBEAT_THRESHOLD=15    # Trigger context consolidation to avoid amnesia and keep context extremely light
 CREDENTIALS="${HOME}/.creds"    # Or any other location or filename you prefer.
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+TOR_PROXY="socks5h://0:9050"
 MESSAGES_FILE="messages.json"
 MEMORY_FILE="memory.json"
 PULL_MODELS=false
@@ -36,6 +38,8 @@ BASE_TOOLS="${SCRIPT_DIR}/tools.json"
 TEMP_MEMORY_SYSTEM="${DATA_STORE}/tmp_memory_sys.txt"
 TEMP_MEMORY_USER="${DATA_STORE}/tmp_memory_usr.txt"
 TEMP_TOOLS_OUTPUT="${DATA_STORE}/tmp_tools_output.json"
+TEMP_PAYLOAD_MESSAGES="${DATA_STORE}/tmp_payload_messages.json"
+TEMP_PAYLOAD_TOOLS="${DATA_STORE}/tmp_payload_tools.json"
 TOOLS_OUTPUT="${DATA_STORE}/tools-output.txt"
 TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
 TOOLS_CONTENT="[]"
@@ -85,6 +89,18 @@ LLAMACPP_CACHE="/mnt/models/llama.cpp"
 # Internals
 OLLAMA_FLAGS="--nowordwrap --hidethinking"
 LLAMACPP_FLAGS="--log-disable --simple-io --no-display-prompt --no-show-timings -st"
+
+# Cleanup temporary files on exit
+cleanup_temp_files() {
+  rm -f "$TEMP_MEMORY_SYSTEM" \
+        "$TEMP_MEMORY_USER" \
+        "$TEMP_TOOLS_OUTPUT" \
+        "$TEMP_PAYLOAD_MESSAGES" \
+        "$TEMP_PAYLOAD_TOOLS" \
+        "$TOOLS_OUTPUT" \
+        "${TOOLS_OUTPUT}.clean"
+}
+trap cleanup_temp_files EXIT INT TERM
 
 # Functions
 log() {
@@ -171,13 +187,14 @@ api_call() {
 
     # External Backend: OpenRouter / Gemini
     gemini)
-      [[ $USE_TOR == true ]] && curl_opts+=("-x" "socks5h://127.0.0.1:9050")
+      [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
       curl "${curl_opts[@]}" "${GEMINI_API_URL}" \
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer ${GEMINI_API_KEY}" \
            -H "HTTP-Referer: ${OPENROUTER_REFERER}" \
            -H "X-OpenRouter-Title: ${OPENROUTER_TITLE}" \
            -H "X-OpenRouter-Categories: ${OPENROUTER_CATEGORIES}" \
+           -A "$USER_AGENT" \
            -d @- <<< "$payload" | \
            jq -rc .
     ;;
@@ -344,8 +361,18 @@ EOF
     consolidated_json=$(jq -rc '.choices[0].message.content' <<<"$raw_response")
 
     # Sanitize markdown block wrappers if the model accidentally included them
-    if [[ $consolidated_json =~ ^\`\`\` ]]; then
-      consolidated_json=$(sed -e 's/^```json//g' -e 's/^```//g' -e 's/```$//g' <<<"$consolidated_json")
+    local bt='```'
+    if [[ "$consolidated_json" == "$bt"* ]]; then
+      if [[ "$consolidated_json" == "${bt}json"* ]]; then
+        consolidated_json="${consolidated_json#"${bt}"json}"
+      else
+        consolidated_json="${consolidated_json#"$bt"}"
+      fi
+      if [[ "$consolidated_json" == *"$bt" ]]; then
+        consolidated_json="${consolidated_json%"$bt"}"
+      fi
+      consolidated_json="${consolidated_json#"${consolidated_json%%[![:space:]]*}"}"
+      consolidated_json="${consolidated_json%"${consolidated_json##*[![:space:]]}"}"
     fi
 
     # Strictly validate that the output is valid JSON
@@ -434,15 +461,20 @@ send_message() {
 
       # The Magic Loop
       while true; do
-        JSON_PAYLOAD=$(printf '%s\n%s\n' "$ALL_MESSAGES" "$TOOLS_CONTENT" | jq -rc -s \
+        # Write payload variables to temporary files inside the loop to capture any updates
+        printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
+        printf "%s" "$TOOLS_CONTENT" > "$TEMP_PAYLOAD_TOOLS"
+
+        JSON_PAYLOAD=$(jq -rc -n \
           --arg model "$GEMINI_API_MODEL" \
+          --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+          --rawfile tools "$TEMP_PAYLOAD_TOOLS" \
           '{
             model: $model,
-            messages: .[0],
+            messages: ($msgs | fromjson),
             reasoning: {enabled: true}
-          } + if (.[1] | length) > 0 then {tools: .[1]} else {} end'
+          } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
         )
-        [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
 
         # Sending request and store response
         RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
@@ -492,21 +524,15 @@ send_message() {
           ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
           ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
 
-          # 2. Extract and iterate over all requested parallel tools
-          NUM_TOOLS=$(jq -rc '. | length' <<<"$TOOLS")
-          log "\n[+] Executing $NUM_TOOLS parallel tool(s)..."
-
-          # Looping throught all requested tools
-          for ((i=0; i<NUM_TOOLS; i++)); do
-            # Store requested tool
-            TOOL_NAME=$(jq -rc ".[$i].function.name" <<<"$TOOLS")
-            TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<"$TOOLS")
-            TOOL_ID=$(jq -rc ".[$i].id" <<<"$TOOLS")
-            log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
+          # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
+          local tool_count=0
+          while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
+            ((tool_count++))
+            log "\n[+] Tool (${tool_count}) AI model wants to run: $tool_name\n[+] With the following arguments: $tool_args\n"
 
             # 3. Check and execute tool handler
             if [[ -x $TOOLS_HANDLER ]]; then
-              "$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" &> "$TOOLS_OUTPUT"
+              "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
             else
               echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
               log "[!] Warning: Tool handler not executable."
@@ -520,7 +546,7 @@ send_message() {
             # 5. Format according to OpenAI guidelines
             # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
             iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-            if jq -rc -n --arg id "$TOOL_ID" --arg name "$TOOL_NAME" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+            if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
               # Clear tools output file
               rm -f "$TOOLS_OUTPUT"
 
@@ -530,8 +556,8 @@ send_message() {
               else
                 log "[!] Warning: fromjson failed, using fallback --arg serialization"
                 ALL_MESSAGES=$(jq -rc \
-                  --arg id "$TOOL_ID" \
-                  --arg name "$TOOL_NAME" \
+                  --arg id "$tool_id" \
+                  --arg name "$tool_name" \
                   --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
                   '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                 )
@@ -544,8 +570,8 @@ send_message() {
               local fallback_content
               fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
               ALL_MESSAGES=$(jq -rc \
-                --arg id "$TOOL_ID" \
-                --arg name "$TOOL_NAME" \
+                --arg id "$tool_id" \
+                --arg name "$tool_name" \
                 --arg content "$fallback_content" \
                 '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
               )
@@ -553,7 +579,7 @@ send_message() {
               # Clear tools output file
               rm -f "$TOOLS_OUTPUT"
             fi
-          done
+          done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$TOOLS" 2>/dev/null)
           # echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
 
         # Handling model final response
@@ -604,10 +630,19 @@ Here is all supported commands:
   /help       Print this screen
   /clear      Clear pipeline memory
   /commit     Commit session history to long-term memory immediately
+  /run <cmd>  Execute a shell command locally
   /start      Start pipeline and exit
   /quit       Exit
 
 EOF
+        ;;
+        "/run")
+          log "\n[!] Usage: /run <command>\n"
+        ;;
+        "/run "*)
+          local cmd="${USER_MSG#"/run "}"
+          log "\n[+] Executing: ${cmd}\n"
+          eval "$cmd"
         ;;
         "/clear") clear_memory ;;
         "/commit") check_and_trigger_heartbeat "true" ;;
@@ -662,9 +697,10 @@ run_pipeline() {
       # Local Backend: Ollama
       ollama)
         log "\nQuestion mode detected. Calling the Architect ($OLLAMA_ARCHITECT)...\n"
+        printf "%s" "$SIMPLE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
         JSON_PAYLOAD=$(jq -rc -n \
           --arg model "$OLLAMA_ARCHITECT" \
-          --arg prompt "$SIMPLE_PROMPT_COMBINED" \
+          --rawfile prompt "$TEMP_MEMORY_USER" \
           '{
             model: $model,
             prompt: $prompt,
@@ -683,10 +719,12 @@ run_pipeline() {
       llamacpp)
         log "\n[+] Question mode detected. Calling the Architect ($LLAMACPP_ARCHITECT)...\n"
         LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
+        printf "%s" "$SYSTEM_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+        printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
         JSON_PAYLOAD=$(jq -rc -n \
           --arg model "$LLAMACPP_MODEL" \
-          --arg system "$SYSTEM_PROMPT" \
-          --arg user "$SIMPLE_PROMPT" \
+          --rawfile system "$TEMP_MEMORY_SYSTEM" \
+          --rawfile user "$TEMP_MEMORY_USER" \
           '{
             model: $model,
             messages: [
@@ -708,21 +746,29 @@ run_pipeline() {
       # External Backend: OpenRouter / Gemini
       gemini)
         log "\n[+] Question mode detected. Calling Gemini ($GEMINI_API_MODEL)...\n"
+        printf "%s" "$SYSTEM_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+        printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
         ALL_MESSAGES=$(jq -rc -n \
-          --arg sys "$SYSTEM_PROMPT" \
-          --arg user "$SIMPLE_PROMPT" \
+          --rawfile sys "$TEMP_MEMORY_SYSTEM" \
+          --rawfile user "$TEMP_MEMORY_USER" \
           '[{role: "system", content: $sys}, {role: "user", content: $user}]'
         )
 
         # The Magic Loop
         while true; do
-          JSON_PAYLOAD=$(printf '%s\n%s\n' "$ALL_MESSAGES" "$TOOLS_CONTENT" | jq -rc -s \
+          # Write payload variables to temporary files inside the loop to capture any updates
+          printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
+          printf "%s" "$TOOLS_CONTENT" > "$TEMP_PAYLOAD_TOOLS"
+
+          JSON_PAYLOAD=$(jq -rc -n \
             --arg model "$GEMINI_API_MODEL" \
+            --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+            --rawfile tools "$TEMP_PAYLOAD_TOOLS" \
             '{
               model: $model,
-              messages: .[0],
+              messages: ($msgs | fromjson),
               reasoning: {enabled: true}
-            } + if (.[1] | length) > 0 then {tools: .[1]} else {} end'
+            } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
           )
           [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
 
@@ -776,21 +822,15 @@ run_pipeline() {
             ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
             ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
 
-            # 2. Extract and iterate over all requested parallel tools
-            NUM_TOOLS=$(jq -rc '. | length' <<<"$TOOLS")
-            log "\n[+] Executing $NUM_TOOLS parallel tool(s)...\n"
-
-            # Looping throught all requested tools
-            for ((i=0; i<NUM_TOOLS; i++)); do
-              # Store requested tool
-              TOOL_NAME=$(jq -rc ".[$i].function.name" <<<"$TOOLS")
-              TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<"$TOOLS")
-              TOOL_ID=$(jq -rc ".[$i].id" <<<"$TOOLS")
-              log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
+            # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
+            local tool_count=0
+            while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
+              ((tool_count++))
+              log "\n[+] Tool (${tool_count}) AI model wants to run: $tool_name\n[+] With the following arguments: $tool_args\n"
 
               # 3. Check and execute tool handler
               if [[ -x $TOOLS_HANDLER ]]; then
-                "$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" &> "$TOOLS_OUTPUT"
+                "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
               else
                 echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
                 log "[!] Warning: Tool handler not executable."
@@ -804,7 +844,7 @@ run_pipeline() {
               # 5. Format according to OpenAI guidelines
               # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
               iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-              if jq -rc -n --arg id "$TOOL_ID" --arg name "$TOOL_NAME" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+              if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
                 # Clear tools output file
                 rm -f "$TOOLS_OUTPUT"
 
@@ -814,8 +854,8 @@ run_pipeline() {
                 else
                   log "[!] Warning: fromjson failed, using fallback --arg serialization"
                   ALL_MESSAGES=$(jq -rc \
-                    --arg id "$TOOL_ID" \
-                    --arg name "$TOOL_NAME" \
+                    --arg id "$tool_id" \
+                    --arg name "$tool_name" \
                     --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
                     '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                   )
@@ -828,8 +868,8 @@ run_pipeline() {
                 local fallback_content
                 fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
                 ALL_MESSAGES=$(jq -rc \
-                  --arg id "$TOOL_ID" \
-                  --arg name "$TOOL_NAME" \
+                  --arg id "$tool_id" \
+                  --arg name "$tool_name" \
                   --arg content "$fallback_content" \
                   '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                 )
@@ -837,7 +877,7 @@ run_pipeline() {
                 # Clear tools output file
                 rm -f "$TOOLS_OUTPUT"
               fi
-            done
+            done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$TOOLS" 2>/dev/null)
             echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
 
           # Handling model final response
@@ -871,9 +911,10 @@ run_pipeline() {
       # Local Backend: Ollama
       ollama)
         log "\nCompare mode detected. Calling the Architect ($OLLAMA_ARCHITECT)...\n"
+        printf "%s" "$COMPARE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
         JSON_PAYLOAD=$(jq -rc -n \
           --arg model "$OLLAMA_ARCHITECT" \
-          --arg prompt "$COMPARE_PROMPT_COMBINED" \
+          --rawfile prompt "$TEMP_MEMORY_USER" \
           '{
             model: $model,
             prompt: $prompt,
@@ -892,10 +933,12 @@ run_pipeline() {
       llamacpp)
         log "\nCompare mode detected. Calling the Architect ($LLAMACPP_ARCHITECT)...\n"
         LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
+        printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+        printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
         JSON_PAYLOAD=$(jq -rc -n \
           --arg model "$LLAMACPP_MODEL" \
-          --arg system "$COMPARE_PROMPT" \
-          --arg user "$USER_PROMPT" \
+          --rawfile system "$TEMP_MEMORY_SYSTEM" \
+          --rawfile user "$TEMP_MEMORY_USER" \
           '{
             model: $model,
             messages: [
@@ -916,10 +959,12 @@ run_pipeline() {
       # External Backend: OpenRouter / Gemini
       gemini)
         log "\nCompare mode detected. Calling Gemini ($GEMINI_API_MODEL)...\n"
+        printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+        printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
         JSON_PAYLOAD=$(jq -rc -n \
           --arg model "$GEMINI_API_MODEL" \
-          --arg system "$COMPARE_PROMPT" \
-          --arg user "$USER_PROMPT" \
+          --rawfile system "$TEMP_MEMORY_SYSTEM" \
+          --rawfile user "$TEMP_MEMORY_USER" \
           '{
             model: $model,
             messages: [
@@ -1063,8 +1108,8 @@ mkdir -p "$DATA_STORE"
 [[ -r $BASE_TOOLS ]] && TOOLS_CONTENT=$(<"$BASE_TOOLS")
 if [[ $USE_TOR == true && $BACKEND == "gemini" ]]; then
   log "\n[*] Checking Tor service...\n"
-  if ! timeout 2 bash -c '</dev/tcp/127.0.0.1/9050' &>/dev/null; then
-    error "Tor proxy (socks5h://127.0.0.1:9050) is configured but unreachable. Is the Tor service running?"
+  if ! timeout 2 bash -c '</dev/tcp/0/9050' &>/dev/null; then
+    error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is the Tor service running?"
   fi
 fi
 if [[ $BACKEND == "gemini" ]]; then

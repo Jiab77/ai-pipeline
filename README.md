@@ -250,3 +250,17 @@ This pipeline is forged under deep iteration and synergistic design:
 * **Project Phase**: Experimental Work-in-Progress (WiP).
 * **Next Roadmap Milestones**: Refactoring Route C (Task Mode) to enable automated local three-stage software-engineer agent loop consensus blocks.
 * **License**: Released under the terms of the **MIT License**. See [LICENSE](LICENSE) for details.
+
+
+
+---
+
+## 📈 Star History
+
+<a href="https://www.star-history.com/?repos=jiab77%2Fai-pipeline&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=jiab77/ai-pipeline&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=jiab77/ai-pipeline&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jiab77/ai-pipeline&type=date&legend=top-left" />
+  </picture>
+</a>

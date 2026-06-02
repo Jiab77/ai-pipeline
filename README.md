@@ -68,7 +68,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 💬 **Interactive Chat Loop**: Features a fully immersive, conversational terminal flow powered by persistent JSON state history.
 - 🧠 **Cognitive Heartbeat Pacemaker**: Dynamic background consolidation. Automatically tracks message lengths and executes active context compression into long-term structures once a threshold is met (default: 15 messages), pruning active logs cleanly to maintain high performance with zero amnesia.
 - 🔍 **Tor-Based Anonymous Web Search**: Secure, fully-parsed, zero-subshell Onion DuckDuckGo lookup queries executed directly over SOCKS5 proxying to fetch clean search listings using `htmlq`.
-- 🛠️ **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, or execute sandboxed shell commands.
+- 🛠️  **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, or execute sandboxed shell commands.
 - 🧅 **Tor Proxy Support**: Outbound connections to `openrouter.ai` can automatically be routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) for secure, private, and geo-independent requests.
 - 💾 **Structured JSON Memory**: Keeps a running context of your conversation in `data/messages.json` and persistent user/system profile rules in `data/memory.json`.
 - 🤖 **Local-First & Hybrid Approach**: Switch seamlessly between local inference servers (Ollama, llama.cpp running on GPU/CPU machines) and highly optimized cloud APIs (Google Gemini via OpenRouter).
@@ -160,7 +160,7 @@ brew install jq glow tor htmlq
 
 # Arch Linux
 sudo pacman -Syu curl jq tor glow
-# htmlq can be installed via AUR (e.g. yay -S htmlq) or Cargo:
+# htmlq can be installed via AUR (e.g. paru -S htmlq) or Cargo:
 cargo install htmlq
 ```
 
@@ -232,7 +232,7 @@ The pipeline's active memory and automated housekeeping are divided inside the `
 This pipeline is forged under deep iteration and synergistic design:
 
 * **Lead Developer / Architect**: **Jiab77**
-* **AI Collaborators / Reviewers**: **Gemini**
+* **AI Collaborator / Reviewer**: **Gemini**
 
 ---
 

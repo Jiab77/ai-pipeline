@@ -2,7 +2,7 @@
 
 A high-performance, single-file development web server powered by PHP. 
 
-This is an optimized and unified version that merges **Linux & macOS implementations** into a single, highly portable, cross-platform utility. It works flawlessly under **Linux, MacOS, BSD, and Windows/Termux**.
+This project is built upon and inspired by **[simple-php-webserver](https://github.com/Jiab77/simple-php-webserver)**. It represents an optimized and unified version that merges **Linux & macOS implementations** into a single, highly portable, cross-platform utility. It works flawlessly under **Linux, MacOS, BSD, and Windows/Termux**.
 
 ---
 
@@ -77,7 +77,7 @@ $ ./web/server.php -i 0.0.0.0 -p 9000 -c 8 -d ./public
 Special thanks to the authors who made this unification possible:
 
 * **[@staatzstreich](https://github.com/staatzstreich)**: Who designed the elegant object-oriented macOS implementation and argument structure.
-* **Unified Development Team**: Merged both scripts into a portable, fallbacked command-line utility with a rich directory browser dashboard.
+* **Unified Development Team & [simple-php-webserver](https://github.com/Jiab77/simple-php-webserver)**: Merged both scripts into a portable, fallbacked command-line utility with a rich directory browser dashboard.
 * **Jarvis o/b/o Gemini**: Acted as the AI co-pilot, refining the architecture, streamlining compatibility, and crafting the interactive interface design.
 
 ---

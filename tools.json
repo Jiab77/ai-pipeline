@@ -242,5 +242,34 @@
         ]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_fetch",
+      "description": "Fetch and extract the main content of a specific web page. Sanitizes it to high-fidelity Markdown, optimized for terminal reading and AI consumption. Supports JS-rendering fallback, proxying and content-filtering.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The target website URL to fetch."
+          },
+          "use_javascript": {
+            "type": "boolean",
+            "description": "If true, boot-up a headless browser to render SPAs / Dynamic content. If false (default), execute a lightweight raw HTML transfer using curl/fetch (much faster, saves battery & RAM).",
+            "default": false
+          },
+          "proxy": {
+            "type": "string",
+            "description": "Optional proxy URL (e.g. 'socks5h://127.0.0.1:9050' for Tor). If omitted, falls back to the system environment defaults.",
+            "default": "socks5h://0:9050"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    }
   }
 ]

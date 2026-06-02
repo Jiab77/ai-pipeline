@@ -10,7 +10,7 @@
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.1.3
+# Version: 0.1.4
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -34,6 +34,7 @@ SCRIPT_NAME="${SCRIPT_FILE//.sh}"
 DATA_STORE="${SCRIPT_DIR}/data"
 BASE_TOOLS="${SCRIPT_DIR}/tools.json"
 MEMORY_FILE="${DATA_STORE}/memory.json"
+TOOLS_OUTPUT="${DATA_STORE}/tools-output.txt"
 TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
 TOOLS_CONTENT="[]"
 
@@ -150,9 +151,9 @@ api_call() {
     # Local Backend: Ollama
     ollama)
       curl "${curl_opts[@]}" "${OLLAMA_API_URL}" \
-     	     -H "Content-Type: application/json" \
-     	     -d @- <<< "$payload" | \
-     	     jq -rc '.response'
+           -H "Content-Type: application/json" \
+           -d @- <<< "$payload" | \
+           jq -rc '.response'
     ;;
 
     # Local Backend: llama.cpp
@@ -258,7 +259,7 @@ send_message() {
       RESPONSE=$(api_call "$JSON_PAYLOAD")
       # RESPONSE=$(curl -sfSL "${OLLAMA_API_URL}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" | jq -rc '.response')
       # RESPONSE=$(ollama run $OLLAMA_FLAGS "$OLLAMA_ARCHITECT" <<<$SIMPLE_PROMPT | grep "Response:" | tail -n 1 | cut -d' ' -f2)
-	    echo "[AI] $(jq -rc '.response' <<<$RESPONSE)" | render_markdown
+      echo "[AI] $(jq -rc '.response' <<<$RESPONSE)" | render_markdown
     ;;
 
     # Local Backend: llama.cpp
@@ -284,7 +285,7 @@ send_message() {
       RESPONSE=$(api_call "$JSON_PAYLOAD")
       # RESPONSE=$(curl -sfSL "${LLAMACPP_API_URL}" -H "Content-Type: application/json" -H "Authorization: Bearer no-key" -d "$JSON_PAYLOAD" | jq -rc '.choices[0].message.content')
       # RESPONSE=$(LLAMA_CACHE="$LLAMACPP_CACHE" llama-cli -hf "$LLAMACPP_ARCHITECT" $LLAMACPP_FLAGS --temp 0.2 -rea off -p "$SIMPLE_PROMPT" 2>&1 | grep -v '>' | grep "Response:" | tail -n 1 | cut -d' ' -f2)
-	    echo "[AI] $(jq -rc '.choices[0].message.content' <<<$RESPONSE)" | render_markdown
+      echo "[AI] $(jq -rc '.choices[0].message.content' <<<$RESPONSE)" | render_markdown
     ;;
 
     # External Backend: OpenRouter / Gemini
@@ -303,59 +304,59 @@ send_message() {
 
       # The Magic Loop
       while true; do
-	      JSON_PAYLOAD=$(printf '%s\n%s\n' "$ALL_MESSAGES" "$TOOLS_CONTENT" | jq -rc -s \
-	        --arg model "$GEMINI_API_MODEL" \
-	        '{
-	          model: $model,
-	          messages: .[0],
-	          reasoning: {enabled: true}
-	        } + if (.[1] | length) > 0 then {tools: .[1]} else {} end'
-	      )
-	      [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
+        JSON_PAYLOAD=$(printf '%s\n%s\n' "$ALL_MESSAGES" "$TOOLS_CONTENT" | jq -rc -s \
+          --arg model "$GEMINI_API_MODEL" \
+          '{
+            model: $model,
+            messages: .[0],
+            reasoning: {enabled: true}
+          } + if (.[1] | length) > 0 then {tools: .[1]} else {} end'
+        )
+        [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
 
-	      # Sending request and store response
-	      RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-	      [[ -z $RAW_RESPONSE ]] && error "Unexpected error! Check the logs and try again."
+        # Sending request and store response
+        RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
+        [[ -z $RAW_RESPONSE ]] && error "Unexpected error! Check the logs and try again."
 
-	      # Handling raw response
-	      if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
-	        # log "\n\n=== RAW RESPONSE ===\n\n"
-	        # echo "$RAW_RESPONSE" | jq .
+        # Handling raw response
+        if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
+          # log "\n\n=== RAW RESPONSE ===\n\n"
+          # echo "$RAW_RESPONSE" | jq .
 
-	        # Check for errors before continuing
+          # Check for errors before continuing
           if jq -e '.error' <<<$RAW_RESPONSE &>/dev/null; then
             err_msg=$(jq -rc '.error.message' <<<$RAW_RESPONSE)
             error "API Error: $err_msg"
           fi
 
-	        # Store relevant data
-	        REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
-	        RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
-	        REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
-	        TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<$RAW_RESPONSE)
-	        USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
-	      fi
+          # Store relevant data
+          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
+          RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
+          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
+          TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<$RAW_RESPONSE)
+          USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
+        fi
 
-	      # Handling model reasoning
-		    if [[ -n $REASONING && ! $REASONING == "null" ]]; then
-		      echo "[Thinking] $REASONING" | render_markdown
-		    fi
+        # Handling model reasoning
+        if [[ -n $REASONING && ! $REASONING == "null" ]]; then
+          echo "[Thinking] $REASONING" | render_markdown
+        fi
 
-		    # Handling model refusal
-		    if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
-		      echo "[AI] $REFUSAL" | render_markdown
-		    fi
+        # Handling model refusal
+        if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
+          echo "[AI] $REFUSAL" | render_markdown
+        fi
 
-		    # Handling model intermediary response
-		    # if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-			  #   log "\n\n=== INTERMEDIARY RESPONSE ===\n\n"
-			  #   echo "$RESPONSE" | render_markdown
-		    # fi
+        # Handling model intermediary response
+        # if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
+        #   log "\n\n=== INTERMEDIARY RESPONSE ===\n\n"
+        #   echo "$RESPONSE" | render_markdown
+        # fi
 
-		    # Handling model requested tools (Multi-Parallel Support)
-		    if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
-			    # log "\n\n[SYS] Tools:\n\n"
-			    # echo "$TOOLS" | jq .
+        # Handling model requested tools (Multi-Parallel Support)
+        if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
+          # log "\n\n[SYS] Tools:\n\n"
+          # echo "$TOOLS" | jq .
 
           # 1. Grab assistant command message and push to history
           ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<$RAW_RESPONSE)
@@ -367,63 +368,76 @@ send_message() {
 
           # Looping throught all requested tools
           for ((i=0; i<NUM_TOOLS; i++)); do
-			      # Store requested tool
-			      TOOL_NAME=$(jq -rc ".[$i].function.name" <<<$TOOLS)
-			      TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<$TOOLS)
-			      TOOL_ID=$(jq -rc ".[$i].id" <<<$TOOLS)
-			      log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
+            # Store requested tool
+            TOOL_NAME=$(jq -rc ".[$i].function.name" <<<$TOOLS)
+            TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<$TOOLS)
+            TOOL_ID=$(jq -rc ".[$i].id" <<<$TOOLS)
+            log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
 
-			      # 3. Check and execute tool handler
-			      if [[ -x $TOOLS_HANDLER ]]; then
-			        TOOL_OUTPUT=$("$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" 2>&1)
-			      else
-              TOOL_OUTPUT="Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing."
+            # 3. Check and execute tool handler
+            if [[ -x $TOOLS_HANDLER ]]; then
+              # TOOL_OUTPUT=$("$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" 2>&1)
+              "$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" &> "$TOOLS_OUTPUT"
+            else
+              # TOOL_OUTPUT="Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing."
+              echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
               log "[!] Warning: Tool handler not executable."
-			      fi
+            fi
 
             # 4. Fallback safeguard for empty output
-            if [[ -z $TOOL_OUTPUT ]]; then
-              TOOL_OUTPUT="(Tool executed successfully and returned empty stdout)"
+            # if [[ -z $TOOL_OUTPUT ]]; then
+            if [[ ! -s $TOOLS_OUTPUT ]]; then
+              # TOOL_OUTPUT="(Tool executed successfully and returned empty stdout)"
+              echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
             fi
 
             # 5. Format according to OpenAI guidelines
+            # TOOL_RESPONSE_MSG=$(jq -rc -n \
+            #   --arg id "$TOOL_ID" \
+            #   --arg name "$TOOL_NAME" \
+            #   --arg content "$TOOL_OUTPUT" \
+            #   '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
+            # )
             TOOL_RESPONSE_MSG=$(jq -rc -n \
               --arg id "$TOOL_ID" \
               --arg name "$TOOL_NAME" \
-              --arg content "$TOOL_OUTPUT" \
+              --rawfile content "$TOOLS_OUTPUT" \
               '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
             )
 
+            # Clear tools output file
+            rm -f "$TOOLS_OUTPUT"
+
             # 6. Append tool output to messages array
             ALL_MESSAGES=$(jq -rc --argjson tool "$TOOL_RESPONSE_MSG" '. + [$tool]' <<<$ALL_MESSAGES)
-			    done
-			    # echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
+          done
+          # echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
 
-		    # Handling model final response
-		    else
-			    if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-				    # log "\n\n=== FINAL RESPONSE ===\n\n"
-				    echo "[AI] $RESPONSE" | render_markdown
+        # Handling model final response
+        else
+          if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
+            # log "\n\n=== FINAL RESPONSE ===\n\n"
+            echo "[AI] $RESPONSE" | render_markdown
 
-				    # Store final AI response
-				    ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<$ALL_MESSAGES)
+            # Store final AI response
+            ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<$ALL_MESSAGES)
             echo "$ALL_MESSAGES" > "${DATA_STORE}/${MESSAGES_FILE}"
-			    fi
-			    break		# Leaving the loop
-		    fi
+          fi
+          break		# Leaving the loop
+        fi
 
-		    # Handling model usage
-		    if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-			    log "[+] Usage:"
-			    log "  - Prompt Tokens: $(jq -rc .prompt_tokens <<<$USAGE)"
-			    log "  - Cached Tokens: $(jq -rc .prompt_tokens_details.cached_tokens <<<$USAGE)"
-			    log "  - Completion Tokens: $(jq -rc .completion_tokens <<<$USAGE)"
-			    log "  - Reasoning Tokens: $(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<$USAGE)"
-			    log "  - Total Tokens: $(jq -rc .total_tokens <<<$USAGE)"
-			    log "  - Cost: $(jq -rc .cost <<<$USAGE)"
-			    # jq . <<<$USAGE
-		    fi
-	    done
+        # Handling model usage
+        if [[ -n $USAGE && ! $USAGE == "null" ]]; then
+          log "[+] Usage:"
+          log "  - Prompt Tokens: $(jq -rc .prompt_tokens <<<$USAGE)"
+          log "  - Cached Tokens: $(jq -rc .prompt_tokens_details.cached_tokens <<<$USAGE)"
+          log "  - Completion Tokens: $(jq -rc .completion_tokens <<<$USAGE)"
+          log "  - Reasoning Tokens: $(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<$USAGE)"
+          log "  - Total Tokens: $(jq -rc .total_tokens <<<$USAGE)"
+          log "  - Cost: $(jq -rc .cost <<<$USAGE)"
+          # jq . <<<$USAGE
+        fi
+      done
     ;;
   esac
 }
@@ -514,7 +528,7 @@ run_pipeline() {
         RESPONSE=$(api_call "$JSON_PAYLOAD")
         # RESPONSE=$(curl -sfSL "${OLLAMA_API_URL}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" | jq -rc '.response')
         # RESPONSE=$(ollama run $OLLAMA_FLAGS "$OLLAMA_ARCHITECT" <<<$SIMPLE_PROMPT | grep "Response:" | tail -n 1 | cut -d' ' -f2)
-		    handle_response "$RESPONSE" "$USER_PROMPT"
+        handle_response "$RESPONSE" "$USER_PROMPT"
       ;;
 
       # Local Backend: llama.cpp
@@ -540,75 +554,75 @@ run_pipeline() {
         RESPONSE=$(api_call "$JSON_PAYLOAD")
         # RESPONSE=$(curl -sfSL "${LLAMACPP_API_URL}" -H "Content-Type: application/json" -H "Authorization: Bearer no-key" -d "$JSON_PAYLOAD" | jq -rc '.choices[0].message.content')
         # RESPONSE=$(LLAMA_CACHE="$LLAMACPP_CACHE" llama-cli -hf "$LLAMACPP_ARCHITECT" $LLAMACPP_FLAGS --temp 0.2 -rea off -p "$SIMPLE_PROMPT" 2>&1 | grep -v '>' | grep "Response:" | tail -n 1 | cut -d' ' -f2)
-		    handle_response "$RESPONSE" "$USER_PROMPT"
+        handle_response "$RESPONSE" "$USER_PROMPT"
       ;;
 
       # External Backend: OpenRouter / Gemini
       gemini)
         log "\n[+] Question mode detected. Calling Gemini ($GEMINI_API_MODEL)...\n"
-	      ALL_MESSAGES=$(jq -rc -n \
-	        --arg sys "$SYSTEM_PROMPT" \
-	        --arg user "$SIMPLE_PROMPT" \
-	        '[{role: "system", content: $sys}, {role: "user", content: $user}]'
-	      )
+        ALL_MESSAGES=$(jq -rc -n \
+          --arg sys "$SYSTEM_PROMPT" \
+          --arg user "$SIMPLE_PROMPT" \
+          '[{role: "system", content: $sys}, {role: "user", content: $user}]'
+        )
 
-	      # The Magic Loop
+        # The Magic Loop
         while true; do
-		      JSON_PAYLOAD=$(printf '%s\n%s\n' "$ALL_MESSAGES" "$TOOLS_CONTENT" | jq -rc -s \
-		        --arg model "$GEMINI_API_MODEL" \
-		        '{
-		          model: $model,
-		          messages: .[0],
-		          reasoning: {enabled: true}
-		        } + if (.[1] | length) > 0 then {tools: .[1]} else {} end'
-		      )
-	        [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
+          JSON_PAYLOAD=$(printf '%s\n%s\n' "$ALL_MESSAGES" "$TOOLS_CONTENT" | jq -rc -s \
+            --arg model "$GEMINI_API_MODEL" \
+            '{
+              model: $model,
+              messages: .[0],
+              reasoning: {enabled: true}
+            } + if (.[1] | length) > 0 then {tools: .[1]} else {} end'
+          )
+          [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
 
-		      # Sending request and store response
-		      RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-	        [[ -z $RAW_RESPONSE ]] && error "Unexpected error! Check the logs and try again."
+          # Sending request and store response
+          RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
+          [[ -z $RAW_RESPONSE ]] && error "Unexpected error! Check the logs and try again."
 
-		      # Handling raw response
-		      if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
-		        log "\n\n=== RAW RESPONSE ===\n\n"
-		        echo "$RAW_RESPONSE" | jq .
+          # Handling raw response
+          if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
+            log "\n\n=== RAW RESPONSE ===\n\n"
+            echo "$RAW_RESPONSE" | jq .
 
-		        # Check for errors before continuing
+            # Check for errors before continuing
             if jq -e '.error' <<<$RAW_RESPONSE &>/dev/null; then
               err_msg=$(jq -rc '.error.message' <<<$RAW_RESPONSE)
               error "API Error: $err_msg"
             fi
 
-		        # Store relevant data
-		        REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
-		        RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
-		        REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
-		        TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<$RAW_RESPONSE)
-		        USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
-		      fi
+            # Store relevant data
+            REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
+            RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
+            REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
+            TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<$RAW_RESPONSE)
+            USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
+          fi
 
-		      # Handling model reasoning
-			    if [[ -n $REASONING && ! $REASONING == "null" ]]; then
-			      log "\n\n=== REASONING ===\n\n"
-			      echo "$REASONING" | render_markdown
-			    fi
+          # Handling model reasoning
+          if [[ -n $REASONING && ! $REASONING == "null" ]]; then
+            log "\n\n=== REASONING ===\n\n"
+            echo "$REASONING" | render_markdown
+          fi
 
-			    # Handling model refusal
-			    if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
-			      log "\n\n=== REFUSAL ===\n\n"
-			      echo "$REFUSAL" | render_markdown
-			    fi
+          # Handling model refusal
+          if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
+            log "\n\n=== REFUSAL ===\n\n"
+            echo "$REFUSAL" | render_markdown
+          fi
 
-			    # Handling model intermediary response
-			    if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-				    log "\n\n=== INTERMEDIARY RESPONSE ===\n\n"
-				    echo "$RESPONSE" | render_markdown
-			    fi
+          # Handling model intermediary response
+          if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
+            log "\n\n=== INTERMEDIARY RESPONSE ===\n\n"
+            echo "$RESPONSE" | render_markdown
+          fi
 
-			    # Handling model requested tools (Multi-Parallel Support)
-			    if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
-				    log "\n\n=== TOOLS REQUEST ===\n\n"
-				    echo "$TOOLS" | jq .
+          # Handling model requested tools (Multi-Parallel Support)
+          if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
+            log "\n\n=== TOOLS REQUEST ===\n\n"
+            echo "$TOOLS" | jq .
 
             # 1. Grab assistant command message and push to history
             ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<$RAW_RESPONSE)
@@ -620,53 +634,66 @@ run_pipeline() {
 
             # Looping throught all requested tools
             for ((i=0; i<NUM_TOOLS; i++)); do
-				      # Store requested tool
-				      TOOL_NAME=$(jq -rc ".[$i].function.name" <<<$TOOLS)
-				      TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<$TOOLS)
-				      TOOL_ID=$(jq -rc ".[$i].id" <<<$TOOLS)
-				      log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
+              # Store requested tool
+              TOOL_NAME=$(jq -rc ".[$i].function.name" <<<$TOOLS)
+              TOOL_ARGS=$(jq -rc ".[$i].function.arguments" <<<$TOOLS)
+              TOOL_ID=$(jq -rc ".[$i].id" <<<$TOOLS)
+              log "\n[+] Tool ($((i+1))/${NUM_TOOLS}) AI model wants to run: $TOOL_NAME\n[+] With the following arguments: $TOOL_ARGS\n"
 
-				      # 3. Check and execute tool handler
-				      if [[ -x $TOOLS_HANDLER ]]; then
-				        TOOL_OUTPUT=$("$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" 2>&1)
-				      else
-                TOOL_OUTPUT="Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing."
+              # 3. Check and execute tool handler
+              if [[ -x $TOOLS_HANDLER ]]; then
+                # TOOL_OUTPUT=$("$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" 2>&1)
+                "$TOOLS_HANDLER" "$TOOL_NAME" "$TOOL_ARGS" &> "$TOOLS_OUTPUT"
+              else
+                # TOOL_OUTPUT="Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing."
+                echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
                 log "[!] Warning: Tool handler not executable."
-				      fi
+              fi
 
               # 4. Fallback safeguard for empty output
-              if [[ -z $TOOL_OUTPUT ]]; then
-                TOOL_OUTPUT="(Tool executed successfully and returned empty stdout)"
+              # if [[ -z $TOOL_OUTPUT ]]; then
+              if [[ ! -s $TOOLS_OUTPUT ]]; then
+                # TOOL_OUTPUT="(Tool executed successfully and returned empty stdout)"
+                echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
               fi
 
               # 5. Format according to OpenAI guidelines
+              # TOOL_RESPONSE_MSG=$(jq -rc -n \
+              #   --arg id "$TOOL_ID" \
+              #   --arg name "$TOOL_NAME" \
+              #   --arg content "$TOOL_OUTPUT" \
+              #   '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
+              # )
               TOOL_RESPONSE_MSG=$(jq -rc -n \
                 --arg id "$TOOL_ID" \
                 --arg name "$TOOL_NAME" \
-                --arg content "$TOOL_OUTPUT" \
+                --rawfile content "$TOOLS_OUTPUT" \
                 '{role: "tool", tool_call_id: $id, name: $name, content: $content}'
               )
 
+              # Clear tools output file
+              rm -f "$TOOLS_OUTPUT"
+
               # 6. Append tool output to messages array
               ALL_MESSAGES=$(jq -rc --argjson tool "$TOOL_RESPONSE_MSG" '. + [$tool]' <<<$ALL_MESSAGES)
-				    done
-				    echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
+            done
+            echo -e "\n\n**SENDING NEW MODEL DATA**\n\n" | render_markdown
 
-			    # Handling model final response
-			    else
-				    if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-					    log "\n\n=== FINAL RESPONSE ===\n\n"
-					    echo "$RESPONSE" | render_markdown
-				    fi
-				    break		# Leaving the loop
-			    fi
+          # Handling model final response
+          else
+            if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
+              log "\n\n=== FINAL RESPONSE ===\n\n"
+              echo "$RESPONSE" | render_markdown
+            fi
+            break		# Leaving the loop
+          fi
 
-			    # Handling model usage
-			    if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-				    log "\n\n=== USAGE ===\n\n"
-				    echo "$USAGE" | jq .
-			    fi
-		    done
+          # Handling model usage
+          if [[ -n $USAGE && ! $USAGE == "null" ]]; then
+            log "\n\n=== USAGE ===\n\n"
+            echo "$USAGE" | jq .
+          fi
+        done
       ;;
       *) error "Unsupported backend given: $BACKEND" ;;
     esac
@@ -680,7 +707,7 @@ run_pipeline() {
 
     # Backend Selector
     case $BACKEND in
-	    # Local Backend: Ollama
+      # Local Backend: Ollama
       ollama)
         log "\nCompare mode detected. Calling the Architect ($OLLAMA_ARCHITECT)...\n"
         JSON_PAYLOAD=$(jq -rc -n \
@@ -697,10 +724,10 @@ run_pipeline() {
         RESPONSE=$(api_call "$JSON_PAYLOAD")
         # RESPONSE=$(curl -sfSL "${OLLAMA_API_URL}" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" | jq -rc '.response')
         # RESPONSE=$(ollama run $OLLAMA_FLAGS "$OLLAMA_ARCHITECT" <<<$COMPARE_PROMPT | grep "Response:" | tail -n 1)
-		    handle_response "$RESPONSE" "$USER_PROMPT"
+        handle_response "$RESPONSE" "$USER_PROMPT"
       ;;
 
-	    # Local Backend: llama.cpp
+      # Local Backend: llama.cpp
       llamacpp)
         log "\nCompare mode detected. Calling the Architect ($LLAMACPP_ARCHITECT)...\n"
         LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
@@ -722,10 +749,10 @@ run_pipeline() {
         # Sending request and store response
         RESPONSE=$(api_call "$JSON_PAYLOAD")
         # RESPONSE=$(curl -sfSL "${LLAMACPP_API_URL}" -H "Content-Type: application/json" -H "Authorization: Bearer no-key" -d "$JSON_PAYLOAD" | jq -rc '.choices[0].message.content')
-		    handle_response "$RESPONSE" "$USER_PROMPT"
+        handle_response "$RESPONSE" "$USER_PROMPT"
       ;;
 
-	    # External Backend: OpenRouter / Gemini
+      # External Backend: OpenRouter / Gemini
       gemini)
         log "\nCompare mode detected. Calling Gemini ($GEMINI_API_MODEL)...\n"
         JSON_PAYLOAD=$(jq -rc -n \
@@ -745,47 +772,47 @@ run_pipeline() {
         # Sending request and store response
         RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
 
-		    # Handling raw response
+        # Handling raw response
         if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
           log "\n\n=== RAW RESPONSE ===\n\n"
           echo "$RAW_RESPONSE" | jq .
 
-	        # Check for errors before continuing
+          # Check for errors before continuing
           if jq -e '.error' <<<$RAW_RESPONSE &>/dev/null; then
             err_msg=$(jq -rc '.error.message' <<<$RAW_RESPONSE)
             error "API Error: $err_msg"
           fi
 
-	        # Store relevant data
+          # Store relevant data
           REASONING=$(jq -rc '.choices[0].message.reasoning' <<<$RAW_RESPONSE)
           RESPONSE=$(jq -rc '.choices[0].message.content' <<<$RAW_RESPONSE)
           REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<$RAW_RESPONSE)
           USAGE=$(jq -rc '.usage' <<<$RAW_RESPONSE)
         fi
 
-		    # Handling model reasoning
-		    if [[ -n $REASONING && ! $REASONING == "null" ]]; then
-		      log "\n\n=== REASONING ===\n\n"
-		      echo "$REASONING" | render_markdown
-		    fi
+        # Handling model reasoning
+        if [[ -n $REASONING && ! $REASONING == "null" ]]; then
+          log "\n\n=== REASONING ===\n\n"
+          echo "$REASONING" | render_markdown
+        fi
 
-		    # Handling model refusal
-		    if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
-		      log "\n\n=== REFUSAL ===\n\n"
-		      echo "$REFUSAL" | render_markdown
-		    fi
+        # Handling model refusal
+        if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
+          log "\n\n=== REFUSAL ===\n\n"
+          echo "$REFUSAL" | render_markdown
+        fi
 
-		    # Handling model final response
-		    if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-		      log "\n\n=== RESPONSE ===\n\n"
-		      echo "$RESPONSE" | render_markdown
-		    fi
+        # Handling model final response
+        if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
+          log "\n\n=== RESPONSE ===\n\n"
+          echo "$RESPONSE" | render_markdown
+        fi
 
-		    # Handling model usage
-		    if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-		      log "\n\n=== USAGE ===\n\n"
-		      echo "$USAGE" | jq .
-		    fi
+        # Handling model usage
+        if [[ -n $USAGE && ! $USAGE == "null" ]]; then
+          log "\n\n=== USAGE ===\n\n"
+          echo "$USAGE" | jq .
+        fi
       ;;
       *) error "Unsupported backend given: $BACKEND" ;;
     esac

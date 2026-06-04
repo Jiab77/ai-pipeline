@@ -208,7 +208,7 @@ pkg install curl jq glow cargo-binstall
 cargo-binstall htmlq
 ```
 
-> The TOR proxy can be provided by several apps on Android. For what it worth, I've using __[InviZible Pro](https://play.google.com/store/apps/details?id=pan.alexander.tordnscrypt.gp)__.
+> The TOR proxy can be provided by several apps on Android. For what it worth, I'm using __[InviZible Pro](https://play.google.com/store/apps/details?id=pan.alexander.tordnscrypt.gp)__.
 
 ### Authorization (For Gemini/OpenRouter API)
 Save your OpenRouter API Key inside a private file.

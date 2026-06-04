@@ -7,14 +7,16 @@
 #
 # Made by Gemini 3.5 Flash Extended / Improved by Jiab77 & Jarvis
 #
-# Version 0.2.0 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
+# Version 0.2.1 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
 
 # Config
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-TOR_PROXY="socks5h://0:9050"
+TOR_HOST="127.0.0.1"
+TOR_PORT=9050
+TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
@@ -352,7 +354,7 @@ web_search() {
   encoded_query=$(jq -nrc --arg q "$query" '$q | @uri')
 
   # Outbound curl options (socks5h proxy if Tor is active in backend, else direct)
-  if timeout 2 bash -c '</dev/tcp/0/9050' &>/dev/null; then
+  if timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
     search_url="https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion"
     curl_opts+=("-x" "$TOR_PROXY")
   fi

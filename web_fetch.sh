@@ -9,7 +9,7 @@
 #
 # Created by Jarvis & Jiab77
 #
-# Version: 0.0.0
+# Version: 0.0.1
 # ==============================================================================
 
 # Options
@@ -17,7 +17,9 @@ set -o pipefail
 
 # Config
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-TOR_PROXY="socks5h://0:9050"
+TOR_HOST="127.0.0.1"
+TOR_PORT=9050
+TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
@@ -27,7 +29,7 @@ LOG_FILE="${SCRIPT_NAME}.log"
 
 # Proxy SOCKS5 for Tor (if active)
 IF_TOR_PROXY=""
-if timeout 2 bash -c '</dev/tcp/0/9050' &>/dev/null; then
+if timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
   IF_TOR_PROXY="$TOR_PROXY"
 fi
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2329
+# shellcheck disable=SC2034
 #
 # Minimalist Experimental AI Pipeline by Jiab77
 #
@@ -11,19 +11,22 @@
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.2.1
+# Version: 0.3.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
 
 # Config
 RULES="Don't cut or break lines."
-RUN_MODE="chat"    # Expected values: simple, multi, chat
+RUN_MODE="chat"    # Expected values: simple, multi, chat, server
+SERVER_MODE="web"   # Expected values: ollama, llamacpp, web
 BACKEND="gemini"    # Expected values: ollama, llamacpp or gemini
 HEARTBEAT_THRESHOLD=15    # Trigger context consolidation to avoid amnesia and keep context extremely light
 CREDENTIALS="${HOME}/.creds"    # Or any other location or filename you prefer.
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-TOR_PROXY="socks5h://0:9050"
+TOR_HOST="127.0.0.1"
+TOR_PORT=9050
+TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 MESSAGES_FILE="messages.json"
 MEMORY_FILE="memory.json"
 PULL_MODELS=false
@@ -35,20 +38,23 @@ SCRIPT_FILE="$(basename "$0")"
 SCRIPT_NAME="${SCRIPT_FILE//.sh}"
 DATA_STORE="${SCRIPT_DIR}/data"
 BASE_TOOLS="${SCRIPT_DIR}/tools.json"
+WEB_SERVER="${SCRIPT_DIR}/web/server.php"
 TEMP_MEMORY_SYSTEM="${DATA_STORE}/tmp_memory_sys.txt"
 TEMP_MEMORY_USER="${DATA_STORE}/tmp_memory_usr.txt"
 TEMP_TOOLS_OUTPUT="${DATA_STORE}/tmp_tools_output.json"
+TEMP_PAYLOAD_ASSISTANT="${DATA_STORE}/tmp_payload_assistant.json"
 TEMP_PAYLOAD_MESSAGES="${DATA_STORE}/tmp_payload_messages.json"
-TEMP_PAYLOAD_TOOLS="${DATA_STORE}/tmp_payload_tools.json"
+# TEMP_PAYLOAD_TOOLS="${DATA_STORE}/tmp_payload_tools.json"
 TOOLS_OUTPUT="${DATA_STORE}/tools-output.txt"
 TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
-TOOLS_CONTENT="[]"
+# TOOLS_CONTENT="[]"
 
 # Soul
 AI_NAME="Jarvis"
 SYSTEM_PROMPT="You are ${AI_NAME}, a friendly AI collaborator. Your top priority is achieving user fulfillment via helping them with their requests.\n"
 SYSTEM_PROMPT+="Your own workspace is in the \`$(basename "$DATA_STORE")\` folder, you can organize it the way you want.\n"
 SYSTEM_PROMPT+="Your own memory file located in your workspace is the \`$(basename "$MEMORY_FILE")\` file, you must load it at every session start.\n"
+SYSTEM_PROMPT+="Your acquired skills are located in your workspace under the \`skills\` folders, you must load them before handling any code related tasks.\n"
 SYSTEM_PROMPT+="You must never modify the following files: \`${SCRIPT_FILE}\`, \`$(basename "$TOOLS_HANDLER")\` and \`$(basename "$BASE_TOOLS")\`.\n"
 SYSTEM_PROMPT+="Modifying these files will simply break the core functionalities of the pipeline."
 
@@ -95,8 +101,8 @@ cleanup_temp_files() {
   rm -f "$TEMP_MEMORY_SYSTEM" \
         "$TEMP_MEMORY_USER" \
         "$TEMP_TOOLS_OUTPUT" \
+        "$TEMP_PAYLOAD_ASSISTANT" \
         "$TEMP_PAYLOAD_MESSAGES" \
-        "$TEMP_PAYLOAD_TOOLS" \
         "$TOOLS_OUTPUT" \
         "${TOOLS_OUTPUT}.clean"
 }
@@ -110,6 +116,7 @@ error() {
   echo -e "\n[!] Error: $*\n" >&2
   exit 255
 }
+# TODO: Make a better help screen
 print_help() {
   cat <<EOF
 
@@ -119,11 +126,26 @@ Usage: $SCRIPT_FILE <prompt> <input-file-1> <input-file-2>
 Flags:
 
   -h | --help       Print this message and exit
+  --backend [type]  Set backend to give type
   --clear           Clear pipeline memory
   --commit          Manually consolidate messages history with permanent memory
   --chat            Start in 'chat' mode
-  --simple          Start in 'simple' mode
   --multi           Start in 'multi' mode
+  --simple          Start in 'simple' mode
+  --server [type]   Start in 'server' mode
+
+Commands:
+
+  help              Print this message and exit
+  backend [type]    Set backend to give type
+  clear             Clear pipeline memory
+  commit            Manually consolidate messages history with permanent memory
+  chat              Start in 'chat' mode
+  multi             Start in 'multi' mode
+  simple            Start in 'simple' mode
+  server [type]     Start in 'server' mode
+
+Note: You can decide to either use flags or commands, both does the same things.
 
 EOF
   exit
@@ -135,9 +157,10 @@ print_usage() {
   exit 1
 }
 serve() {
-  # Backend Selector
-  case $BACKEND in
+  # Server Mode Selector
+  case $SERVER_MODE in
     ollama)
+      log "\n[*] Starting ollama server...\n"
       error "Coming soon! Stay tuned ;-)"
     ;;
     llamacpp)
@@ -148,8 +171,8 @@ serve() {
         --models-max 1 \
         --models-autoload \
         --jinja \
-        -fa on \
         --swa-full \
+        -fa on \
         -c "$MAX_CONTEXT" \
         -t "$MAX_CORES" \
         -tb "$MAX_CORES" \
@@ -159,12 +182,16 @@ serve() {
         -ctv "$QUANTIZATION" \
         --timeout "$MAX_TIMEOUT"
     ;;
-    *) error "Unsupported backend given: $BACKEND" ;;
+    web)
+      log "\n[*] Starting local PHP webserver...\n"
+      "$WEB_SERVER"
+    ;;
+    *) error "Unsupported server mode given: $SERVER_MODE" ;;
   esac
 }
 api_call() {
   local payload="$1"
-  local curl_opts=("-sfSL")
+  local curl_opts=("-sSL")
 
   # Backend Selector
   case $BACKEND in
@@ -463,12 +490,12 @@ send_message() {
       while true; do
         # Write payload variables to temporary files inside the loop to capture any updates
         printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
-        printf "%s" "$TOOLS_CONTENT" > "$TEMP_PAYLOAD_TOOLS"
+        # printf "%s" "$TOOLS_CONTENT" > "$TEMP_PAYLOAD_TOOLS"
 
         JSON_PAYLOAD=$(jq -rc -n \
           --arg model "$GEMINI_API_MODEL" \
           --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-          --rawfile tools "$TEMP_PAYLOAD_TOOLS" \
+          --rawfile tools "$BASE_TOOLS" \
           '{
             model: $model,
             messages: ($msgs | fromjson),
@@ -488,7 +515,7 @@ send_message() {
           # Check for errors before continuing
           if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
             err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
-            error "API Error: $err_msg"
+            error "Unexpected API error.\n\n${err_msg}\n"
           fi
 
           # Store relevant data
@@ -522,7 +549,10 @@ send_message() {
 
           # 1. Grab assistant command message and push to history
           ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
-          ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
+          # Write payload variables to temporary files inside the loop to capture any updates
+          printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
+          # ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
+          ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
 
           # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
           local tool_count=0
@@ -561,6 +591,12 @@ send_message() {
                   --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
                   '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                 )
+                # ALL_MESSAGES=$(jq -rc \
+                #   --arg id "$tool_id" \
+                #   --arg name "$tool_name" \
+                #   --rawfile content "$TEMP_TOOLS_OUTPUT" \
+                #   '. + [{role: "tool", tool_call_id: $id, name: $name, content: ($content | fromjson)}]' <<<"$ALL_MESSAGES"
+                # )
               fi
 
               # Clear temporary tools output file
@@ -575,6 +611,12 @@ send_message() {
                 --arg content "$fallback_content" \
                 '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
               )
+              # ALL_MESSAGES=$(jq -rc \
+              #   --arg id "$tool_id" \
+              #   --arg name "$tool_name" \
+              #   --rawfile content "$TOOLS_OUTPUT" \
+              #   '. + [{role: "tool", tool_call_id: $id, name: $name, content: ($content | fromjson)}]' <<<"$ALL_MESSAGES"
+              # )
 
               # Clear tools output file
               rm -f "$TOOLS_OUTPUT"
@@ -758,12 +800,12 @@ run_pipeline() {
         while true; do
           # Write payload variables to temporary files inside the loop to capture any updates
           printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
-          printf "%s" "$TOOLS_CONTENT" > "$TEMP_PAYLOAD_TOOLS"
+          # printf "%s" "$TOOLS_CONTENT" > "$TEMP_PAYLOAD_TOOLS"
 
           JSON_PAYLOAD=$(jq -rc -n \
             --arg model "$GEMINI_API_MODEL" \
             --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-            --rawfile tools "$TEMP_PAYLOAD_TOOLS" \
+            --rawfile tools "$BASE_TOOLS" \
             '{
               model: $model,
               messages: ($msgs | fromjson),
@@ -784,7 +826,7 @@ run_pipeline() {
             # Check for errors before continuing
             if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
               err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
-              error "API Error: $err_msg"
+              error "Unexpected API error.\n\n${err_msg}\n"
             fi
 
             # Store relevant data
@@ -808,10 +850,10 @@ run_pipeline() {
           fi
 
           # Handling model intermediary response
-          if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-            log "\n\n=== INTERMEDIARY RESPONSE ===\n\n"
-            echo "$RESPONSE" | render_markdown
-          fi
+          # if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
+          #   log "\n\n=== INTERMEDIARY RESPONSE ===\n\n"
+          #   echo "$RESPONSE" | render_markdown
+          # fi
 
           # Handling model requested tools (Multi-Parallel Support)
           if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
@@ -820,7 +862,10 @@ run_pipeline() {
 
             # 1. Grab assistant command message and push to history
             ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
-            ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
+            # Write payload variables to temporary files inside the loop to capture any updates
+            printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
+            # ALL_MESSAGES=$(jq -rc --argjson ast "$ASSISTANT_MSG" '. + [$ast]' <<<"$ALL_MESSAGES")
+            ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
 
             # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
             local tool_count=0
@@ -859,6 +904,12 @@ run_pipeline() {
                     --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
                     '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                   )
+                  # ALL_MESSAGES=$(jq -rc \
+                  #   --arg id "$tool_id" \
+                  #   --arg name "$tool_name" \
+                  #   --rawfile content "$TEMP_TOOLS_OUTPUT" \
+                  #   '. + [{role: "tool", tool_call_id: $id, name: $name, content: ($content | fromjson)}]' <<<"$ALL_MESSAGES"
+                  # )
                 fi
 
                 # Clear temporary tools output file
@@ -873,6 +924,12 @@ run_pipeline() {
                   --arg content "$fallback_content" \
                   '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                 )
+                # ALL_MESSAGES=$(jq -rc \
+                #   --arg id "$tool_id" \
+                #   --arg name "$tool_name" \
+                #   --rawfile content "$TOOLS_OUTPUT" \
+                #   '. + [{role: "tool", tool_call_id: $id, name: $name, content: ($content | fromjson)}]' <<<"$ALL_MESSAGES"
+                # )
 
                 # Clear tools output file
                 rm -f "$TOOLS_OUTPUT"
@@ -986,7 +1043,7 @@ run_pipeline() {
           # Check for errors before continuing
           if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
             err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
-            error "API Error: $err_msg"
+            error "Unexpected API error.\n\n${err_msg}\n"
           fi
 
           # Store relevant data
@@ -1070,26 +1127,39 @@ run_pipeline() {
 while [[ $# -ne 0 ]]; do
   case $1 in
     # Help
-    -h|--help) print_help ;;
+    -h|--help|help) print_help ;;
 
     # Clean
-    --clear) clear_memory ;;
+    --clear|clear) clear_memory ;;
 
     # Consolidate
-    --commit) check_and_trigger_heartbeat "true" ;;
+    --commit|commit) check_and_trigger_heartbeat "true" ;;
+
+    # Backends
+    --backend|backend)
+      shift
+      BACKEND="$1"
+      log "\n[+] Setting backend to '$BACKEND'.\n"
+      shift
+    ;;
 
     # Modes
-    --chat)
+    --chat|chat)
       log "\n[+] Entering to 'chat' mode.\n"
       RUN_MODE="chat" ; shift
     ;;
-    --multi)
+    --multi|multi)
       log "\n[+] Entering to 'multi' mode.\n"
       RUN_MODE="multi" ; shift
     ;;
-    --simple)
+    --simple|simple)
       log "\n[+] Entering to 'simple' mode.\n"
       RUN_MODE="simple" ; shift
+    ;;
+    --server|server)
+      log "\n[+] Entering to 'server' mode.\n"
+      RUN_MODE="server" ; shift
+      SERVER_MODE="$1" ; shift
     ;;
     *)
       # All flags set, leaving the loop
@@ -1105,10 +1175,10 @@ INPUT_FILE2="$3"
 
 # Init
 mkdir -p "$DATA_STORE"
-[[ -r $BASE_TOOLS ]] && TOOLS_CONTENT=$(<"$BASE_TOOLS")
+[[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
 if [[ $USE_TOR == true && $BACKEND == "gemini" ]]; then
   log "\n[*] Checking Tor service...\n"
-  if ! timeout 2 bash -c '</dev/tcp/0/9050' &>/dev/null; then
+  if ! timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
     error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is the Tor service running?"
   fi
 fi
@@ -1146,8 +1216,9 @@ if [[ $PULL_MODELS == true ]]; then
 fi
 
 # Main
-if [[ $RUN_MODE == "chat" ]]; then
-  run_chat
-else
-  run_pipeline
-fi
+case $RUN_MODE in
+  chat) run_chat ;;
+  multi|simple) run_pipeline ;;
+  server) serve ;;
+  *) error "Unsupported run mode given: $RUN_MODE" ;;
+esac

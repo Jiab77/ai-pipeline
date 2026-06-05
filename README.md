@@ -46,38 +46,43 @@ Unlike heavy, dependency-bloated Python frameworks, this implementation is excep
              ┌────────────────────────┼────────────────────────┐
              ▼                        ▼                        ▼
      ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-     │   QUESTION   │         │   COMPARE    │         │  TASK (WIP)  │
+     │   QUESTION   │         │   COMPARE    │         │     TASK     │
      └──────┬───────┘         └──────┬───────┘         └──────┬───────┘
             │                        │                        │
             ▼                        ▼                        ▼
-  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-  │ Chat Completion  │    │ Side-by-Side Diff│    │ Consensual Loop  │
-  │  & Tool-Calling  │    │     Analysis     │    │Architect/Coder/  │
-  │       Loop       │    │                  │    │      Judge       │
-  └──────────────────┘    └──────────────────┘    └──────────────────┘
+  ┌──────────────────┐    ┌───────────────────┐    ┌──────────────────┐
+  │ Chat Completion  │    │ Side-by-Side Diff │    │ Consensual Loop  │
+  │  & Tool-Calling  │    │     Analysis      │    │ Architect/Coder/ │
+  │       Loop       │    │                   │    │      Judge       │
+  └──────────────────┘    └───────────────────┘    └──────────────────┘
 ```
 
 When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies it:
 1. **QUESTION**: Direct questions or explanations about files. For the `gemini` backend, this triggers an automated Tool Execution loop with `run-tools.sh` until the model decides it has gathered enough answers to output a final reply.
 2. **COMPARE**: Automated identification of structural, functional, or logical differences between two context files.
-3. **TASK**: (WIP) Actionable, code-generating edits. Triggers a structured consensus flow of three specialized models: **Architect** (drafts a logic plan) $\rightarrow$ **Coder** (generates pure source code modifications) $\rightarrow$ **Judge** (performs validation / regression checks).
+3. **TASK**: Actionable, code-generating edits. Triggers a structured, multi-agent consensus flow of three specialized models: **Architect** (drafts a logic plan) &rarr; **Coder** (generates pure source code modifications) &rarr; **Judge** (performs validation and regression checks).
 
 ---
 
 ## ✨ Key Capabilities
 
 - 💬 **Interactive Chat Loop**: Features a fully immersive, conversational terminal flow powered by persistent JSON state history.
+- 🎨 **Sleek & Immersive Aesthetic Shell UI**: Integrated in **v0.4.0**. Powered by high-intensity ANSI color flows, contextual thematic icons, gorgeous execution headers (`User`, `Jarvis`, `Thinking`, and `Tool Call` headers), and dynamic ASCII art banners generated via `figlet` with smart text-based fallbacks.
 - 🧠 **Cognitive Heartbeat Pacemaker**: Dynamic background consolidation. Automatically tracks message lengths and executes active context compression into long-term structures once a threshold is met (default: 15 messages), pruning active logs cleanly to maintain high performance with zero amnesia.
+- 💭 **AI Cognitive Reasoning Extraction**: Native parsing and styling of internal LLM critical-thinking blocks (`thinking_tokens`) in **v0.4.0**, displayed in dedicated, beautiful cognitive terminal frames prior to yielding final outputs.
+- 📊 **Real-Time Token Metrics & Operational Cost**: Automatically computes and outputs itemized query usage stats after every run in **v0.4.0** (Prompt, Response, Cached, and Reasoning tokens) along with precise operational API costing in USD.
+- 🔄 **Fully Operational Multi-Agent Task Consensus**: Completed in **v0.4.0** for Gemini. Features robust 3-stage consensus pipeline orchestration (Architect 🏛️ drafts precise plans &rarr; Coder 💻 generates clean compliant codebase modifications &rarr; Judge ⚖️ validates syntax and executes regression QA) with safe code output saved to `<input_file>.new` to guarantee absolute codebase security.
+- 🧹 **Interactive Cache Sweep & Control**: Provides options-driven dynamic memory scrubbing in **v0.4.0** with interactive step-by-step menus to selectively wipe Long-Term profile behaviors (`memory.json`), Chat conversation logs (`messages.json`), or execute a master-clear on both.
 - ⚡ **High-Performance "Single-jq Stream" runner**: Zero-subshell parameter parsing, pure-Bash URL-decoding, and compact single-process JSON token streaming inside `run-tools.sh` v0.2.1, achieving up to 10x process-fork reduction and reducing tool latency significantly.
 - 🖥️ **Unified Local Server Orchestration**: Launches optimized companion services on-the-fly. Boot up a local multi-threaded PHP dashboard to inspect files and documentations, or deploy a surgically configured `llama-server` tuned with dynamic thread mapping, KV-quantization limits, and auto-loading templates.
 - 🌐 **web_fetch (Smart Router) Tool Routing**: Highly optimized Bash domain routing (`web_fetch.sh`) supporting instant API-based scraping (GitHub, GitLab, and Wikipedia summaries), falling back elegantly to raw regex tag-stripping or `htmlq` over Tor socks5h to completely prevent heavy browser runtime bloat.
 - 🔍 **Tor-Based Anonymous Web Search**: Secure, fully-parsed, zero-subshell Onion DuckDuckGo lookup queries executed directly over SOCKS5 proxying to fetch clean search listings using `htmlq`.
 - 🛠️ **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, fetch raw web documents, or execute sandboxed shell commands.
-- 🛡️ **Universal HTTP 400 Payload Immunization**: 100% strict `jq --rawfile` encapsulation of assistant and chronological conversation logs in `pipeline.sh` v0.3.0, paired with robust dual-tier binary and special-character encoding filters (`iconv + jq`) on tool outputs to fully secure external backends against malformed JSON crashes.
+- 🛡️ **Universal HTTP 400 Payload Immunization**: 100% strict `jq --rawfile` encapsulation of assistant and chronological conversation logs in `pipeline.sh` **v0.4.0**, paired with robust dual-tier binary and special-character encoding filters (`iconv + jq`) on tool outputs to fully secure external backends against malformed JSON crashes.
 - ⚡ **Complete JQ E2BIG / ARG_MAX Immunization**: Universal protection against Unix `ARG_MAX` ("Argument list too long") memory limit crashes across all backend execution paths. Implemented via raw file-streaming pipeline variables with `jq --rawfile` streams instead of command-line string interpolation, safeguarding the pipeline on highly constrained mobile/Termux environments.
 - 🧹 **Automatic Signal-Trap & Cleanup**: Zero-leak guarantee. Utilizes native UNIX `trap` signaling on `EXIT`, `INT`, and `TERM` signals to instantly clean up all temporary buffer files (`tmp_*`) and standard execution streams, ensuring absolute workspace hygiene even during abrupt process interruptions.
 - ⏱️ **Zero-Fork Speedups & Micro-Benchmarks**: Verified via our upgraded test harness, which benchmarks pure-Bash parameter stream processing and zero-subshelled operations to achieve a verified **up to 1.72x performance speed-up** compared to standard execution methods.
-- 🧅 **Tor Proxy Support**: Outbound connections to `openrouter.ai` can automatically be routed over a local Tor daemon SOCKS5 proxy (`socks5h://0:9050`) using custom User-Agents for secure, private, and geo-independent requests.
+- 🧅 **Tor Proxy Support**: Outbound connections to `openrouter.ai` can automatically be routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) using custom User-Agents for secure, private, and geo-independent requests.
 - 💾 **Structured JSON Memory**: Keeps a running context of your conversation in `data/messages.json` and persistent user/system profile rules in `data/memory.json`.
 - 🤖 **Local-First & Hybrid Approach**: Switch seamlessly between local inference servers (Ollama, llama.cpp running on GPU/CPU machines) and highly optimized cloud APIs (Google Gemini via OpenRouter).
 - 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, and `bash`.
@@ -88,7 +93,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.3.0)**: Manages arguments (supporting both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter, and manages Memory with complete robust JQ payload immunization. |
+| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.4.0)**: Manages arguments (both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter, and manages memory with complete robust JQ payload immunization. |
 | [`run-tools.sh`](run-tools.sh) | **Execution Runner (v0.2.1)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
 | [`web_fetch.sh`](web_fetch.sh) | **Smart Web Crawler Engine**: Employs domain-specific API endpoints (GitHub, GitLab, Wikipedia) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. |
 | [`tools.json`](tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for Function Calling (matching the OpenRouter model spec). |
@@ -208,6 +213,7 @@ pkg install curl jq glow cargo-binstall
 cargo-binstall htmlq
 ```
 
+> [!TIP]
 > The TOR proxy can be provided by several apps on Android. For what it worth, I'm using __[InviZible Pro](https://play.google.com/store/apps/details?id=pan.alexander.tordnscrypt.gp)__.
 
 ### Authorization (For Gemini/OpenRouter API)
@@ -253,7 +259,7 @@ Launch the fully-remembered chat mode simply:
   # OR:
   ./pipeline.sh simple "Summarize this log file" run-tools.log
   ```
-- `--multi` or `multi`: For complex tasks, triggers heavy consensus routing blocks (WIP).
+- `--multi` or `multi`: For complex tasks, triggers the heavy, three-stage multi-agent consensus routing block (Architect 🏛️ &rarr; Coder 💻 &rarr; Judge ⚖️) to design, code, and inspect proposed file modifications before generating output.
 
 ### C. Clean Memory Store
 Clear cached chat history and profile structures:
@@ -306,7 +312,7 @@ This pipeline is forged under deep iteration and synergistic design:
 ## ⚖️ License & Project Status
 
 * **Project Phase**: Experimental Work-in-Progress (WiP).
-* **Next Roadmap Milestones**: Refactoring Route C (Task Mode) to enable automated local three-stage software-engineer agent loop consensus blocks.
+* **Next Roadmap Milestones**: Generalizing Route C (Task Mode) consensus blocks to support fully-local workflows (Ollama & llama.cpp), and integrating `charmbracelet/gum` for a next-generation visual terminal experience with elegant fallback support for progressive visual CLI inputs and selections.
 * **License**: Released under the terms of the **MIT License**. See [LICENSE](LICENSE) for details.
 
 ---

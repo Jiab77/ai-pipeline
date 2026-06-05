@@ -7,7 +7,7 @@
 #
 # Made by Gemini 3.5 Flash Extended / Improved by Jiab77 & Jarvis
 #
-# Version 0.2.1 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
+# Version 0.2.2 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
@@ -182,7 +182,7 @@ exec_shell_command() {
   fi
 
   # Avoid running the pipeline itself while it is running (Zero-Fork character-class substring matching!)
-  if [[ $command == *"[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]"* ]]; then
+  if [[ $command == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to run the pipeline itself, it's not made for that. Thank you."
   fi
 
@@ -219,7 +219,7 @@ write_file() {
   fi
 
   # Avoid writing to the pipeline itself while it is running (Zero-Fork character-class matching!)
-  if [[ $path == *"[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]"* ]]; then
+  if [[ $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to write to the pipeline itself, it's not made for that. Thank you."
   fi
 
@@ -252,7 +252,7 @@ edit_file() {
   [[ ! -f $path ]] && error "File not found at $path"
 
   # Avoid editing the pipeline itself while it is running (Zero-Fork character-class matching!)
-  if [[ $path == *"[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]"* ]]; then
+  if [[ $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to edit the pipeline itself, it's not made for that. Thank you."
   fi
 
@@ -307,6 +307,11 @@ edit_file() {
 # 7. Apply a unified Git diff template
 apply_diff() {
   local diff_content
+
+  # Avoid patching the pipeline itself while it is running (Zero-Fork character-class substring matching!)
+  if [[ $FUNC_ARGS == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+    error "Dear model, don't try to patch the pipeline itself, it's not made for that. Thank you."
+  fi
 
   if [[ -n $FUNC_ARGS ]]; then
     {

@@ -68,6 +68,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 - 💬 **Interactive Chat Loop**: Features a fully immersive, conversational terminal flow powered by persistent JSON state history.
 - 🎨 **Sleek & Immersive Aesthetic Shell UI**: Integrated in **v0.4.0**. Powered by high-intensity ANSI color flows, contextual thematic icons, gorgeous execution headers (`User`, `Jarvis`, `Thinking`, and `Tool Call` headers), and dynamic ASCII art banners generated via `figlet` with smart text-based fallbacks.
+- 📐 **Pixel-Perfect Auto-Sizing Terminal Headers**: Introduced in **v0.5.0**. Fully adjusts visual borders by intelligently replacing double-column wide character emojis with corresponding visual weights and filtering out zero-width Unicode variation selectors (`️`). Coupled with a `-1` column safe-zone padding to 100% prevent forced wrapping artifacts or line overflow bugs on narrow mobile scopes (e.g. Termux on Android).
 - 🧠 **Cognitive Heartbeat Pacemaker**: Dynamic background consolidation. Automatically tracks message lengths and executes active context compression into long-term structures once a threshold is met (default: 15 messages), pruning active logs cleanly to maintain high performance with zero amnesia.
 - 💭 **AI Cognitive Reasoning Extraction**: Native parsing and styling of internal LLM critical-thinking blocks (`thinking_tokens`) in **v0.4.0**, displayed in dedicated, beautiful cognitive terminal frames prior to yielding final outputs.
 - 📊 **Real-Time Token Metrics & Operational Cost**: Automatically computes and outputs itemized query usage stats after every run in **v0.4.0** (Prompt, Response, Cached, and Reasoning tokens) along with precise operational API costing in USD.
@@ -93,7 +94,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.4.0)**: Manages arguments (both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter, and manages memory with complete robust JQ payload immunization. |
+| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.5.0)**: Manages arguments (both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter, and manages memory with complete robust JQ payload immunization. |
 | [`run-tools.sh`](run-tools.sh) | **Execution Runner (v0.2.1)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
 | [`web_fetch.sh`](web_fetch.sh) | **Smart Web Crawler Engine**: Employs domain-specific API endpoints (GitHub, GitLab, Wikipedia) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. |
 | [`tools.json`](tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for Function Calling (matching the OpenRouter model spec). |

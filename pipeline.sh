@@ -11,7 +11,7 @@
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models can't be used for my needs, fallback on API models with TOR.
 #
-# Version: 0.4.0
+# Version: 0.5.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -152,6 +152,63 @@ ICON_DEBUG="🔍 "
 ICON_USER="👤 "
 ICON_AI="🤖 "
 
+get_term_width() {
+  local cols
+  cols=$(tput cols 2>/dev/null || echo 80)
+  if [[ ! "$cols" =~ ^[0-9]+$ ]] || [ "$cols" -lt 20 ]; then
+    cols=80
+  fi
+  echo "$((cols - 1))"
+}
+
+draw_line() {
+  local char="${1:-─}"
+  local count="${2:-80}"
+  local line
+  printf -v line "%*s" "$count" ""
+  echo -e "${line// /$char}"
+}
+
+draw_header() {
+  local prefix="$1"
+  local char="${2:-─}"
+  local line_clr="$3"
+  local line_char
+  local width ; width=$(get_term_width)
+  local esc ; esc=$(printf '')
+  local clean_prefix ; clean_prefix=$(echo -e "$prefix" | sed "s/${esc}[[0-9;]*m//g")
+  # Measure visual length accurately, substituting emojis/wide chars with 2 chars
+  local visual_prefix ; visual_prefix=$(echo -n "$clean_prefix" | sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g')
+  local prefix_len=${#visual_prefix}
+  local remaining_width=$((width - prefix_len))
+  [[ $remaining_width -lt 5 ]] && remaining_width=5
+  printf -v line_char "%*s" "$remaining_width" ""
+  echo -e "${prefix}${line_clr}${line_char// /$char}${ANSI_RESET}"
+}
+
+draw_symmetric_header() {
+  local title="$1"
+  local title_color="$2"
+  local line_color="$3"
+  local char="${4:-─}"
+  local width ; width=$(get_term_width)
+  local clean_title="[ $title ]"
+  # Measure visual length accurately, substituting emojis/wide chars with 2 chars
+  local visual_title ; visual_title=$(echo -n "$clean_title" | sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g')
+  local title_len=${#visual_title}
+  local total_line_width=$((width - title_len))
+  if [ "$total_line_width" -lt 4 ]; then
+    echo -e "${line_color}──${title_color}[ ${title} ]${line_color}──${ANSI_RESET}"
+    return
+  fi
+  local left_width=$((total_line_width / 2))
+  local right_width=$((total_line_width - left_width))
+  local left_line right_line
+  printf -v left_line "%*s" "$left_width" ""
+  printf -v right_line "%*s" "$right_width" ""
+  echo -e "${line_color}${left_line// /$char}${title_color}[ ${title} ]${line_color}${right_line// /$char}${ANSI_RESET}"
+}
+
 log() {
   echo -e "$*" >&2
 }
@@ -159,8 +216,12 @@ log() {
 log_section() {
   local title="$1"
   local clr="${2:-$CLR_B_CYAN}"
-  log "\n${clr}┌──[ ${ANSI_BOLD}${CLR_B_WHITE}${title}${ANSI_RESET}${clr} ]"           "
-└─────────────────────────────────────────────────────────────${ANSI_RESET}"
+  local width ; width=$(get_term_width)
+  local line_width=$((width - 1))
+  local line_char
+  printf -v line_char "%*s" "$line_width" ""
+  log "\n${clr}┌──[ ${ANSI_BOLD}${CLR_B_WHITE}${title}${ANSI_RESET}${clr} ]${ANSI_RESET}"
+  log "${clr}└${line_char// /─}${ANSI_RESET}"
 }
 
 log_info() {
@@ -202,25 +263,60 @@ to_upper() {
 }
 
 show_user_header() {
-  log "\n${CLR_B_GREEN}${ICON_USER}User ${CLR_B_BLACK}────────────────────────────────────────────────────────────────${ANSI_RESET}\n"
+  log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER}User " "─" "${CLR_B_BLACK}")\n"
 }
 
 show_ai_header() {
-  log "\n${CLR_B_CYAN}${ICON_AI}${AI_NAME} ${CLR_B_BLACK}──────────────────────────────────────────────────────────────${ANSI_RESET}\n"
+  log "\n$(draw_header "${CLR_B_CYAN}${ICON_AI}${AI_NAME} " "─" "${CLR_B_BLACK}")\n"
 }
 
 show_thinking_header() {
-  log "\n${CLR_B_MAGENTA}${ICON_REASONING}Thinking ${CLR_B_BLACK}───────────────────────────────────────────────────────────${ANSI_RESET}\n"
+  log "\n$(draw_header "${CLR_B_MAGENTA}${ICON_REASONING}Thinking " "─" "${CLR_B_BLACK}")\n"
 }
 
 show_tool_header() {
   local count="$1"
   local name="$2"
   local args="$3"
-  log "\n${CLR_B_YELLOW}${ICON_TOOL} Tool Call #${count} ${CLR_B_BLACK}─────────────────────────────────────────────────────────"           "
-   ${CLR_B_YELLOW}Identifier :${ANSI_RESET} ${CLR_B_WHITE}${name}${ANSI_RESET}"           "
-   ${CLR_B_YELLOW}Arguments  :${ANSI_RESET} ${CLR_DIM}${args}${ANSI_RESET}"           "
-${CLR_B_BLACK}────────────────────────────────────────────────────────────────────────${ANSI_RESET}\n"
+  log "\n$(draw_header "${CLR_B_YELLOW}${ICON_TOOL} Tool Call #${count} " "─" "${CLR_B_BLACK}")"
+  log "   ${CLR_B_YELLOW}Identifier :${ANSI_RESET} ${CLR_B_WHITE}${name}${ANSI_RESET}"
+  log "   ${CLR_B_YELLOW}Arguments  :${ANSI_RESET} ${CLR_DIM}${args}${ANSI_RESET}"
+  log "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}\n"
+}
+
+error() {
+  log_error "$*"
+  exit 255
+}
+
+# Extracted from the 'bash-funcs' project
+set_console_title() {
+  local TITLE ; TITLE="$1"
+  echo -ne "\033]0;$TITLE\007"
+}
+
+# Extracted from the 'bash-funcs' project
+get_self_path() {
+  local FILE_PATH
+
+  [[ -n "${BASH_SOURCE[0]}" ]] && FILE_PATH="${BASH_SOURCE[0]}" || FILE_PATH="$0"
+
+  if [[ -n "$FILE_PATH" ]]; then
+    echo -n "$FILE_PATH"
+  else
+    error "Could not get self path."
+  fi
+}
+
+# Extracted from the 'bash-funcs' project
+get_self_version() {
+  local FILE_PATH ; FILE_PATH="$(get_self_path)"
+
+  if [[ -n $(command -v awk 2>/dev/null) ]]; then
+    grep -m1 "# Version" "$FILE_PATH" | awk '{ print $3 }'
+  else
+    grep -m1 "# Version" "$FILE_PATH" | cut -d" " -f3
+  fi
 }
 
 show_banner() {
@@ -237,13 +333,8 @@ show_banner() {
                               
 EOF
   fi
-  echo -e "${CLR_B_CYAN}🔮 Jarvis AI Pipeline | Version 0.4.0 🔮${ANSI_RESET}"
+  echo -e "${CLR_B_CYAN}🔮 Jarvis AI Pipeline | Version $(get_self_version) 🔮${ANSI_RESET}"
   echo -e "${CLR_DIM}Lead: Jiab77 | AI Sorcerer: Jarvis (Gemini)${ANSI_RESET}\n"
-}
-
-error() {
-  log_error "\n$*"
-  exit 255
 }
 
 print_help() {
@@ -275,9 +366,8 @@ ${ANSI_BOLD}${CLR_B_YELLOW}NOTES / USAGE EXAMPLES:${ANSI_RESET}
     ${CLR_B_WHITE}$SCRIPT_FILE "explain these changes" file1.php file2.php${ANSI_RESET}
   • Launch conversational co-programming session:
     ${CLR_B_WHITE}$SCRIPT_FILE --chat${ANSI_RESET}
-
-${CLR_B_BLACK}────────────────────────────────────────────────────────────────────────${ANSI_RESET}
 EOF
+  echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
   exit
 }
 
@@ -363,79 +453,197 @@ api_call() {
   esac
 }
 
-# Helper to call Gemini in Task Mode
+# Helper to call Gemini in Task Mode (v0.4.2 with Role-based Tool and Reasoning Constraints)
 call_gemini_task_agent() {
   local system_inst="$1"
   local user_content="$2"
   local purpose_msg="$3"
+  local tools_option="${4:-all}"      # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
+  local enable_reasoning="${5:-true}" # true or false
 
-  log_info "${purpose_msg} (${CLR_B_YELLOW}${GEMINI_API_MODEL}${ANSI_RESET})..."
+  log_info "${purpose_msg} (${CLR_B_YELLOW}${GEMINI_API_MODEL}${ANSI_RESET}) [Tools: ${CLR_B_GREEN}${tools_option}${ANSI_RESET} | Reasoning: ${CLR_B_GREEN}${enable_reasoning}${ANSI_RESET}]..."
 
-  printf "%s" "$system_inst" > "$TEMP_MEMORY_SYSTEM"
-  printf "%s" "$user_content" > "$TEMP_MEMORY_USER"
+  # Build the dynamic tools payload based on the tools_option constraint
+  local tools_payload=""
+  if [[ "$tools_option" == "all" ]]; then
+    tools_payload=$(cat "$BASE_TOOLS")
+  elif [[ "$tools_option" == "readonly" ]]; then
+    # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
+    tools_payload=$(jq '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
+  fi
 
-  local payload
-  payload=$(jq -rc -n \
-    --arg model "$GEMINI_API_MODEL" \
-    --rawfile sys "$TEMP_MEMORY_SYSTEM" \
-    --rawfile user "$TEMP_MEMORY_USER" \
-    '{
-      model: $model,
-      messages: [
-        {role: "system", content: $sys},
-        {role: "user", content: $user}
-      ],
-      reasoning: {enabled: true}
-    }'
+  # Initialize local MESSAGES array in-memory for this specific agent's execution loop
+  local ALL_MESSAGES
+  ALL_MESSAGES=$(jq -rc -n \
+    --arg sys "$system_inst" \
+    --arg usr "$user_content" \
+    '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
   )
 
-  local raw_res
-  raw_res=$(api_call "$payload")
-  if [[ -z $raw_res || $raw_res == "null" ]]; then
-    error "API returned an empty response."
-  fi
+  local final_content=""
 
-  if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-    local err_msg
-    err_msg=$(jq -rc '.error.message' <<<"$raw_res")
-    error "Unexpected API error.\n\n${err_msg}\n"
-  fi
+  while true; do
+    # Write payload messages to temp file for jq --rawfile
+    printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
-  # Output thinking (reasoning) if present
-  local reasoning
-  reasoning=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$raw_res" 2>/dev/null)
-  if [[ -n $reasoning && $reasoning != "null" ]]; then
-    show_thinking_header
-    echo "$reasoning" | render_markdown >&2
-  fi
+    # Build the OpenAI compliant Gemini Request Payload
+    local payload
+    if [[ -z $tools_payload || $tools_payload == "[]" || "$tools_option" == "none" ]]; then
+      payload=$(jq -rc -n \
+        --arg model "$GEMINI_API_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --argjson enabled_bool "$enable_reasoning" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: $enabled_bool}
+        }'
+      )
+    else
+      payload=$(jq -rc -n \
+        --arg model "$GEMINI_API_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --argjson enabled_bool "$enable_reasoning" \
+        --argjson tools_obj "$tools_payload" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: $enabled_bool},
+          tools: $tools_obj
+        }'
+      )
+    fi
 
-  local content
-  content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
+    local raw_res ; raw_res=$(api_call "$payload")
+    if [[ -z $raw_res || $raw_res == "null" ]]; then
+      error "API returned an empty response."
+    fi
 
-  # Print usage metrics
-  local usage
-  usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
-  if [[ -n $usage && $usage != "null" ]]; then
-    local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage")
-    local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage")
-    local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage")
-    local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage")
-    local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage")
-    local cost ; cost=$(jq -rc .cost <<<"$usage")
+    if jq -e '.error' <<<"$raw_res" &>/dev/null; then
+      local err_msg ; err_msg=$(jq -rc '.error.message' <<<"$raw_res")
+      error "Unexpected API error.\n\n${err_msg}\n"
+    fi
 
-    {
-      echo -e "\n${CLR_B_BLACK}──────────────────────────[ SYSTEM METRICS ]──────────────────────────${ANSI_RESET}"
-      echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-      if [[ -n $cost && "$cost" != "null" ]]; then
-        echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+    # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
+    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$raw_res" 2>/dev/null)
+    if [[ -n $reasoning && $reasoning != "null" ]]; then
+      {
+        show_thinking_header
+        echo "$reasoning" | render_markdown
+      } >&2
+    fi
+
+    # Retrieve components
+    local content ; content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
+    local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
+    local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
+    local usage ; usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
+
+    # Output refusal to STDERR if present
+    if [[ -n $refusal && $refusal != "null" ]]; then
+      {
+        show_ai_header
+        echo "$refusal" | render_markdown
+      } >&2
+    fi
+
+    # Handle requested tool calls (Multi-Parallel Support)
+    if [[ -n $tools && $tools != "null" ]]; then
+      # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
+      if [[ "$tools_option" == "none" ]]; then
+        log_warn "Received unexpected tool calls despite tools disabled!" >&2
+        break
       fi
-      echo -e "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────${ANSI_RESET}"
-    } >&2
-  fi
 
-  echo "$content"
+      # 1. Grab assistant command message and push to local history
+      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res")
+      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
+      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
+
+      # 2. Extract and iterate over all requested parallel tools
+      local tool_count=0
+      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
+        ((tool_count++))
+        show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
+
+        # 3. Check and execute tool handler
+        if [[ -x $TOOLS_HANDLER ]]; then
+          "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
+        else
+          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
+          log_warn "Tool handler not executable." >&2
+        fi
+
+        # 4. Fallback safeguard for empty output
+        if [[ ! -s $TOOLS_OUTPUT ]]; then
+          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
+        fi
+
+        # 5. Format and sanitize output to protect JSON/JQ
+        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
+        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+          rm -f "$TOOLS_OUTPUT"
+
+          # 6. Append tool output to messages array safely
+          local new_msgs
+          if new_msgs=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
+            ALL_MESSAGES="$new_msgs"
+          else
+            log_warn "fromjson failed, using fallback --arg serialization" >&2
+            ALL_MESSAGES=$(jq -rc \
+              --arg id "$tool_id" \
+              --arg name "$tool_name" \
+              --arg content "$(<"$TEMP_TOOLS_OUTPUT")" \
+              '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+            )
+          fi
+          rm -f "$TEMP_TOOLS_OUTPUT"
+        else
+          log_warn "Unable to parse tool output with rawfile, using fallback formatting" >&2
+          local fallback_content
+          fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
+          ALL_MESSAGES=$(jq -rc \
+            --arg id "$tool_id" \
+            --arg name "$tool_name" \
+            --arg content "$fallback_content" \
+            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+          )
+          rm -f "$TOOLS_OUTPUT"
+        fi
+      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
+
+    else
+      # If no tool calls, this is the final response
+      if [[ -n $content && $content != "null" ]]; then
+        final_content="$content"
+      fi
+
+      # Print usage metrics to STDERR to avoid polluting stdout
+      if [[ -n $usage && $usage != "null" ]]; then
+        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage")
+        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage")
+        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage")
+        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage")
+        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage")
+        local cost ; cost=$(jq -rc .cost <<<"$usage")
+
+        {
+          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
+          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+          if [[ -n $cost && "$cost" != "null" ]]; then
+            echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+          fi
+          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
+        } >&2
+      fi
+
+      break
+    fi
+  done
+
+  # Return the final text content of the agent on stdout
+  echo "$final_content"
 }
-
 route_request() {
   local INPUT="$1"
   shopt -s nocasematch
@@ -837,12 +1045,12 @@ send_message() {
           local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
           local cost ; cost=$(jq -rc .cost <<<"$USAGE")
 
-          echo -e "\n${CLR_B_BLACK}──────────────────────────[ SYSTEM METRICS ]──────────────────────────${ANSI_RESET}"
+          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
           if [[ -n $cost && "$cost" != "null" ]]; then
             echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           fi
-          echo -e "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         fi
       done
     ;;
@@ -882,9 +1090,9 @@ run_chat() {
       "/run "*)
         local cmd="${USER_MSG#"/run "}"
         log_step "Locally executing: ${CLR_B_WHITE}${cmd}${ANSI_RESET}"
-        echo -e "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+        echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         eval "$cmd"
-        echo -e "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+        echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
       ;;
       "/clear") clear_memory ;;
       "/commit") check_and_trigger_heartbeat "true" ;;
@@ -1140,12 +1348,12 @@ run_pipeline() {
             local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
             local cost ; cost=$(jq -rc .cost <<<"$USAGE")
 
-            echo -e "\n${CLR_B_BLACK}──────────────────────────[ SYSTEM METRICS ]──────────────────────────${ANSI_RESET}"
+            echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
             echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
             if [[ -n $cost && "$cost" != "null" ]]; then
               echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
             fi
-            echo -e "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+            echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
           fi
         done
       ;;
@@ -1269,13 +1477,12 @@ run_pipeline() {
           local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE")
           local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
           local cost ; cost=$(jq -rc .cost <<<"$USAGE")
-
-          echo -e "\n${CLR_B_BLACK}──────────────────────────[ SYSTEM METRICS ]──────────────────────────${ANSI_RESET}"
+          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
           if [[ -n $cost && "$cost" != "null" ]]; then
             echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           fi
-          echo -e "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         fi
       ;;
       *) error "Unsupported backend given: $BACKEND" ;;
@@ -1308,7 +1515,7 @@ run_pipeline() {
         #   CODER_PROMPT="Follow the user prompt for the given file ($INPUT_FILE). Return only the updated code without anything else. Don't use Markdown.\n\nContext:\n$CONTEXT_DATA"
         #   RETURNED_CODE=$(ollama run "${OLLAMA_FLAGS[@]}" "$OLLAMA_CODER" <<<"$CODER_PROMPT" | sed '1d;$d')
         # fi
-        # if [[ -n $RETURNED_CODE ]]; then
+        # if [[ -n $RETURNED_CODE && ! $RETURNED_CODE == "null" ]]; then
         #   log "\n\n+++ WRITING CHANGES +++\n\n"
         #   echo "$RETURNED_CODE" > "${INPUT_FILE}.new"
         #   log "\n[Finished] Code written in ${INPUT_FILE}.new\n"
@@ -1327,7 +1534,12 @@ run_pipeline() {
           log_info "Launching Multi-Agent Pipeline for Gemini..."
 
           # Step 1: Architect Plan
-          local arch_sys="${SYSTEM_PROMPT}\n\nYou are a professional Software Architect. Your task is to analyze the source file and the user's requested modification to create a precise development plan.\n"
+          local arch_sys="${SYSTEM_PROMPT}\n\nYou are a professional Software Architect. Your task is to analyze the source file and the user's requested modification to create a precise, step-by-step development plan.\n\n"
+          arch_sys+="🚨 CRITICAL ARCHITECT BOUNDARIES:\n"
+          arch_sys+="1. You are the Architect, NOT the Coder or Builder. Your sole output must be a text-based Architectural Action Plan. NEVER write or output raw updated code blocks.\n"
+          arch_sys+="2. ABSOLUTELY FORBIDDEN FROM FS WRITING: Do NOT use tools that modify or create files (such as 'write_file', 'edit_file', or 'apply_diff'). You must never execute these modification tools yourself.\n"
+          arch_sys+="3. READ-ONLY TOOLS ALLOWED: If you need more context or information, you are fully authorized to use read-only tools (like 'read_file', 'grep_search', 'file_glob_search', 'web_search', or 'web_fetch').\n"
+          arch_sys+="4. DELEGATION RULE: Even if the user prompt directly asks to 'update', 'modify', 'write' or 'apply' changes, remember that this is a multi-agent system. You must NOT perform the edit. Instead, design the step-by-step specifications that the Coder agent will reliably execute in the next phase.\n\n"
           arch_sys+="In your response, outline what code needs to be modified, what needs to be added or cleaned, potential edge cases, syntax concerns, and architectural best practices.\n"
           arch_sys+="Keep your action plan concise, clear, and perfectly targeted."
 
@@ -1342,61 +1554,64 @@ run_pipeline() {
             arch_user+="No file was provided as context.\n"
           fi
 
-          local ARCHITECT_PLAN
-          ARCHITECT_PLAN=$(call_gemini_task_agent "$arch_sys" "$arch_user" "Architecting the changes")
+          local ARCHITECT_PLAN ; ARCHITECT_PLAN=$(call_gemini_task_agent "$arch_sys" "$arch_user" "Architecting the changes" "readonly" "true")
 
-          log ; show_ai_header
-          echo "### Architectural Action Plan:"
-          echo "$ARCHITECT_PLAN" | render_markdown
-          log
+          # Act only if plan is generated
+          if [[ -n $ARCHITECT_PLAN && ! $ARCHITECT_PLAN == "null" ]]; then
+            log ; show_ai_header
+            echo "### Architectural Action Plan:"
+            echo "$ARCHITECT_PLAN" | render_markdown
+            log
 
-          # Step 2: Coder Implementation
-          local coder_sys="${SYSTEM_PROMPT}\n\nYou are an elite developer. Your task is to apply the provided architectural plan to the given file content.\n"
-          coder_sys+="CRITICAL INSTRUCTION:\n"
-          coder_sys+="1. You must return ONLY and EXCLUSIVELY the complete, raw content of the updated file.\n"
-          coder_sys+="2. Do NOT wrap your output in markdown code blocks (such as \`\`\`php ... \`\`\`).\n"
-          coder_sys+="3. Do NOT include any explanations, greetings, warnings, or descriptions.\n"
-          coder_sys+="4. Output exclusively raw, valid source code ready to be saved directly to the file."
+            # Step 2: Coder Implementation
+            local coder_sys="${SYSTEM_PROMPT}\n\nYou are an elite developer. Your task is to apply the provided architectural plan to the given file content.\n\n"
+            coder_sys+="🚨 CRITICAL CODER BOUNDARIES:\n"
+            coder_sys+="1. You must return ONLY and EXCLUSIVELY the complete, raw content of the updated file.\n"
+            coder_sys+="2. Do NOT use tools that write or modify files (such as 'write_file', 'edit_file', or 'apply_diff'). The parent pipeline script handles saving your raw response to the final file automatically.\n"
+            coder_sys+="3. Do NOT wrap your output in markdown code blocks (such as \`\`\`php ... \`\`\`).\n"
+            coder_sys+="4. Do NOT include any explanations, greetings, warnings, or descriptions. Just output raw, updated source code."
 
-          local coder_user=""
-          if [[ -n $INPUT_FILE && -r $INPUT_FILE ]]; then
-            coder_user+="Filename: $(basename "$INPUT_FILE")\n"
-            coder_user+="Original file content:\n"
-            coder_user+="--- BEGIN FILE ---\n"
-            coder_user+="$(<"$INPUT_FILE")\n"
-            coder_user+="--- END FILE ---\n\n"
-          fi
-          coder_user+="Architect Plan:\n"
-          coder_user+="${ARCHITECT_PLAN}"
+            local coder_user=""
+            if [[ -n $INPUT_FILE && -r $INPUT_FILE ]]; then
+              coder_user+="Filename: $(basename "$INPUT_FILE")\n"
+              coder_user+="Original file content:\n"
+              coder_user+="--- BEGIN FILE ---\n"
+              coder_user+="$(<"$INPUT_FILE")\n"
+              coder_user+="--- END FILE ---\n\n"
+            fi
+            coder_user+="Architect Plan:\n"
+            coder_user+="${ARCHITECT_PLAN}"
 
-          RETURNED_CODE=$(call_gemini_task_agent "$coder_sys" "$coder_user" "Implementing changes")
+            RETURNED_CODE=$(call_gemini_task_agent "$coder_sys" "$coder_user" "Implementing changes" "none" "true")
 
-          # Step 3: Judge Verification
-          local judge_sys="${SYSTEM_PROMPT}\n\nYou are an expert Quality Assurance and Code Inspector.\n"
-          judge_sys+="Your task is to compare the original file content and the updated file content to ensure syntax correctness, absence of regressions, security compliance, and proper implementation of the requested edits.\n"
-          judge_sys+="Start your response with a line starting with '[PASS]' if everything is correct, or '[FAIL]' with clear, detailed explanations of any regression or issue discovered."
+            # Step 3: Judge Verification
+            local judge_sys="${SYSTEM_PROMPT}\n\nYou are an expert Quality Assurance and Code Inspector.\n"
+            judge_sys+="Your task is to compare the original file content and the updated file content to ensure syntax correctness, absence of regressions, security compliance, and proper implementation of the requested edits.\n"
+            judge_sys+="Start your response with a line starting with '[PASS]' if everything is correct, or '[FAIL]' with clear, detailed explanations of any regression or issue discovered."
 
-          local judge_user=""
-          if [[ -n $INPUT_FILE && -r $INPUT_FILE ]]; then
-            judge_user+="Filename: $(basename "$INPUT_FILE")\n"
-            judge_user+="Original file content:\n"
+            local judge_user=""
+            if [[ -n $INPUT_FILE && -r $INPUT_FILE ]]; then
+              judge_user+="Filename: $(basename "$INPUT_FILE")\n"
+              judge_user+="Original file content:\n"
+              judge_user+="--- BEGIN FILE ---\n"
+              judge_user+="$(<"$INPUT_FILE")\n"
+              judge_user+="--- END FILE ---\n\n"
+            fi
+            judge_user+="Updated file content (to be inspected):\n"
             judge_user+="--- BEGIN FILE ---\n"
-            judge_user+="$(<"$INPUT_FILE")\n"
+            judge_user+="${RETURNED_CODE}\n"
             judge_user+="--- END FILE ---\n\n"
+            judge_user+="User request: ${USER_PROMPT}"
+
+            local CODER_JUDGMENT ; CODER_JUDGMENT=$(call_gemini_task_agent "$judge_sys" "$judge_user" "Evaluating changes" "none" "true")
+
+            log ; show_ai_header
+            echo "### QA Inspection & Verdict:"
+            echo "$CODER_JUDGMENT" | render_markdown
+            log
+          else
+            error "No plan generated by the Architect, nothing has been changed."
           fi
-          judge_user+="Updated file content (to be inspected):\n"
-          judge_user+="--- BEGIN FILE ---\n"
-          judge_user+="${RETURNED_CODE}\n"
-          judge_user+="--- END FILE ---\n\n"
-          judge_user+="User request: ${USER_PROMPT}"
-
-          local CODER_JUDGMENT
-          CODER_JUDGMENT=$(call_gemini_task_agent "$judge_sys" "$judge_user" "Evaluating changes")
-
-          log ; show_ai_header
-          echo "### QA Inspection & Verdict:"
-          echo "$CODER_JUDGMENT" | render_markdown
-          log
 
         else
           log_info "Launching Simple Single-Agent Mode for Gemini..."
@@ -1419,14 +1634,30 @@ run_pipeline() {
             simple_user+="No file was provided as context. Create/modify the code as requested. Here is the context metadata:\n${CONTEXT_DATA}"
           fi
 
-          RETURNED_CODE=$(call_gemini_task_agent "$simple_sys" "$simple_user" "Coding modifications")
+          RETURNED_CODE=$(call_gemini_task_agent "$simple_sys" "$simple_user" "Coding modifications" "all" "true")
         fi
 
         # Securely write/output results
-        if [[ -n $RETURNED_CODE ]]; then
+        if [[ -n $RETURNED_CODE && ! $RETURNED_CODE == "null" ]]; then
           if [[ -n $INPUT_FILE && -r $INPUT_FILE ]]; then
-            echo "$RETURNED_CODE" > "${INPUT_FILE}.new"
-            log_success "Modified code successfully generated and saved to: ${CLR_B_GREEN}${INPUT_FILE}.new${ANSI_RESET}"
+            local new_file
+            if [[ "$INPUT_FILE" == *"/"* ]]; then
+              local dir="${INPUT_FILE%/*}"
+              local base="${INPUT_FILE##*/}"
+              if [[ "$base" == *.* ]]; then
+                new_file="${dir}/${base%.*}.new.${base##*.}"
+              else
+                new_file="${INPUT_FILE}.new"
+              fi
+            else
+              if [[ "$INPUT_FILE" == *.* ]]; then
+                new_file="${INPUT_FILE%.*}.new.${INPUT_FILE##*.}"
+              else
+                new_file="${INPUT_FILE}.new"
+              fi
+            fi
+            echo "$RETURNED_CODE" > "$new_file"
+            log_success "Modified code successfully generated and saved to: ${CLR_B_GREEN}${new_file}${ANSI_RESET}"
           else
             log_info "No input file provided. Displaying generated code below:"
             show_ai_header

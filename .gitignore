@@ -1,6 +1,6 @@
 # Files that must never be published
 data/
-pipeline-test.sh
+test.sh
 run-tools-test.sh
 run-tools.log
 web_fetch.log

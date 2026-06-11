@@ -263,7 +263,7 @@
           "proxy": {
             "type": "string",
             "description": "Optional proxy URL (e.g. 'socks5h://127.0.0.1:9050' for Tor). If omitted, falls back to the system environment defaults.",
-            "default": "socks5h://0:9050"
+            "default": "socks5h://127.0.0.1:9050"
           }
         },
         "required": [

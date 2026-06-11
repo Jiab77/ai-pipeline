@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034
+# shellcheck disable=SC2034,SC2001
 #
 # Minimalist Experimental AI Pipeline by Jiab77
 #
@@ -9,18 +9,23 @@
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
 # Note: This is a WiP and will be improved during next iterations.
-# Status: Local models can't be used for my needs, fallback on API models with TOR.
+# Status: Local models tested can't be used for my needs, fallback on API models with TOR.
+# TODO: Implement ZDR for external providers
+#  - https://vercel.com/docs/ai-gateway/capabilities/disallow-prompt-training
+#  - https://vercel.com/docs/ai-gateway/capabilities/zdr
+#  - https://openrouter.ai/docs/guides/features/zdr
 #
-# Version: 0.5.0
+# Version: 0.6.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
 
 # Config
-RULES="Don't cut or break lines."
+# RULES="Don't cut or break lines."
 RUN_MODE="chat"    # Expected values: simple, multi, chat, server
 SERVER_MODE="web"   # Expected values: ollama, llamacpp, web
 BACKEND="gemini"    # Expected values: ollama, llamacpp or gemini
+PROVIDER="vercel"   # Expected values: openrouter, vercel
 HEARTBEAT_THRESHOLD=15    # Trigger context consolidation to avoid amnesia and keep context extremely light
 CREDENTIALS="${HOME}/.creds"    # Or any other location or filename you prefer.
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"    # You can also set any other user-agents.
@@ -31,7 +36,7 @@ MESSAGES_FILE="messages.json"
 MEMORY_FILE="memory.json"
 PULL_MODELS=false
 DEBUG=true
-USE_TOR=true
+USE_TOR=true    # Set to 'false' only for debugging
 
 # Internals
 SCRIPT_DIR="$(dirname "$0")"
@@ -40,12 +45,12 @@ SCRIPT_NAME="${SCRIPT_FILE//.sh}"
 DATA_STORE="${SCRIPT_DIR}/data"
 BASE_TOOLS="${SCRIPT_DIR}/tools.json"
 WEB_SERVER="${SCRIPT_DIR}/web/server.php"
-TEMP_MEMORY_SYSTEM="${DATA_STORE}/tmp_memory_sys.txt"
-TEMP_MEMORY_USER="${DATA_STORE}/tmp_memory_usr.txt"
-TEMP_TOOLS_OUTPUT="${DATA_STORE}/tmp_tools_output.json"
-TEMP_PAYLOAD_ASSISTANT="${DATA_STORE}/tmp_payload_assistant.json"
-TEMP_PAYLOAD_MESSAGES="${DATA_STORE}/tmp_payload_messages.json"
-TOOLS_OUTPUT="${DATA_STORE}/tools-output.txt"
+TEMP_MEMORY_SYSTEM="/tmp/memory_sys.txt"
+TEMP_MEMORY_USER="/tmp/memory_usr.txt"
+TEMP_TOOLS_OUTPUT="/tmp/tools_output.json"
+TEMP_PAYLOAD_ASSISTANT="/tmp/payload_assistant.json"
+TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
+TOOLS_OUTPUT="/tmp/tools_output.txt"
 TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 
@@ -60,37 +65,47 @@ SYSTEM_PROMPT+="Modifying these files will simply break the core functionalities
 
 # Local Models Config
 QUANTIZATION="q8_0"   # Suitable for small laptops and mobile devices | Case sensitive, keep it in lowercase
-MAX_CONTEXT=8192
-MAX_BATCH_SIZE=256
-MAX_CORES=$(($(nproc)/2))   # FIXME: May not work well on mobiles devices
+MIN_CONTEXT=256       # Used for fetching models with 'llama.cpp'
+MAX_CONTEXT=16384     # Increase the value if you have a bigger hardware that can handle more
+MAX_BATCH_SIZE=1024   # Reduce this value back to 256 in case of performance issues
+MAX_LIFETIME="5s"     # Duration before unloading the model from memory
 MAX_TIMEOUT=1200
 
-# OpenRouter Config
-OPENROUTER_REFERER="https://github.com/jiab77/ai-pipeline"
-OPENROUTER_TITLE="Minimalist Experimental AI Pipeline"
-OPENROUTER_CATEGORIES="cli-agent,cloud-agent"
+# Attribution Config
+ATTRIBUTION_REFERER="https://github.com/jiab77/ai-pipeline"
+ATTRIBUTION_TITLE="Minimalist Experimental AI Pipeline"
+ATTRIBUTION_CATEGORIES="cli-agent,cloud-agent"
 
 # Gemini 3.5 Flash
-GEMINI_API_URL="https://openrouter.ai/api/v1/chat/completions"
-GEMINI_API_MODEL="google/gemini-3.5-flash"
-GEMINI_API_KEY=""    # /!\ NEVER PUBLISH IT /!\
-
-# Models - Ollama
-OLLAMA_API_URL="http://localhost:11434/api/generate"
-OLLAMA_ROUTER="hf.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
-OLLAMA_ARCHITECT="hf.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
-OLLAMA_CODER="hf.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
-OLLAMA_JUDGE="hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
-OLLAMA_CACHE="/mnt/models/ollama"
+# TODO: Use a JSON file for configuring external providers settings
+# Note: Still acceptable for now but might be a nightmare later if we handle more external providers
+if [[ $PROVIDER == "vercel" ]]; then
+  PROVIDER_API_URL="https://ai-gateway.vercel.sh/v1/chat/completions"
+else
+  PROVIDER_API_URL="https://openrouter.ai/api/v1/chat/completions"
+fi
+PROVIDER_API_MODEL="google/gemini-3.5-flash"
+PROVIDER_API_KEY=""    # /!\ NEVER PUBLISH IT /!\
 
 # Models - llama.cpp
 LLAMACPP_API_SRV="http://localhost:8080"
 LLAMACPP_API_URL="${LLAMACPP_API_SRV}/v1/chat/completions"
+LLAMACPP_CHAT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
 LLAMACPP_ROUTER="LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
 LLAMACPP_ARCHITECT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
-LLAMACPP_CODER="Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
-LLAMACPP_JUDGE="Qwen/Qwen2.5-Coder-3B-Instruct-GGUF"
+LLAMACPP_CODER="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
+LLAMACPP_JUDGE="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
 LLAMACPP_CACHE="/mnt/models/llama.cpp"
+
+# Models - Ollama
+OLLAMA_API_SRV="http://localhost:11434"
+OLLAMA_API_URL="${OLLAMA_API_SRV}/v1/chat/completions"
+OLLAMA_CHAT="hf.co/${LLAMACPP_CHAT}"
+OLLAMA_ROUTER="hf.co/${LLAMACPP_ROUTER}"
+OLLAMA_ARCHITECT="hf.co/${LLAMACPP_ARCHITECT}"
+OLLAMA_CODER="hf.co/${LLAMACPP_CODER}"
+OLLAMA_JUDGE="hf.co/${LLAMACPP_JUDGE}"
+OLLAMA_CACHE="/mnt/models/ollama"
 
 # Internals
 OLLAMA_FLAGS="--nowordwrap --hidethinking"
@@ -108,7 +123,7 @@ cleanup_temp_files() {
 }
 trap cleanup_temp_files EXIT INT TERM
 
-# Functions & Visual Styling
+# Visual Styling
 # Colors & Styles (ANSI Escape Codes)
 ANSI_RESET="[0m"
 ANSI_BOLD="[1m"
@@ -138,20 +153,21 @@ CLR_WHITE="[37m"
 
 # Emojis/Icons
 ICON_INFO="ℹ️ "
-ICON_SUCCESS="✅ "
+ICON_SUCCESS="✅"
 ICON_WARNING="⚠️ "
-ICON_ERROR="❌ "
+ICON_ERROR="❌"
 ICON_TOOL="⚙️ "
-ICON_BRAIN="🧠 "
-ICON_CODER="💻 "
+ICON_BRAIN="🧠"
+ICON_CODER="💻"
 ICON_JUDGE="⚖️ "
 ICON_ARCHITECT="🏛️ "
-ICON_REASONING="💭 "
-ICON_INTENT="🔍 "
-ICON_DEBUG="🔍 "
+ICON_REASONING="💭"
+ICON_INTENT="🔍"
+ICON_DEBUG="🔍"
 ICON_USER="👤 "
-ICON_AI="🤖 "
+ICON_AI="🤖"
 
+# Functions
 get_term_width() {
   local cols
   cols=$(tput cols 2>/dev/null || echo 80)
@@ -176,9 +192,10 @@ draw_header() {
   local line_char
   local width ; width=$(get_term_width)
   local esc ; esc=$(printf '')
+  # TODO: Check if herestring can be used to replace 'echo -e'
   local clean_prefix ; clean_prefix=$(echo -e "$prefix" | sed "s/${esc}[[0-9;]*m//g")
   # Measure visual length accurately, substituting emojis/wide chars with 2 chars
-  local visual_prefix ; visual_prefix=$(echo -n "$clean_prefix" | sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g')
+  local visual_prefix ; visual_prefix=$(sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g' <<<"$clean_prefix")
   local prefix_len=${#visual_prefix}
   local remaining_width=$((width - prefix_len))
   [[ $remaining_width -lt 5 ]] && remaining_width=5
@@ -194,7 +211,7 @@ draw_symmetric_header() {
   local width ; width=$(get_term_width)
   local clean_title="[ $title ]"
   # Measure visual length accurately, substituting emojis/wide chars with 2 chars
-  local visual_title ; visual_title=$(echo -n "$clean_title" | sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g')
+  local visual_title ; visual_title=$(sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g' <<<"$clean_title")
   local title_len=${#visual_title}
   local total_line_width=$((width - title_len))
   if [ "$total_line_width" -lt 4 ]; then
@@ -225,32 +242,32 @@ log_section() {
 }
 
 log_info() {
-  log "  ${CLR_B_CYAN}${ICON_INFO}${ANSI_RESET}  ${CLR_B_WHITE}$*${ANSI_RESET}"
+  log "${CLR_B_CYAN}${ICON_INFO}${ANSI_RESET} ${CLR_B_WHITE}$*${ANSI_RESET}"
 }
 
 log_success() {
-  log "  ${CLR_B_GREEN}${ICON_SUCCESS}${ANSI_RESET}  ${CLR_B_GREEN}$*${ANSI_RESET}"
+  log "${CLR_B_GREEN}${ICON_SUCCESS}${ANSI_RESET} ${CLR_B_GREEN}$*${ANSI_RESET}"
 }
 
 log_warn() {
-  log "  ${CLR_B_YELLOW}${ICON_WARNING}${ANSI_RESET}  ${CLR_B_YELLOW}$*${ANSI_RESET}"
+  log "${CLR_B_YELLOW}${ICON_WARNING}${ANSI_RESET} ${CLR_B_YELLOW}$*${ANSI_RESET}"
 }
 
 log_error() {
-  log "  ${CLR_B_RED}${ICON_ERROR}${ANSI_RESET}  ${CLR_B_RED}Error: $*${ANSI_RESET}"
+  log "${CLR_B_RED}${ICON_ERROR}${ANSI_RESET} ${CLR_B_RED}Error: $*${ANSI_RESET}"
 }
 
 log_brain() {
-  log "  ${CLR_B_MAGENTA}${ICON_BRAIN}${ANSI_RESET}  ${CLR_B_MAGENTA}$*${ANSI_RESET}"
+  log "${CLR_B_MAGENTA}${ICON_BRAIN}${ANSI_RESET} ${CLR_B_MAGENTA}$*${ANSI_RESET}"
 }
 
 log_step() {
-  log "  ${CLR_B_MAGENTA}➜${ANSI_RESET} ${ANSI_BOLD}${CLR_B_WHITE}$*${ANSI_RESET}"
+  log "${CLR_B_MAGENTA}➜${ANSI_RESET} ${ANSI_BOLD}${CLR_B_WHITE}$*${ANSI_RESET}"
 }
 
 log_debug() {
   if [[ -e $HOME/.debug || "$DEBUG" == "true" ]]; then
-    log "\n${CLR_B_BLACK}${ICON_DEBUG}[DEBUG] $*${ANSI_RESET}"
+    log "\n${CLR_B_BLACK}${ICON_DEBUG} [DEBUG] $*${ANSI_RESET}"
   fi
 }
 
@@ -263,15 +280,15 @@ to_upper() {
 }
 
 show_user_header() {
-  log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER}User " "─" "${CLR_B_BLACK}")\n"
+  log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER} User " "─" "${CLR_B_BLACK}")\n"
 }
 
 show_ai_header() {
-  log "\n$(draw_header "${CLR_B_CYAN}${ICON_AI}${AI_NAME} " "─" "${CLR_B_BLACK}")\n"
+  log "\n$(draw_header "${CLR_B_CYAN}${ICON_AI} ${AI_NAME} " "─" "${CLR_B_BLACK}")\n"
 }
 
 show_thinking_header() {
-  log "\n$(draw_header "${CLR_B_MAGENTA}${ICON_REASONING}Thinking " "─" "${CLR_B_BLACK}")\n"
+  log "\n$(draw_header "${CLR_B_MAGENTA}${ICON_REASONING} Thinking " "─" "${CLR_B_BLACK}")\n"
 }
 
 show_tool_header() {
@@ -289,17 +306,35 @@ error() {
   exit 255
 }
 
+get_chat_model() {
+  local chat_model
+  local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
+  case $BACKEND in
+    ollama) chat_model="${OLLAMA_CHAT}:${quant_upper}" ;;
+    llamacpp) chat_model="${LLAMACPP_CHAT}:${quant_upper}" ;;
+    gemini) chat_model="$PROVIDER_API_MODEL" ;;
+  esac
+  echo -n "$chat_model"
+}
+
+# Extracted from the 'bash-funcs' project
+is_termux() {
+  [[ $(printenv | grep -ci "termux") -ne 0 ]] && return 0
+  return 1
+}
+
 # Extracted from the 'bash-funcs' project
 set_console_title() {
   local TITLE ; TITLE="$1"
-  echo -ne "\033]0;$TITLE\007"
+  echo -ne "\033]0;$TITLE\007" >&2
 }
 
 # Extracted from the 'bash-funcs' project
 get_self_path() {
   local FILE_PATH
 
-  [[ -n "${BASH_SOURCE[0]}" ]] && FILE_PATH="${BASH_SOURCE[0]}" || FILE_PATH="$0"
+  [[ -n "${BASH_SOURCE[0]}" ]] && FILE_PATH="${BASH_SOURCE[0]}"
+  [[ -z $FILE_PATH ]] && FILE_PATH="$0"
 
   if [[ -n "$FILE_PATH" ]]; then
     echo -n "$FILE_PATH"
@@ -316,6 +351,50 @@ get_self_version() {
     grep -m1 "# Version" "$FILE_PATH" | awk '{ print $3 }'
   else
     grep -m1 "# Version" "$FILE_PATH" | cut -d" " -f3
+  fi
+}
+
+create_local_data_store() {
+  mkdir -p "$DATA_STORE"
+}
+
+create_local_model_cache() {
+  if [[ $(is_termux) ]]; then
+    OLLAMA_CACHE="${HOME}/models/ollama"
+    LLAMACPP_CACHE="${HOME}/models/llama.cpp"
+  fi
+  mkdir -p "$OLLAMA_CACHE"
+  mkdir -p "$LLAMACPP_CACHE"
+}
+
+set_temp_files() {
+  if [[ $(is_termux) ]]; then
+    TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
+    TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
+    TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
+    TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
+    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
+    TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
+  fi
+}
+
+set_cpu_cores() {
+  local cores
+  if [[ -n $(command -v nproc 2>/dev/null) ]]; then
+    cores=$(nproc)
+  elif [[ -n $(command -v sysctl 2>/dev/null) ]]; then
+    cores=$(systctl -n hw.ncpu)
+  else
+    [[ -r /proc/cpuinfo ]] && cores=$(grep -c processor </proc/cpuinfo)
+  fi
+  if [[ -n $cores ]]; then
+    if [[ $(is_termux) ]]; then
+      MAX_CORES=$(( cores / 2 ))   # This should prevent burning mobile phones
+    else
+      MAX_CORES=$(( cores > 1 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
+    fi
+  else
+    error "Unable to detect CPU cores."
   fi
 }
 
@@ -346,6 +425,7 @@ ${ANSI_BOLD}${CLR_B_CYAN}USAGE:${ANSI_RESET}
 ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}-h, --help${ANSI_RESET}        Show this help screen and exit
   ${CLR_B_GREEN}--backend [type]${ANSI_RESET}  Set AI backend (ollama, llamacpp, gemini)
+  ${CLR_B_GREEN}--provider [type]${ANSI_RESET} Set AI external provider (openrouter, vercel)
   ${CLR_B_GREEN}--chat${ANSI_RESET}            Start the interactive conversational chat mode
   ${CLR_B_GREEN}--multi${ANSI_RESET}           Start complex multi-agent analysis pipeline
   ${CLR_B_GREEN}--simple${ANSI_RESET}          Start lightweight single-agent inference pipeline
@@ -374,21 +454,29 @@ EOF
 print_usage() {
   echo -e "\n${CLR_B_RED}${ICON_ERROR} Error: No arguments provided.${ANSI_RESET}"
   echo -e "${CLR_B_WHITE}Usage:${ANSI_RESET} $SCRIPT_FILE <prompt> <input-file-1> <input-file-2>"
-  echo -e "  • For conversational chat:  ${CLR_B_GREEN}--chat${ANSI_RESET}"
-  echo -e "  • To clear cached memory:   ${CLR_B_GREEN}--clear${ANSI_RESET}"
-  echo -e "  • To consolidate context:   ${CLR_B_GREEN}--commit${ANSI_RESET}\n"
+  echo -e "  • For conversational chat:  ${CLR_B_GREEN}chat${ANSI_RESET}"
+  echo -e "  • To clear cached memory:   ${CLR_B_GREEN}clear${ANSI_RESET}"
+  echo -e "  • To consolidate context:   ${CLR_B_GREEN}commit${ANSI_RESET}\n"
   exit 1
 }
 
 serve() {
+  set_console_title "${SCRIPT_FILE}: Server Mode."
   case $SERVER_MODE in
     ollama)
-      log_info "Initiating Ollama daemon process..."
-      error "Coming soon! Stay tuned ;-)"
+      log_info "Starting Ollama Server..."
+      log_info "Settings automatically customized & optimized for resource-light devices.\n"
+      OLLAMA_MODELS="$OLLAMA_CACHE" \
+      OLLAMA_NUM_PARALLEL=1 \
+      OLLAMA_KEEP_ALIVE="$MAX_LIFETIME" \
+      OLLAMA_FLASH_ATTENTION=true \
+      OLLAMA_KV_CACHE_TYPE="$QUANTIZATION" \
+      OLLAMA_CONTEXT_LENGTH="$MAX_CONTEXT" \
+      ollama serve
     ;;
     llamacpp)
-      log_info "Starting High-Performance llama-cli model services..."
-      log_info "Settings automatically customized & optimized for resource-light devices."
+      log_info "Starting High-Performance llama.cpp Server..."
+      log_info "Settings automatically customized & optimized for resource-light devices.\n"
       LLAMA_CACHE="$LLAMACPP_CACHE" \
       llama-server \
         --models-max 1 \
@@ -406,7 +494,7 @@ serve() {
         --timeout "$MAX_TIMEOUT"
     ;;
     web)
-      log_info "Starting local PHP Gateway web interface..."
+      log_info "Starting local PHP Server...\n"
       "$WEB_SERVER"
     ;;
     *) error "Unsupported server mode given: $SERVER_MODE" ;;
@@ -424,7 +512,7 @@ api_call() {
       curl "${curl_opts[@]}" "${OLLAMA_API_URL}" \
            -H "Content-Type: application/json" \
            -d @- <<< "$payload" | \
-           jq -rc '.response'
+           jq -rc '.'
     ;;
 
     # Local Backend: llama.cpp
@@ -433,40 +521,81 @@ api_call() {
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer no-key" \
            -d @- <<< "$payload" | \
-           jq -rc '.choices[0].message.content'
+           jq -rc '.'
     ;;
 
     # External Backend: OpenRouter / Gemini
     gemini)
       [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
-      curl "${curl_opts[@]}" "${GEMINI_API_URL}" \
-           -H "Content-Type: application/json" \
-           -H "Authorization: Bearer ${GEMINI_API_KEY}" \
-           -H "HTTP-Referer: ${OPENROUTER_REFERER}" \
-           -H "X-OpenRouter-Title: ${OPENROUTER_TITLE}" \
-           -H "X-OpenRouter-Categories: ${OPENROUTER_CATEGORIES}" \
-           -A "$USER_AGENT" \
-           -d @- <<< "$payload" | \
-           jq -rc .
+      case $PROVIDER in
+        vercel)
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+               -H "http-referer: ${ATTRIBUTION_REFERER}" \
+               -H "x-title: ${ATTRIBUTION_TITLE}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | \
+               jq -rc .
+        ;;
+        openrouter)
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+               -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
+               -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
+               -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | \
+               jq -rc .
+        ;;
+      esac
     ;;
     *) error "Unsupported backend given: $BACKEND" ;;
   esac
 }
 
-# Helper to call Gemini in Task Mode (v0.4.2 with Role-based Tool and Reasoning Constraints)
-call_gemini_task_agent() {
-  local system_inst="$1"
-  local user_content="$2"
-  local purpose_msg="$3"
-  local tools_option="${4:-all}"      # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
-  local enable_reasoning="${5:-true}" # true or false
+# Experimental helper to call all backends in Task Mode
+call_task_agent() {
+  local agent_type="$1"
+  local system_inst="$2"
+  local user_content="$3"
+  local purpose_msg="$4"
+  local tools_option="${5:-all}"      # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
+  local enable_reasoning="${6:-true}" # true or false
+  local active_model
 
-  log_info "${purpose_msg} (${CLR_B_YELLOW}${GEMINI_API_MODEL}${ANSI_RESET}) [Tools: ${CLR_B_GREEN}${tools_option}${ANSI_RESET} | Reasoning: ${CLR_B_GREEN}${enable_reasoning}${ANSI_RESET}]..."
+  # Select the right agent model
+  case $agent_type in
+    architect)
+      case $BACKEND in
+        ollama) active_model="$OLLAMA_ARCHITECT" ;;
+        llamacpp) active_model="$LLAMACPP_ARCHITECT" ;;
+        gemini) active_model="$PROVIDER_API_MODEL" ;;
+      esac
+    ;;
+    coder)
+      case $BACKEND in
+        ollama) active_model="$OLLAMA_CODER" ;;
+        llamacpp) active_model="$LLAMACPP_CODER" ;;
+        gemini) active_model="$PROVIDER_API_MODEL" ;;
+      esac
+    ;;
+    judge)
+      case $BACKEND in
+        ollama) active_model="$OLLAMA_JUDGE" ;;
+        llamacpp) active_model="$LLAMACPP_JUDGE" ;;
+        gemini) active_model="$PROVIDER_API_MODEL" ;;
+      esac
+    ;;
+  esac
+
+  log_info "${purpose_msg} (${CLR_B_YELLOW}${active_model}${ANSI_RESET}) [Tools: ${CLR_B_GREEN}${tools_option}${ANSI_RESET} | Reasoning: ${CLR_B_GREEN}${enable_reasoning}${ANSI_RESET}]..."
 
   # Build the dynamic tools payload based on the tools_option constraint
-  local tools_payload=""
+  local tools_payload
   if [[ "$tools_option" == "all" ]]; then
-    tools_payload=$(cat "$BASE_TOOLS")
+    tools_payload=$(<"$BASE_TOOLS")
   elif [[ "$tools_option" == "readonly" ]]; then
     # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
     tools_payload=$(jq '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
@@ -480,7 +609,7 @@ call_gemini_task_agent() {
     '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
   )
 
-  local final_content=""
+  local final_content
 
   while true; do
     # Write payload messages to temp file for jq --rawfile
@@ -490,7 +619,7 @@ call_gemini_task_agent() {
     local payload
     if [[ -z $tools_payload || $tools_payload == "[]" || "$tools_option" == "none" ]]; then
       payload=$(jq -rc -n \
-        --arg model "$GEMINI_API_MODEL" \
+        --arg model "$active_model" \
         --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
         --argjson enabled_bool "$enable_reasoning" \
         '{
@@ -501,7 +630,7 @@ call_gemini_task_agent() {
       )
     else
       payload=$(jq -rc -n \
-        --arg model "$GEMINI_API_MODEL" \
+        --arg model "$active_model" \
         --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
         --argjson enabled_bool "$enable_reasoning" \
         --argjson tools_obj "$tools_payload" \
@@ -520,7 +649,7 @@ call_gemini_task_agent() {
     fi
 
     if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message' <<<"$raw_res")
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res")
       error "Unexpected API error.\n\n${err_msg}\n"
     fi
 
@@ -644,6 +773,199 @@ call_gemini_task_agent() {
   # Return the final text content of the agent on stdout
   echo "$final_content"
 }
+
+# Helper to call Gemini in Task Mode (v0.4.2 with Role-based Tool and Reasoning Constraints)
+call_gemini_task_agent() {
+  local system_inst="$1"
+  local user_content="$2"
+  local purpose_msg="$3"
+  local tools_option="${4:-all}"      # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
+  local enable_reasoning="${5:-true}" # true or false
+
+  log_info "${purpose_msg} (${CLR_B_YELLOW}${PROVIDER_API_MODEL}${ANSI_RESET}) [Tools: ${CLR_B_GREEN}${tools_option}${ANSI_RESET} | Reasoning: ${CLR_B_GREEN}${enable_reasoning}${ANSI_RESET}]..."
+
+  # Build the dynamic tools payload based on the tools_option constraint
+  local tools_payload=""
+  if [[ "$tools_option" == "all" ]]; then
+    tools_payload=$(cat "$BASE_TOOLS")
+  elif [[ "$tools_option" == "readonly" ]]; then
+    # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
+    tools_payload=$(jq '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
+  fi
+
+  # Initialize local MESSAGES array in-memory for this specific agent's execution loop
+  local ALL_MESSAGES
+  ALL_MESSAGES=$(jq -rc -n \
+    --arg sys "$system_inst" \
+    --arg usr "$user_content" \
+    '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
+  )
+
+  local final_content=""
+
+  while true; do
+    # Write payload messages to temp file for jq --rawfile
+    printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
+
+    # Build the OpenAI compliant Gemini Request Payload
+    local payload
+    if [[ -z $tools_payload || $tools_payload == "[]" || "$tools_option" == "none" ]]; then
+      payload=$(jq -rc -n \
+        --arg model "$PROVIDER_API_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --argjson enabled_bool "$enable_reasoning" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: $enabled_bool}
+        }'
+      )
+    else
+      payload=$(jq -rc -n \
+        --arg model "$PROVIDER_API_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --argjson enabled_bool "$enable_reasoning" \
+        --argjson tools_obj "$tools_payload" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: $enabled_bool},
+          tools: $tools_obj
+        }'
+      )
+    fi
+
+    local raw_res ; raw_res=$(api_call "$payload")
+    if [[ -z $raw_res || $raw_res == "null" ]]; then
+      error "API returned an empty response."
+    fi
+
+    if jq -e '.error' <<<"$raw_res" &>/dev/null; then
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res")
+      error "Unexpected API error.\n\n${err_msg}\n"
+    fi
+
+    # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
+    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$raw_res" 2>/dev/null)
+    if [[ -n $reasoning && $reasoning != "null" ]]; then
+      {
+        show_thinking_header
+        echo "$reasoning" | render_markdown
+      } >&2
+    fi
+
+    # Retrieve components
+    local content ; content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
+    local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
+    local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
+    local usage ; usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
+
+    # Output refusal to STDERR if present
+    if [[ -n $refusal && $refusal != "null" ]]; then
+      {
+        show_ai_header
+        echo "$refusal" | render_markdown
+      } >&2
+    fi
+
+    # Handle requested tool calls (Multi-Parallel Support)
+    if [[ -n $tools && $tools != "null" ]]; then
+      # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
+      if [[ "$tools_option" == "none" ]]; then
+        log_warn "Received unexpected tool calls despite tools disabled!" >&2
+        break
+      fi
+
+      # 1. Grab assistant command message and push to local history
+      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res")
+      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
+      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
+
+      # 2. Extract and iterate over all requested parallel tools
+      local tool_count=0
+      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
+        ((tool_count++))
+        show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
+
+        # 3. Check and execute tool handler
+        if [[ -x $TOOLS_HANDLER ]]; then
+          "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
+        else
+          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
+          log_warn "Tool handler not executable." >&2
+        fi
+
+        # 4. Fallback safeguard for empty output
+        if [[ ! -s $TOOLS_OUTPUT ]]; then
+          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
+        fi
+
+        # 5. Format and sanitize output to protect JSON/JQ
+        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
+        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+          rm -f "$TOOLS_OUTPUT"
+
+          # 6. Append tool output to messages array safely
+          local new_msgs
+          if new_msgs=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
+            ALL_MESSAGES="$new_msgs"
+          else
+            log_warn "fromjson failed, using fallback --arg serialization" >&2
+            ALL_MESSAGES=$(jq -rc \
+              --arg id "$tool_id" \
+              --arg name "$tool_name" \
+              --arg content "$(<"$TEMP_TOOLS_OUTPUT")" \
+              '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+            )
+          fi
+          rm -f "$TEMP_TOOLS_OUTPUT"
+        else
+          log_warn "Unable to parse tool output with rawfile, using fallback formatting" >&2
+          local fallback_content
+          fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
+          ALL_MESSAGES=$(jq -rc \
+            --arg id "$tool_id" \
+            --arg name "$tool_name" \
+            --arg content "$fallback_content" \
+            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+          )
+          rm -f "$TOOLS_OUTPUT"
+        fi
+      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
+
+    else
+      # If no tool calls, this is the final response
+      if [[ -n $content && $content != "null" ]]; then
+        final_content="$content"
+      fi
+
+      # Print usage metrics to STDERR to avoid polluting stdout
+      if [[ -n $usage && $usage != "null" ]]; then
+        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage")
+        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage")
+        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage")
+        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage")
+        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage")
+        local cost ; cost=$(jq -rc .cost <<<"$usage")
+
+        {
+          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
+          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+          if [[ -n $cost && "$cost" != "null" ]]; then
+            echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+          fi
+          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
+        } >&2
+      fi
+
+      break
+    fi
+  done
+
+  # Return the final text content of the agent on stdout
+  echo "$final_content"
+}
+
 route_request() {
   local INPUT="$1"
   shopt -s nocasematch
@@ -682,7 +1004,7 @@ clear_memory() {
   echo -e "  [${CLR_B_GREEN}3${ANSI_RESET}] ${CLR_B_RED}Wipe All${ANSI_RESET}\n"
   read -rp "  Select Option: " USER_CHOICE
   [[ -z $USER_CHOICE ]] && error "No selection given. Safe abort."
-  
+
   if [[ $USER_CHOICE == 1 ]]; then
     rm -f "${DATA_STORE}/${MEMORY_FILE}"
     log_success "Long-term memory has been completely recycled."
@@ -722,6 +1044,7 @@ check_and_trigger_heartbeat() {
   local messages_count
   local consolidated_json
   local raw_response
+  local err_msg
   local payload
 
   # Ensure the messages file exists and is readable
@@ -784,25 +1107,43 @@ EOF
     echo "$memory_user_payload" > "$TEMP_MEMORY_USER"
 
     # Prepare payload for API call (using --rawfile to bypass ARG_MAX)
-    payload=$(jq -rc -n \
-      --arg model "$GEMINI_API_MODEL" \
-      --rawfile sys "$TEMP_MEMORY_SYSTEM" \
-      --rawfile user "$TEMP_MEMORY_USER" \
-      '{
-        model: $model,
-        messages: [
-          {role: "system", content: $sys},
-          {role: "user", content: $user}
-        ],
-        temperature: 0.1,
-        stream: false
-      }'
-    )
+    if [[ $BACKEND == "gemini" ]]; then
+      payload=$(jq -rc -n \
+        --arg model "$CHAT_MODEL" \
+        --rawfile sys "$TEMP_MEMORY_SYSTEM" \
+        --rawfile user "$TEMP_MEMORY_USER" \
+        '{
+          model: $model,
+          messages: [
+            {role: "system", content: $sys},
+            {role: "user", content: $user}
+          ],
+          temperature: 0.1,
+          stream: false
+        }'
+      )
+    else
+      payload=$(jq -rc -n \
+        --arg model "$CHAT_MODEL" \
+        --rawfile sys "$TEMP_MEMORY_SYSTEM" \
+        --rawfile user "$TEMP_MEMORY_USER" \
+        '{
+          model: $model,
+          messages: [
+            {role: "system", content: $sys},
+            {role: "user", content: $user}
+          ],
+          response_format: {type: "json_object"},
+          temperature: 0.1,
+          stream: false
+        }'
+      )
+    fi
 
     # Clean up temporary files immediately
     rm -f "$TEMP_MEMORY_SYSTEM" "$TEMP_MEMORY_USER"
 
-    log_brain "Invoking $GEMINI_API_MODEL for synthesis..."
+    log_brain "Invoking $CHAT_MODEL for synthesis..."
     raw_response=$(api_call "$payload")
     if [[ -z $raw_response || $raw_response == "null" ]]; then
       log_warn "Memory consolidation API call returned empty response."
@@ -839,7 +1180,8 @@ EOF
       mv -f "${messages_path}.tmp" "$messages_path"
       log_success "$messages_filename successfully pruned! Context is now ultra-light and ready."
     else
-      log_error "Consolidated output was not valid JSON. Memory consolidation aborted to prevent corruption."
+      err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response")
+      log_error "Consolidated output was not valid JSON. Memory consolidation aborted to prevent corruption.\n\n${err_msg}"
       log_debug "Raw response payload was: ${consolidated_json:0:400}..."
     fi
   fi
@@ -853,49 +1195,57 @@ send_message() {
   # Backend Selector
   case $BACKEND in
     # Local Backend: Ollama
-    ollama)
-      log_debug "Sending query chunk to local Ollama agent..."
-      JSON_PAYLOAD=$(jq -rc -n \
-        --arg model "$OLLAMA_ARCHITECT" \
-        --arg prompt "$combined" \
-        '{
-          model: $model,
-          prompt: $prompt,
-          stream: false
-        }'
-      )
-      RESPONSE=$(api_call "$JSON_PAYLOAD")
-      show_ai_header
-      jq -rc '.response' <<<"$RESPONSE" | render_markdown
-    ;;
+    # ollama)
+    #   log_debug "Sending query chunk to local Ollama agent..."
+    #   JSON_PAYLOAD=$(jq -rc -n \
+    #     --arg model "$OLLAMA_ARCHITECT" \
+    #     --arg prompt "$combined" \
+    #     '{
+    #       model: $model,
+    #       prompt: $prompt,
+    #       stream: false
+    #     }'
+    #   )
+    #   RESPONSE=$(api_call "$JSON_PAYLOAD")
+    #   show_ai_header
+    #   jq -rc '.response' <<<"$RESPONSE" | render_markdown
+    # ;;
+
     # Local Backend: llama.cpp
-    llamacpp)
-      log_debug "Sending query chunk to local llama-server..."
-      LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
-      JSON_PAYLOAD=$(jq -rc -n \
-        --arg model "$LLAMACPP_MODEL" \
-        --arg sys "$system" \
-        --arg user "$prompt" \
-        '{
-          model: $model,
-          messages: [
-            {role: "system", content: $sys},
-            {role: "user", content: $user}
-          ],
-          temperature: 0.0,
-          stream: false
-        }'
-      )
+    # llamacpp)
+    #   log_debug "Sending query chunk to local llama-server..."
+    #   LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
+    #   JSON_PAYLOAD=$(jq -rc -n \
+    #     --arg model "$LLAMACPP_MODEL" \
+    #     --arg sys "$system" \
+    #     --arg user "$prompt" \
+    #     '{
+    #       model: $model,
+    #       messages: [
+    #         {role: "system", content: $sys},
+    #         {role: "user", content: $user}
+    #       ],
+    #       temperature: 0.0,
+    #       stream: false
+    #     }'
+    #   )
+    #
+    #   # Sending request and store response
+    #   RESPONSE=$(api_call "$JSON_PAYLOAD")
+    #   show_ai_header
+    #   jq -rc '.choices[0].message.content' <<<"$RESPONSE" | render_markdown
+    # ;;
 
-      # Sending request and store response
-      RESPONSE=$(api_call "$JSON_PAYLOAD")
-      show_ai_header
-      jq -rc '.choices[0].message.content' <<<"$RESPONSE" | render_markdown
-    ;;
-
-    # External Backend: OpenRouter / Gemini
-    gemini)
-      log_debug "Sending query chunk to cloud Gemini agent..."
+    # Local + External Backend: OpenRouter / Gemini
+    ollama|llamacpp|gemini)
+      # log_debug "Sending query chunk to cloud Gemini agent..."
+      if [[ $BACKEND == "ollama" ]]; then
+        log_debug "Sending query chunk to local Ollama backend..."
+      elif [[ $BACKEND == "llamacpp" ]]; then
+        log_debug "Sending query chunk to local llama.cpp backend..."
+      else
+        log_debug "Sending query chunk to cloud Gemini backend..."
+      fi
 
       # Loading history file if exist or start from zero
       if [[ -r "${DATA_STORE}/${MESSAGES_FILE}" ]]; then
@@ -913,7 +1263,7 @@ send_message() {
         printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
         JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$GEMINI_API_MODEL" \
+          --arg model "$CHAT_MODEL" \
           --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
           --rawfile tools "$BASE_TOOLS" \
           '{
@@ -934,7 +1284,7 @@ send_message() {
 
           # Check for errors before continuing
           if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-            err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
+            err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
             error "Unexpected API error.\n\n${err_msg}\n"
           fi
 
@@ -1054,6 +1404,7 @@ send_message() {
         fi
       done
     ;;
+    *) error "Unsupported backend given: $BACKEND" ;;
   esac
 
   # Autonomous Memory Consolidation Heartbeat
@@ -1061,10 +1412,13 @@ send_message() {
 }
 
 run_chat() {
+  set_console_title "${SCRIPT_FILE}: Chat Mode."
   show_banner
   log_info "Initializing chat context..."
   local backend_upper ; backend_upper=$(to_upper "$BACKEND")
+  local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
   log_info "Active Backend : ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
+  log_info "Active Provider : ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
   log_info "Conversation online. Type ${CLR_B_GREEN}/help${ANSI_RESET} to view commands."
 
   while true; do
@@ -1116,6 +1470,7 @@ run_chat() {
 }
 
 run_pipeline() {
+  set_console_title "${SCRIPT_FILE}: Pipeline Mode."
   log_section "PIPELINE MODE ACTIVATED"
   local backend_upper ; backend_upper=$(to_upper "$BACKEND")
   log_info "Active Backend : ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
@@ -1161,53 +1516,59 @@ run_pipeline() {
     # Backend Selector
     case $BACKEND in
       # Local Backend: Ollama
-      ollama)
-        log_info "Question mode detected. Calling local Architect (${CLR_B_YELLOW}$OLLAMA_ARCHITECT${ANSI_RESET})..."
-        printf "%s" "$SIMPLE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
-        JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$OLLAMA_ARCHITECT" \
-          --rawfile prompt "$TEMP_MEMORY_USER" \
-          '{
-            model: $model,
-            prompt: $prompt,
-            stream: false
-          }'
-        )
-
-        # Sending request and store response
-        RESPONSE=$(api_call "$JSON_PAYLOAD")
-        handle_response "$RESPONSE" "$USER_PROMPT"
-      ;;
+      # ollama)
+      #   log_info "Question mode detected. Calling local Architect (${CLR_B_YELLOW}$OLLAMA_ARCHITECT${ANSI_RESET})..."
+      #   printf "%s" "$SIMPLE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
+      #   JSON_PAYLOAD=$(jq -rc -n \
+      #     --arg model "$OLLAMA_ARCHITECT" \
+      #     --rawfile prompt "$TEMP_MEMORY_USER" \
+      #     '{
+      #       model: $model,
+      #       prompt: $prompt,
+      #       stream: false
+      #     }'
+      #   )
+      #
+      #   # Sending request and store response
+      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
+      #   handle_response "$RESPONSE" "$USER_PROMPT"
+      # ;;
 
       # Local Backend: llama.cpp
-      llamacpp)
-        log_info "Question mode detected. Calling local Architect (${CLR_B_YELLOW}$LLAMACPP_ARCHITECT${ANSI_RESET})... "
-        LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
-        printf "%s" "$SYSTEM_PROMPT" > "$TEMP_MEMORY_SYSTEM"
-        printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
-        JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$LLAMACPP_MODEL" \
-          --rawfile system "$TEMP_MEMORY_SYSTEM" \
-          --rawfile user "$TEMP_MEMORY_USER" \
-          '{
-            model: $model,
-            messages: [
-              {role: "system", content: $system},
-              {role: "user", content: $user}
-            ],
-            temperature: 0.0,
-            stream: false
-          }'
-        )
+      # llamacpp)
+      #   log_info "Question mode detected. Calling local Architect (${CLR_B_YELLOW}$LLAMACPP_ARCHITECT${ANSI_RESET})... "
+      #   LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
+      #   printf "%s" "$SYSTEM_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+      #   printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
+      #   JSON_PAYLOAD=$(jq -rc -n \
+      #     --arg model "$LLAMACPP_MODEL" \
+      #     --rawfile system "$TEMP_MEMORY_SYSTEM" \
+      #     --rawfile user "$TEMP_MEMORY_USER" \
+      #     '{
+      #       model: $model,
+      #       messages: [
+      #         {role: "system", content: $system},
+      #         {role: "user", content: $user}
+      #       ],
+      #       temperature: 0.0,
+      #       stream: false
+      #     }'
+      #   )
+      #
+      #   # Sending request and store response
+      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
+      #   handle_response "$RESPONSE" "$USER_PROMPT"
+      # ;;
 
-        # Sending request and store response
-        RESPONSE=$(api_call "$JSON_PAYLOAD")
-        handle_response "$RESPONSE" "$USER_PROMPT"
-      ;;
-
-      # External Backend: OpenRouter / Gemini
-      gemini)
-        log_info "Question mode detected. Calling cloud Gemini (${CLR_B_YELLOW}$GEMINI_API_MODEL${ANSI_RESET})..."
+      # Local + External Backend: OpenRouter / Gemini
+      ollama|llamacpp|gemini)
+        if [[ $BACKEND == "ollama" ]]; then
+          log_info "Question mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
+        elif [[ $BACKEND == "llamacpp" ]]; then
+          log_info "Question mode detected. Calling local llama.cpp model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
+        else
+          log_info "Question mode detected. Calling cloud model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
+        fi
         printf "%s" "$SYSTEM_PROMPT" > "$TEMP_MEMORY_SYSTEM"
         printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
         ALL_MESSAGES=$(jq -rc -n \
@@ -1222,7 +1583,7 @@ run_pipeline() {
           printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
           JSON_PAYLOAD=$(jq -rc -n \
-            --arg model "$GEMINI_API_MODEL" \
+            --arg model "$CHAT_MODEL" \
             --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
             --rawfile tools "$BASE_TOOLS" \
             '{
@@ -1241,7 +1602,7 @@ run_pipeline() {
           if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
             # Check for errors before continuing
             if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-              err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
+              err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
               error "Unexpected API error.\n\n${err_msg}\n"
             fi
 
@@ -1370,57 +1731,63 @@ run_pipeline() {
     # Backend Selector
     case $BACKEND in
       # Local Backend: Ollama
-      ollama)
-        log_info "Compare mode detected. Calling local Architect (${CLR_B_YELLOW}$OLLAMA_ARCHITECT${ANSI_RESET})... "
-        printf "%s" "$COMPARE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
-        JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$OLLAMA_ARCHITECT" \
-          --rawfile prompt "$TEMP_MEMORY_USER" \
-          '{
-            model: $model,
-            prompt: $prompt,
-            stream: false
-          }'
-        )
-
-        # Sending request and store response
-        RESPONSE=$(api_call "$JSON_PAYLOAD")
-        handle_response "$RESPONSE" "$USER_PROMPT"
-      ;;
+      # ollama)
+      #   log_info "Compare mode detected. Calling local Architect (${CLR_B_YELLOW}$OLLAMA_ARCHITECT${ANSI_RESET})... "
+      #   printf "%s" "$COMPARE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
+      #   JSON_PAYLOAD=$(jq -rc -n \
+      #     --arg model "$OLLAMA_ARCHITECT" \
+      #     --rawfile prompt "$TEMP_MEMORY_USER" \
+      #     '{
+      #       model: $model,
+      #       prompt: $prompt,
+      #       stream: false
+      #     }'
+      #   )
+      #
+      #   # Sending request and store response
+      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
+      #   handle_response "$RESPONSE" "$USER_PROMPT"
+      # ;;
 
       # Local Backend: llama.cpp
-      llamacpp)
-        log_info "Compare mode detected. Calling local Architect (${CLR_B_YELLOW}$LLAMACPP_ARCHITECT${ANSI_RESET})... "
-        LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
+      # llamacpp)
+      #   log_info "Compare mode detected. Calling local Architect (${CLR_B_YELLOW}$LLAMACPP_ARCHITECT${ANSI_RESET})... "
+      #   LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
+      #   printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+      #   printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
+      #   JSON_PAYLOAD=$(jq -rc -n \
+      #     --arg model "$LLAMACPP_MODEL" \
+      #     --rawfile system "$TEMP_MEMORY_SYSTEM" \
+      #     --rawfile user "$TEMP_MEMORY_USER" \
+      #     '{
+      #       model: $model,
+      #       messages: [
+      #         {role: "system", content: $system},
+      #         {role: "user", content: $user}
+      #       ],
+      #       temperature: 0.0,
+      #       stream: false
+      #     }'
+      #   )
+      #
+      #   # Sending request and store response
+      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
+      #   handle_response "$RESPONSE" "$USER_PROMPT"
+      # ;;
+
+      # Local + External Backend: OpenRouter / Gemini
+      ollama|llamacpp|gemini)
+        if [[ $BACKEND == "ollama" ]]; then
+          log_info "Compare mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
+        elif [[ $BACKEND == "llamacpp" ]]; then
+          log_info "Compare mode detected. Calling local llama.cpp model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
+        else
+          log_info "Compare mode detected. Calling cloud model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
+        fi
         printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
         printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
         JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$LLAMACPP_MODEL" \
-          --rawfile system "$TEMP_MEMORY_SYSTEM" \
-          --rawfile user "$TEMP_MEMORY_USER" \
-          '{
-            model: $model,
-            messages: [
-              {role: "system", content: $system},
-              {role: "user", content: $user}
-            ],
-            temperature: 0.0,
-            stream: false
-          }'
-        )
-
-        # Sending request and store response
-        RESPONSE=$(api_call "$JSON_PAYLOAD")
-        handle_response "$RESPONSE" "$USER_PROMPT"
-      ;;
-
-      # External Backend: OpenRouter / Gemini
-      gemini)
-        log_info "Compare mode detected. Calling cloud Gemini (${CLR_B_YELLOW}$GEMINI_API_MODEL${ANSI_RESET})... "
-        printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
-        printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
-        JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$GEMINI_API_MODEL" \
+          --arg model "$CHAT_MODEL" \
           --rawfile system "$TEMP_MEMORY_SYSTEM" \
           --rawfile user "$TEMP_MEMORY_USER" \
           '{
@@ -1440,7 +1807,7 @@ run_pipeline() {
         if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
           # Check for errors before continuing
           if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-            err_msg=$(jq -rc '.error.message' <<<"$RAW_RESPONSE")
+            err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
             error "Unexpected API error.\n\n${err_msg}\n"
           fi
 
@@ -1495,8 +1862,8 @@ run_pipeline() {
     log_info "Task mode detected. Preparing execution via backend '${CLR_B_YELLOW}${BACKEND}${ANSI_RESET}' in mode '${CLR_B_GREEN}${RUN_MODE}${ANSI_RESET}'"
 
     case $BACKEND in
-      ollama)
-        error "Coming soon! Stay tuned ;-)"
+      # ollama)
+        # error "Coming soon! Stay tuned ;-)"
         # if [[ $RUN_MODE == "multi" ]]; then
         #   log "\nTask mode detected. Running heavy pipeline.\n"
         #   log "[1/3] The Architect ($OLLAMA_ARCHITECT) will prepare the plan...\n"
@@ -1522,16 +1889,22 @@ run_pipeline() {
         # else
         #   log "\n[Done]\n"
         # fi
-      ;;
+      # ;;
 
-      llamacpp)
-        error "Coming soon! Stay tuned ;-)"
-      ;;
+      # llamacpp)
+      #   error "Coming soon! Stay tuned ;-)"
+      # ;;
 
-      gemini)
-        local RETURNED_CODE
+      # Local + External Backend: OpenRouter / Gemini
+      ollama|llamacpp|gemini)
         if [[ $RUN_MODE == "multi" ]]; then
-          log_info "Launching Multi-Agent Pipeline for Gemini..."
+          if [[ $BACKEND == "ollama" ]]; then
+            log_info "Launching Multi-Agent Pipeline for Ollama..."
+          elif [[ $BACKEND == "llamacpp" ]]; then
+            log_info "Launching Multi-Agent Pipeline for llama.cpp..."
+          else
+            log_info "Launching Multi-Agent Pipeline for Gemini..."
+          fi
 
           # Step 1: Architect Plan
           local arch_sys="${SYSTEM_PROMPT}\n\nYou are a professional Software Architect. Your task is to analyze the source file and the user's requested modification to create a precise, step-by-step development plan.\n\n"
@@ -1554,7 +1927,8 @@ run_pipeline() {
             arch_user+="No file was provided as context.\n"
           fi
 
-          local ARCHITECT_PLAN ; ARCHITECT_PLAN=$(call_gemini_task_agent "$arch_sys" "$arch_user" "Architecting the changes" "readonly" "true")
+          # local ARCHITECT_PLAN ; ARCHITECT_PLAN=$(call_gemini_task_agent "$arch_sys" "$arch_user" "Architecting the changes" "readonly" "true")
+          local ARCHITECT_PLAN ; ARCHITECT_PLAN=$(call_task_agent "architect" "$arch_sys" "$arch_user" "Architecting the changes" "readonly" "true")
 
           # Act only if plan is generated
           if [[ -n $ARCHITECT_PLAN && ! $ARCHITECT_PLAN == "null" ]]; then
@@ -1582,7 +1956,8 @@ run_pipeline() {
             coder_user+="Architect Plan:\n"
             coder_user+="${ARCHITECT_PLAN}"
 
-            RETURNED_CODE=$(call_gemini_task_agent "$coder_sys" "$coder_user" "Implementing changes" "none" "true")
+            # local RETURNED_CODE ; RETURNED_CODE=$(call_gemini_task_agent "$coder_sys" "$coder_user" "Implementing changes" "none" "true")
+            local RETURNED_CODE ; RETURNED_CODE=$(call_task_agent "coder" "$coder_sys" "$coder_user" "Implementing changes" "none" "true")
 
             # Step 3: Judge Verification
             local judge_sys="${SYSTEM_PROMPT}\n\nYou are an expert Quality Assurance and Code Inspector.\n"
@@ -1603,7 +1978,8 @@ run_pipeline() {
             judge_user+="--- END FILE ---\n\n"
             judge_user+="User request: ${USER_PROMPT}"
 
-            local CODER_JUDGMENT ; CODER_JUDGMENT=$(call_gemini_task_agent "$judge_sys" "$judge_user" "Evaluating changes" "none" "true")
+            # local CODER_JUDGMENT ; CODER_JUDGMENT=$(call_gemini_task_agent "$judge_sys" "$judge_user" "Evaluating changes" "none" "true")
+            local CODER_JUDGMENT ; CODER_JUDGMENT=$(call_task_agent "judge" "$judge_sys" "$judge_user" "Evaluating changes" "none" "true")
 
             log ; show_ai_header
             echo "### QA Inspection & Verdict:"
@@ -1634,7 +2010,8 @@ run_pipeline() {
             simple_user+="No file was provided as context. Create/modify the code as requested. Here is the context metadata:\n${CONTEXT_DATA}"
           fi
 
-          RETURNED_CODE=$(call_gemini_task_agent "$simple_sys" "$simple_user" "Coding modifications" "all" "true")
+          # local RETURNED_CODE ; RETURNED_CODE=$(call_gemini_task_agent "$simple_sys" "$simple_user" "Coding modifications" "all" "true")
+          local RETURNED_CODE ; RETURNED_CODE=$(call_task_agent "coder" "$simple_sys" "$simple_user" "Coding modifications" "all" "true")
         fi
 
         # Securely write/output results
@@ -1672,6 +2049,73 @@ run_pipeline() {
     esac
 
     exit $?   # End of Task Mode
+  fi
+}
+
+init_pipeline() {
+  local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
+
+  set_console_title "${SCRIPT_FILE}: Initializing..."
+  set_cpu_cores
+  set_temp_files
+  create_local_model_cache
+  create_local_data_store
+
+  [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
+
+  if [[ $USE_TOR == true && $BACKEND == "gemini" ]]; then
+    log_info "Checking Tor Network proxy interface..."
+    if ! timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
+      error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is Tor running?"
+    else
+      log_success "Tor privacy tunnel established! Routing securely to $TOR_PROXY."
+    fi
+  fi
+
+  if [[ $BACKEND == "gemini" ]]; then
+    [[ -r $CREDENTIALS ]] && PROVIDER_API_KEY=$(<"$CREDENTIALS")
+    [[ -z $PROVIDER_API_KEY ]] && error "Missing cloud credentials. Please configure local '.creds' file with your OpenRouter API key."
+  fi
+
+  # Define right chat model
+  CHAT_MODEL="$(get_chat_model)"
+
+  # Download models when necessary
+  [[ $BACKEND == "ollama" || $BACKEND == "llamacpp" ]] && PULL_MODELS=true    # Force models download for local backends
+  if [[ $PULL_MODELS == true ]]; then
+    # Backend Selector
+    case $BACKEND in
+      # Local Backend: Ollama
+      ollama)
+        # Downloading models for ollama
+        log_info "Preloading required local models for Ollama server...\n"
+        OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_CHAT}:${quant_upper}"
+        OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_ROUTER}:${quant_upper}"
+        OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_ARCHITECT}:${quant_upper}"
+        OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_CODER}:${quant_upper}"
+        OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_JUDGE}:${quant_upper}"
+        log ; log_success "All required local Ollama models preloaded successfully."
+      ;;
+
+      # Local Backend: llama.cpp
+      llamacpp)
+        # Downloading models for llama.cpp
+        log_info "Preloading required local models llama.cpp server...\n"
+        LLAMA_CACHE="$LLAMACPP_CACHE" \
+        llama-cli -hf "${LLAMACPP_CHAT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        LLAMA_CACHE="$LLAMACPP_CACHE" \
+        llama-cli -hf "${LLAMACPP_ROUTER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        LLAMA_CACHE="$LLAMACPP_CACHE" \
+        llama-cli -hf "${LLAMACPP_ARCHITECT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        LLAMA_CACHE="$LLAMACPP_CACHE" \
+        llama-cli -hf "${LLAMACPP_CODER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        LLAMA_CACHE="$LLAMACPP_CACHE" \
+        llama-cli -hf "${LLAMACPP_JUDGE}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        log_debug "Reloading llama.cpp GGUF models cache..."
+        curl -sSL "${LLAMACPP_API_SRV}/models?reload=1" &>/dev/null || error "Failed to reload llama.cpp GGUF models cache."
+        log ; log_success "All required local llama.cpp models preloaded successfully."
+      ;;
+    esac
   fi
 }
 
@@ -1730,49 +2174,7 @@ INPUT_FILE="$2"
 INPUT_FILE2="$3"
 
 # Init
-mkdir -p "$DATA_STORE"
-[[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
-if [[ $USE_TOR == true && $BACKEND == "gemini" ]]; then
-  log_info "Checking Tor Network proxy interface..."
-  if ! timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
-    error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is Tor running?"
-  else
-    log_success "Tor privacy tunnel established! Routing securely to $TOR_PROXY."
-  fi
-fi
-if [[ $BACKEND == "gemini" ]]; then
-  [[ -r $CREDENTIALS ]] && GEMINI_API_KEY=$(<"$CREDENTIALS")
-  [[ -z $GEMINI_API_KEY ]] && error "Missing cloud credentials. Please configure local '.creds' file with your OpenRouter API key."
-fi
-
-# Download models when necessary
-if [[ $PULL_MODELS == true ]]; then
-  # Backend Selector
-  case $BACKEND in
-    # Local Backend: Ollama
-    ollama)
-      # Downloading models for ollama
-      log_info "Synchronizing required local architectures for Ollama daemon..."
-      [[ -n $OLLAMA_ROUTER ]] && OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "$OLLAMA_ROUTER"
-      OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "$OLLAMA_ARCHITECT"
-      OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "$OLLAMA_CODER"
-      OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "$OLLAMA_JUDGE"
-      log_success "All Ollama architectures synchronized successfully."
-    ;;
-
-    # Local Backend: llama.cpp
-    llamacpp)
-      # Downloading models for llama.cpp
-      log_info "Preloading local GGUF models into llama.cpp cache..."
-      quant_upper=$(to_upper "$QUANTIZATION")
-      LLAMA_CACHE="$LLAMACPP_CACHE" llama-cli -hf "${LLAMACPP_ROUTER}:${quant_upper}" -c $MAX_CONTEXT --simple-io -st -p hello &>/dev/null ; sleep 5
-      LLAMA_CACHE="$LLAMACPP_CACHE" llama-cli -hf "${LLAMACPP_ARCHITECT}:${quant_upper}" -c $MAX_CONTEXT --simple-io -st -p hello &>/dev/null ; sleep 5
-      LLAMA_CACHE="$LLAMACPP_CACHE" llama-cli -hf "${LLAMACPP_CODER}:${quant_upper}" -c $MAX_CONTEXT --simple-io -st -p hello &>/dev/null ; sleep 5
-      LLAMA_CACHE="$LLAMACPP_CACHE" llama-cli -hf "${LLAMACPP_JUDGE}:${quant_upper}" -c $MAX_CONTEXT --simple-io -st -p hello &>/dev/null ; sleep 5
-      log_success "Llama.cpp cache populated successfully."
-    ;;
-  esac
-fi
+init_pipeline
 
 # Main
 case $RUN_MODE in

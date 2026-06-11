@@ -2,10 +2,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20OpenRouter-orange.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter-orange.svg)]()
 [![Status](https://img.shields.io/badge/Status-Experimental--WIP-blue.svg)]()
 
-> A lightweight, highly extensible Bash-driven orchestration framework for interacting with local LLMs (via **Ollama** or **llama.cpp**) and external API backends (via **OpenRouter / Gemini 3.5 Flash**). Features fully integrated parallel tool-calling capabilities and structured, persistent JSON-based memory.
+> A lightweight, highly extensible Bash-driven orchestration framework for interacting with local LLMs (via **Ollama** or **llama.cpp**) and external API backends (via **Vercel AI Gateway / OpenRouter / Gemini 3.5 Flash**). Features fully integrated parallel tool-calling capabilities and structured, persistent JSON-based memory.
 
 ---
 
@@ -72,21 +72,24 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 🧠 **Cognitive Heartbeat Pacemaker**: Dynamic background consolidation. Automatically tracks message lengths and executes active context compression into long-term structures once a threshold is met (default: 15 messages), pruning active logs cleanly to maintain high performance with zero amnesia.
 - 💭 **AI Cognitive Reasoning Extraction**: Native parsing and styling of internal LLM critical-thinking blocks (`thinking_tokens`) in **v0.4.0**, displayed in dedicated, beautiful cognitive terminal frames prior to yielding final outputs.
 - 📊 **Real-Time Token Metrics & Operational Cost**: Automatically computes and outputs itemized query usage stats after every run in **v0.4.0** (Prompt, Response, Cached, and Reasoning tokens) along with precise operational API costing in USD.
-- 🔄 **Fully Operational Multi-Agent Task Consensus**: Completed in **v0.4.0** for Gemini. Features robust 3-stage consensus pipeline orchestration (Architect 🏛️ drafts precise plans &rarr; Coder 💻 generates clean compliant codebase modifications &rarr; Judge ⚖️ validates syntax and executes regression QA) with safe code output saved to `<input_file>.new` to guarantee absolute codebase security.
+- 🔄 **Fully Operational Multi-Agent Task Consensus**: Completed in **v0.4.0** for Gemini. Features robust 3-stage consensus pipeline orchestration (Architect 🏛️  drafts precise plans &rarr; Coder 💻 generates clean compliant codebase modifications &rarr; Judge ⚖️  validates syntax and executes regression QA) with safe code output saved to `<input_file>.new` to guarantee absolute codebase security.
 - 🧹 **Interactive Cache Sweep & Control**: Provides options-driven dynamic memory scrubbing in **v0.4.0** with interactive step-by-step menus to selectively wipe Long-Term profile behaviors (`memory.json`), Chat conversation logs (`messages.json`), or execute a master-clear on both.
 - ⚡ **High-Performance "Single-jq Stream" runner**: Zero-subshell parameter parsing, pure-Bash URL-decoding, and compact single-process JSON token streaming inside `run-tools.sh` v0.2.1, achieving up to 10x process-fork reduction and reducing tool latency significantly.
-- 🖥️ **Unified Local Server Orchestration**: Launches optimized companion services on-the-fly. Boot up a local multi-threaded PHP dashboard to inspect files and documentations, or deploy a surgically configured `llama-server` tuned with dynamic thread mapping, KV-quantization limits, and auto-loading templates.
+- 🚀 **Hardware-Aware Adaptive Tuning**: Added in **v0.6.0**. Dynamically detects host CPU topologies (compatible with `nproc`, macOS `sysctl`, and Android/Termux `/proc/cpuinfo`), automatically cutting thread allocations in half on Termux to prevent mobile CPU throttling and battery overheating.
+- 💾 **Flash Memory Wear-Reduction**: Refactored in **v0.6.0**. Migrated all runtime payload fragments and tool buffers directly to the OS volatile RAM storage `/tmp` (or `$TMPDIR` dynamically under Termux), safeguarding the physical solid-state flash memory of mobile devices from high-frequency write cycles.
+- ⚡ **Optimized Local Server Orchestration**: Upgraded in **v0.6.0**. On-the-fly execution and automatic, low-overhead tuning for local inference servers. Start a native PHP companion web server, a surgically tuned `llama-server`, or a lightweight `ollama serve` instance initialized with dynamic keep-alive structures, hardware-optimized quantizations, and active flash-attention mechanisms.
+- 🌐 **Dual Cloud API Gateways (Vercel & OpenRouter)**: Introduced in **v0.6.0**. Broadened external pipeline connectivity by adding Vercel AI Gateway support as a high-performance alternative to OpenRouter for routing queries to external API endpoints like `google/gemini-3.5-flash`.
 - 🌐 **web_fetch (Smart Router) Tool Routing**: Highly optimized Bash domain routing (`web_fetch.sh`) supporting instant API-based scraping (GitHub, GitLab, and Wikipedia summaries), falling back elegantly to raw regex tag-stripping or `htmlq` over Tor socks5h to completely prevent heavy browser runtime bloat.
 - 🔍 **Tor-Based Anonymous Web Search**: Secure, fully-parsed, zero-subshell Onion DuckDuckGo lookup queries executed directly over SOCKS5 proxying to fetch clean search listings using `htmlq`.
-- 🛠️ **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, fetch raw web documents, or execute sandboxed shell commands.
-- 🛡️ **Universal HTTP 400 Payload Immunization**: 100% strict `jq --rawfile` encapsulation of assistant and chronological conversation logs in `pipeline.sh` **v0.4.0**, paired with robust dual-tier binary and special-character encoding filters (`iconv + jq`) on tool outputs to fully secure external backends against malformed JSON crashes.
+- 🛠️  **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, fetch raw web documents, or execute sandboxed shell commands.
+- 🛡️  **Universal HTTP 400 Payload Immunization**: 100% strict `jq --rawfile` encapsulation of assistant and chronological conversation logs in `pipeline.sh` **v0.4.0**, paired with robust dual-tier binary and special-character encoding filters (`iconv + jq`) on tool outputs to fully secure external backends against malformed JSON crashes.
 - ⚡ **Complete JQ E2BIG / ARG_MAX Immunization**: Universal protection against Unix `ARG_MAX` ("Argument list too long") memory limit crashes across all backend execution paths. Implemented via raw file-streaming pipeline variables with `jq --rawfile` streams instead of command-line string interpolation, safeguarding the pipeline on highly constrained mobile/Termux environments.
 - 🧹 **Automatic Signal-Trap & Cleanup**: Zero-leak guarantee. Utilizes native UNIX `trap` signaling on `EXIT`, `INT`, and `TERM` signals to instantly clean up all temporary buffer files (`tmp_*`) and standard execution streams, ensuring absolute workspace hygiene even during abrupt process interruptions.
-- ⏱️ **Zero-Fork Speedups & Micro-Benchmarks**: Verified via our upgraded test harness, which benchmarks pure-Bash parameter stream processing and zero-subshelled operations to achieve a verified **up to 1.72x performance speed-up** compared to standard execution methods.
+- ⏱️  **Zero-Fork Speedups & Micro-Benchmarks**: Verified via our upgraded test harness, which benchmarks pure-Bash parameter stream processing and zero-subshelled operations to achieve a verified **up to 1.72x performance speed-up** compared to standard execution methods.
 - 🧅 **Tor Proxy Support**: Outbound connections to `openrouter.ai` can automatically be routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) using custom User-Agents for secure, private, and geo-independent requests.
 - 💾 **Structured JSON Memory**: Keeps a running context of your conversation in `data/messages.json` and persistent user/system profile rules in `data/memory.json`.
 - 🤖 **Local-First & Hybrid Approach**: Switch seamlessly between local inference servers (Ollama, llama.cpp running on GPU/CPU machines) and highly optimized cloud APIs (Google Gemini via OpenRouter).
-- 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, and `bash`.
+- 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, `sed` and `bash`.
 
 ---
 
@@ -94,7 +97,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.5.0)**: Manages arguments (both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter, and manages memory with complete robust JQ payload immunization. |
+| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.6.0)**: Manages arguments (both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter/Vercel, and manages memory with complete robust JQ payload immunization. |
 | [`run-tools.sh`](run-tools.sh) | **Execution Runner (v0.2.1)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
 | [`web_fetch.sh`](web_fetch.sh) | **Smart Web Crawler Engine**: Employs domain-specific API endpoints (GitHub, GitLab, Wikipedia) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. |
 | [`tools.json`](tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for Function Calling (matching the OpenRouter model spec). |
@@ -107,7 +110,7 @@ Running `pipeline.sh` without any arguments starting a prompt (or explicitly wit
 
 The system initializes your conversational profile and displays a standard prompt. Communication is continuous, meaning the AI remembers all questions and answers previously sent during the session!
 
-### 🗺️ Built-in Slash Commands
+### 🗺️  Built-in Slash Commands
 
 During the chat session, you can invoke special control actions using slash prefixes:
 
@@ -122,7 +125,7 @@ During the chat session, you can invoke special control actions using slash pref
 
 ---
 
-## 🛠️ Tool-Calling Engine (Agentic Capability)
+## 🛠️  Tool-Calling Engine (Agentic Capability)
 
 The pipeline integrates 10 standard agentic actions declared in `tools.json`. When the model returns a tool request, `pipeline.sh` parses it and spawns `run-tools.sh` with the extracted arguments before feeding the results back.
 
@@ -145,30 +148,31 @@ The pipeline integrates 10 standard agentic actions declared in `tools.json`. Wh
 
 You can configure the active engine inside `pipeline.sh` by modifying the `BACKEND` variable (`ollama`, `llamacpp`, or `gemini`).
 
-### 1. **Gemini / OpenRouter (`gemini`)** [Default]
-* **Inference Endpoint**: `https://openrouter.ai/api/v1/chat/completions`
+### 1. **Vercel AI Gateway / OpenRouter (`gemini`)** [Default]
+* **Inference Endpoints**: 
+  * **Vercel AI Gateway (Default Provider)**: `https://ai-gateway.vercel.sh/v1/chat/completions` (Highly optimized routing)
+  * **OpenRouter**: `https://openrouter.ai/api/v1/chat/completions`
 * **Default Model**: `google/gemini-3.5-flash`
 * **Features**: Direct support for system prompts, official JSON tool specifications, reasoning capability toggles, and Tor integration.
 
 ### 2. **Ollama (`ollama`)**
-* **Inference Endpoint**: `http://localhost:11434`
+* **Inference Endpoint**: `http://localhost:11434/v1/chat/completions` (Highly optimized local server)
 * **Configured Stack**:
   * **Router**: `hf.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF`
-  * **Architect / Reasoning**: `hf.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
-  * **Coder**: `hf.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF`
-  * **Judge / Analyst**: `hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF`
+  * **Architect / Reasoning / Chat**: `hf.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
+  * **Coder**: `hf.co/ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
+  * **Judge / Analyst**: `hf.co/ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
 
 ### 3. **llama.cpp (`llamacpp`)**
-* **Inference Endpoint**: `http://localhost:8080/v1/chat/completions` (Standard Server)
+* **Inference Endpoint**: `http://localhost:8080/v1/chat/completions` (Highly optimized local server)
 * **Configured Stack**:
   * **Router**: `LiquidAI/LFM2.5-1.2B-Instruct-GGUF`
-  * **Architect / Reasoning**: `LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
-  * **Coder**: `Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF`
-  * **Judge / Analyst**: `Qwen/Qwen2.5-Coder-3B-Instruct-GGUF`
-
+  * **Architect / Reasoning / Chat**: `LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
+  * **Coder**: `ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
+  * **Judge / Analyst**: `ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
 ---
 
-## 🖥️ Unified Local Server Modes
+## 🖥️  Unified Local Server Modes
 
 The pipeline introduces integrated **Server hosting capabilities** in version **0.3.0**, letting you boot up companion servers easily via `--server [type]` or the `server [type]` command synonym.
 
@@ -188,49 +192,54 @@ Launches a dynamically tuned instance of native `llama-server`. It's engineered 
 * **Endpoint**: `http://localhost:8080`
 
 ### 3. Local Ollama Server Daemon (`ollama`)
-*(Under Active Development / Coming Soon)* Designed to provide unified management and orchestration of the background Ollama daemon API natively.
+Upgraded in **v0.6.0**. Boot up a highly optimized background Ollama daemon process tuned to utilize Flash Attention, quantized key-value caches matching system quantization profiles, and configured keep-alive timeouts to automatically unload models when idle.
+* **Command**: `./pipeline.sh server ollama`  *(or `./pipeline.sh --server ollama`)*
+* **Endpoint**: `http://localhost:11434`
 
 ---
 
-## ⚙️ Prerequisites & Installation
+## ⚙️  Prerequisites & Installation
 
 ### Core Utilities
 Ensure you have standard system packages installed:
 ```bash
 # Debian / Ubuntu / Mint
-sudo apt update && sudo apt install -y curl jq tor glow cargo
+sudo apt update && sudo apt install -y curl jq sed tor glow cargo
 cargo install htmlq
 
 # macOS (Homebrew)
-brew install jq glow tor htmlq
+brew install jq sed glow tor htmlq
 
 # Arch Linux
-sudo pacman -Syu curl jq tor glow
+sudo pacman -Syu curl jq sed tor glow
 # htmlq can be installed via AUR (e.g. paru -S htmlq) or Cargo:
 cargo install htmlq
 
 # Android / Termux
-pkg install curl jq glow cargo-binstall
+pkg install curl jq sed glow cargo-binstall
 cargo-binstall htmlq
 ```
 
 > [!TIP]
 > The TOR proxy can be provided by several apps on Android. For what it worth, I'm using __[InviZible Pro](https://play.google.com/store/apps/details?id=pan.alexander.tordnscrypt.gp)__.
 
-### Authorization (For Gemini/OpenRouter API)
-Save your OpenRouter API Key inside a private file.
+### Authorization (For OpenRouter API and Vercel AI Gateway)
+Save your OpenRouter / Vercel API Key inside a private file.
 ```bash
-echo "your-openrouter-api-key-here" > ~/.creds
+echo "your-openrouter-or-vercel-api-key-here" > ~/.creds
 chmod 600 ~/.creds
 ```
 
 ### Running Backend Services (When using Local Inference)
 
 #### Option A: Ollama Service
-Ensure Ollama daemon is running, then enable model pulling in `pipeline.sh` (`PULL_MODELS=true`) or pull manually.
+Spwan your local `ollama` server on port `11434` loaded with model auto-routing enabled.
 
 #### Option B: llama.cpp Server
-Spawn your local `llama-server` on port `8080` loaded with your active GGUF models.
+Spawn your local `llama-server` on port `8080` loaded with model auto-routing enabled.
+
+> [!NOTE]
+> Required local models will be pulled automatically.
 
 ---
 
@@ -281,8 +290,9 @@ Force immediate session context compression and memory syncing:
 ### E. Unified Local Server Mode
 Launch an optimized companion server instance:
 ```bash
+./pipeline.sh server ollama    # Deploy already optimized CPU/GPU ollama server
+./pipeline.sh server llamacpp  # Deploy already optimized high-performance CPU/GPU llama-server
 ./pipeline.sh server web       # Deploy local PHP documentation/dashboard server
-./pipeline.sh server llamacpp  # Deploy the high-performance CPU/GPU llama-server
 ```
 
 ---
@@ -308,15 +318,14 @@ This pipeline is forged under deep iteration and synergistic design:
 * **Lead Developer / Architect**: **Jiab77**
 * **AI Sorcerer & Co-Creator**: **Jarvis (Gemini)**
 
----
+## ⚖️  License & Project Status
 
-## ⚖️ License & Project Status
-
-* **Project Phase**: Experimental Work-in-Progress (WiP).
-* **Next Roadmap Milestones**: Generalizing Route C (Task Mode) consensus blocks to support fully-local workflows (Ollama & llama.cpp), and integrating `charmbracelet/gum` for a next-generation visual terminal experience with elegant fallback support for progressive visual CLI inputs and selections.
-* **License**: Released under the terms of the **MIT License**. See [LICENSE](LICENSE) for details.
-
----
+* **Project Phase**: Active Development / Core Engine Stabilized (v0.6.0).
+* **Next Roadmap Milestones**:
+  * 🛡️  **Zero Data Retention (ZDR) Cloud Enforcement**: Integrate and enforce native Zero Data Retention (ZDR) parameters and headers for external API requests routed through Vercel AI Gateway and OpenRouter, guaranteeing that prompt payloads are never logged, retained, or utilized for training by external providers.
+  * 🚯 **Workspace Sandboxing & Path Protection**: Design a highly secure local execution sandbox policy that automatically and dynamically validates all target-written or read files by LLM-driven actions, ensuring absolute isolation and preventing illegal system directory modifications or unwanted leaks outside the workspace.
+  * 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: Integrate Gum-driven progressive CLI selections, beautiful interactive spinners, inputs, and styled multi-line text boxes with robust, zero-overhead fallbacks to standard pure-Bash read loops for non-interactive / SSH terminals.
+  * 🌐 **Fully-Local Consensus Execution**: Scale the 3-stage Multi-Agent Consensus pipeline (Architect 🏛️  &rarr; Coder 💻 &rarr; Judge ⚖️  into local offline modes natively, allowing high-performance execution completely disconnected from external cloud APIs.
 
 ## 📈 Star History
 

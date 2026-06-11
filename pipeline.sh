@@ -15,7 +15,7 @@
 #  - https://vercel.com/docs/ai-gateway/capabilities/zdr
 #  - https://openrouter.ai/docs/guides/features/zdr
 #
-# Version: 0.6.0
+# Version: 0.6.1
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -359,7 +359,7 @@ create_local_data_store() {
 }
 
 create_local_model_cache() {
-  if [[ $(is_termux) ]]; then
+  if is_termux; then
     OLLAMA_CACHE="${HOME}/models/ollama"
     LLAMACPP_CACHE="${HOME}/models/llama.cpp"
   fi
@@ -368,7 +368,7 @@ create_local_model_cache() {
 }
 
 set_temp_files() {
-  if [[ $(is_termux) ]]; then
+  if is_termux; then
     TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
     TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
     TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
@@ -388,7 +388,7 @@ set_cpu_cores() {
     [[ -r /proc/cpuinfo ]] && cores=$(grep -c processor </proc/cpuinfo)
   fi
   if [[ -n $cores ]]; then
-    if [[ $(is_termux) ]]; then
+    if is_termux; then
       MAX_CORES=$(( cores / 2 ))   # This should prevent burning mobile phones
     else
       MAX_CORES=$(( cores > 1 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS

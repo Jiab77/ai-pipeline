@@ -9,7 +9,7 @@
 #
 # Created by Jarvis & Jiab77
 #
-# Version: 0.0.1
+# Version: 0.1.0
 # ==============================================================================
 
 # Options
@@ -225,6 +225,47 @@ handle_github() {
   fi
 }
 
+# 1b. RAW GITHUB ROUTER
+handle_raw_github() {
+  local url="$1"
+  log "Handling URL as Raw GitHub target: $url"
+
+  # Remove protocol and domain
+  local path="${url#*://*/}"  # e.g., "Jiab77/ai-pipeline/refs/heads/main/README.md"
+
+  local owner="${path%%/*}"
+  local temp="${path#*/}"
+  local repo="${temp%%/*}"
+  local remaining="${temp#*/}"    # e.g., "refs/heads/main/README.md" or "main/README.md"
+
+  local branch file_path
+  if [[ $remaining =~ ^(refs/(heads|tags|pull)/[^/]+)/(.*) ]]; then
+    branch="${BASH_REMATCH[1]}"   # "refs/heads/main"
+    file_path="${BASH_REMATCH[3]}" # "README.md"
+  else
+    branch="${remaining%%/*}"
+    file_path="${remaining#*/}"
+  fi
+
+  log "Raw GitHub Parse: owner=$owner repo=$repo branch=$branch file=$file_path"
+
+  local raw_content
+  if raw_content=$(curl "${CURL_OPTS[@]}" "$url"); then
+    local ext="${file_path##*.}"
+    [[ $ext == "$file_path" ]] && ext="text" # no extension
+
+    echo "# 📄 File: $file_path"
+    echo "> **Repository:** [$owner/$repo]($url) | **Branch/Reference:** \`$branch\`"
+    echo ""
+    echo "\`\`\`$ext"
+    echo "$raw_content"
+    echo "\`\`\`"
+  else
+    echo "Error: Could not retrieve raw file from $url" >&2
+    exit 2
+  fi
+}
+
 # 2. GITLAB ROUTER
 handle_gitlab() {
   local url="$1"
@@ -234,20 +275,45 @@ handle_gitlab() {
   url="${url%.git}"
   url="${url%/}"
 
-  # GitLab matches:
-  # File: https://gitlab.com/owner/repo/-/blob/branch/path
-  # Tree: https://gitlab.com/owner/repo/-/tree/branch/path
-  # Repo: https://gitlab.com/owner/repo
-  
-  if [[ $url =~ ^https?://(www\.)?gitlab\.com/([^/]+)/([^/]+)/-/blob/([^/]+)/(.+)$ ]]; then
-    local owner="${BASH_REMATCH[2]}"
-    local repo="${BASH_REMATCH[3]}"
-    local branch="${BASH_REMATCH[4]}"
-    local file_path="${BASH_REMATCH[5]}"
+  if [[ $url =~ (.*)/-/raw/([^/]+)/(.*) ]]; then
+    local raw_project_path="${BASH_REMATCH[1]}"
+    local branch="${BASH_REMATCH[2]}"
+    local file_path="${BASH_REMATCH[3]}"
+    
+    local project_path="${raw_project_path#*://*/}"
+    local owner="${project_path%/*}"
+    local repo="${project_path##*/}"
+
+    log "GitLab Raw: owner=$owner repo=$repo branch=$branch file=$file_path"
+
+    local raw_content
+    if raw_content=$(curl "${CURL_OPTS[@]}" "$url"); then
+      local ext="${file_path##*.}"
+      [[ $ext == "$file_path" ]] && ext="text"
+
+      echo "# 📄 File: $file_path (GitLab Raw)"
+      echo "> **Repository:** [$owner/$repo]($raw_project_path) | **Branch:** \`$branch\`"
+      echo ""
+      echo "\`\`\`$ext"
+      echo "$raw_content"
+      echo "\`\`\`"
+    else
+      echo "Error: Could not retrieve raw file from $url" >&2
+      exit 2
+    fi
+
+  elif [[ $url =~ (.*)/-/blob/([^/]+)/(.*) ]]; then
+    local raw_project_path="${BASH_REMATCH[1]}"
+    local branch="${BASH_REMATCH[2]}"
+    local file_path="${BASH_REMATCH[3]}"
+    
+    local project_path="${raw_project_path#*://*/}"
+    local owner="${project_path%/*}"
+    local repo="${project_path##*/}"
 
     log "GitLab Blob: owner=$owner repo=$repo branch=$branch file=$file_path"
 
-    local raw_url="https://gitlab.com/$owner/$repo/-/raw/$branch/$file_path"
+    local raw_url="${raw_project_path}/-/raw/${branch}/${file_path}"
     local raw_content
 
     if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
@@ -255,7 +321,7 @@ handle_gitlab() {
       [[ $ext == "$file_path" ]] && ext="text"
 
       echo "# 📄 File: $file_path (GitLab)"
-      echo "> **Repository:** [$owner/$repo]($url) | **Branch:** \`$branch\`"
+      echo "> **Repository:** [$owner/$repo]($raw_project_path) | **Branch:** \`$branch\`"
       echo ""
       echo "\`\`\`$ext"
       echo "$raw_content"
@@ -265,21 +331,24 @@ handle_gitlab() {
       exit 2
     fi
 
-  elif [[ $url =~ ^https?://(www\.)?gitlab\.com/([^/]+)/([^/]+)/-/tree/([^/]+)(/(.+))?$ ]]; then
-    local owner="${BASH_REMATCH[2]}"
-    local repo="${BASH_REMATCH[3]}"
-    local branch="${BASH_REMATCH[4]}"
-    local dir_path="${BASH_REMATCH[6]}"
+  elif [[ $url =~ (.*)/-/tree/([^/]+)(/(.*))? ]]; then
+    local raw_project_path="${BASH_REMATCH[1]}"
+    local branch="${BASH_REMATCH[2]}"
+    local dir_path="${BASH_REMATCH[4]}"
+    
+    local project_path="${raw_project_path#*://*/}"
+    local owner="${project_path%/*}"
+    local repo="${project_path##*/}"
+    local encoded_project="${project_path////%2F}"
 
     log "GitLab Tree: owner=$owner repo=$repo branch=$branch dir=$dir_path"
 
-    local enc_path="${owner}%2F${repo}"
-    local api_url="https://gitlab.com/api/v4/projects/$enc_path/repository/tree?ref=$branch&path=$dir_path"
+    local api_url="https://gitlab.com/api/v4/projects/$encoded_project/repository/tree?ref=$branch&path=$dir_path"
     local json_data
 
     if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
       echo "# 📂 Directory (GitLab): \`/$dir_path\`"
-      echo "> **Repository:** [$owner/$repo]($url) | **Ref:** \`$branch\`"
+      echo "> **Repository:** [$owner/$repo]($raw_project_path) | **Ref:** \`$branch\`"
       echo ""
       echo "| Name | Type | Link |"
       echo "| --- | --- | --- |"
@@ -292,9 +361,9 @@ handle_gitlab() {
         path_item=$(jq -rc '.path' <<< "$row")
 
         if [[ $type == tree ]]; then
-          echo "| 📁 $name | \`directory\` | [View](https://gitlab.com/$owner/$repo/-/tree/$branch/$path_item) |"
+          echo "| 📁 $name | \`directory\` | [View](${raw_project_path}/-/tree/$branch/$path_item) |"
         else
-          echo "| 📄 $name | \`file\` | [Raw](https://gitlab.com/$owner/$repo/-/raw/$branch/$path_item) |"
+          echo "| 📄 $name | \`file\` | [Raw](${raw_project_path}/-/raw/$branch/$path_item) |"
         fi
       done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
     else
@@ -302,15 +371,15 @@ handle_gitlab() {
       exit 2
     fi
 
-  elif [[ $url =~ ^https?://(www\.)?gitlab\.com/([^/]+)/([^/]+)/?$ ]]; then
-    local owner="${BASH_REMATCH[2]}"
-    local repo="${BASH_REMATCH[3]}"
+  else
+    local project_path="${url#*://*/}"
+    local owner="${project_path%/*}"
+    local repo="${project_path##*/}"
+    local encoded_project="${project_path////%2F}"
 
     log "GitLab Repo Home: owner=$owner repo=$repo"
 
-    # Gitlab projects API: encode path
-    local enc_path="${owner}%2F${repo}"
-    local api_url="https://gitlab.com/api/v4/projects/$enc_path"
+    local api_url="https://gitlab.com/api/v4/projects/$encoded_project"
     
     local meta_json
     if ! meta_json=$(curl "${CURL_OPTS[@]}" "$api_url"); then
@@ -338,7 +407,6 @@ handle_gitlab() {
     echo ""
 
     if [[ -n $readme_url_web ]]; then
-      # Convert .../-/blob/... to .../-/raw/...
       local readme_raw_url="${readme_url_web//\/-\/blob\//\/-\/raw\/}"
       local readme_content
       readme_content=$(curl "${CURL_OPTS[@]}" "$readme_raw_url" 2>/dev/null)
@@ -352,9 +420,6 @@ handle_gitlab() {
     else
       echo "*No README found on GitLab project.*"
     fi
-  else
-    echo "Error: Unsupported GitLab URL format." >&2
-    exit 1
   fi
 }
 
@@ -399,10 +464,67 @@ handle_wikipedia() {
   fi
 }
 
+# 3b. MARKDOWN PROBE FALLBACK ROUTER
+handle_markdown_fallback() {
+  local url="$1"
+  log "Checking for Markdown direct availability or probe: $url"
+
+  # Strip hash fragments and query parameters
+  local q="?"
+  local base_url="${url%%#*}"
+  base_url="${base_url%%"$q"*}"
+  local clean_url="${base_url%/}"
+  local target_url="$url"
+  local is_direct_md=false
+
+  if [[ $clean_url == *.md ]]; then
+    target_url="$url"
+    is_direct_md=true
+  else
+    target_url="${clean_url}.md"
+  fi
+
+  # Fetch contents
+  local response_body
+  if response_body=$(curl "${CURL_OPTS[@]}" "$target_url" 2>/dev/null) && [[ -n $response_body ]]; then
+    # Anti-SPA and Anti-HTML check: inspect first few hundred characters for HTML tags
+    local body_chunk="${response_body:0:1000}"
+    local body_chunk_lc
+    body_chunk_lc=$(echo "$body_chunk" | tr '[:upper:]' '[:lower:]')
+
+    if [[ $body_chunk_lc == *"<doctype"* ]] ||        [[ $body_chunk_lc == *"<html"* ]] ||        [[ $body_chunk_lc == *"<body"* ]] ||        [[ $body_chunk_lc == *"<head"* ]]; then
+      log "Probe URL $target_url returned HTML instead of raw Markdown."
+      return 1
+    fi
+
+    # SUCCESS!
+    log "Markdown version found dynamically at: $target_url"
+
+    local page_title="${clean_url##*/}"
+    page_title="${page_title//-/ }"
+    page_title="${page_title//_/ }"
+    # Simple word capitalization using awk
+    page_title="$(echo "$page_title" | awk '{for(i=1;i<=NF;i++){sub(substr($i,1,1),toupper(substr($i,1,1)),$i);}}1')"
+
+    echo "# 📄 Document: $page_title"
+    echo "> **Source URL:** [$url]($url)"
+    if [[ $is_direct_md == false ]]; then
+      echo "> **Markdown Source:** [$target_url]($target_url)"
+    fi
+    echo ""
+    echo "---"
+    echo ""
+    echo "$response_body"
+    return 0
+  else
+    log "Probe for Markdown at $target_url failed."
+    return 1
+  fi
+}
+
 # 4. GENERAL FALLBACK ROUTER (Using htmlq)
 handle_fallback() {
   local url="$1"
-  log "No custom API router found. Using general fallback parser: $url"
 
   # Fetch raw HTML
   local html_data
@@ -456,10 +578,14 @@ handle_fallback() {
 
 if [[ $URL =~ (www\.)?github\.com ]]; then
   handle_github "$URL"
+elif [[ $URL =~ raw\.githubusercontent\.com ]]; then
+  handle_raw_github "$URL"
 elif [[ $URL =~ (www\.)?gitlab\.com ]]; then
   handle_gitlab "$URL"
 elif [[ $URL =~ [a-z0-9-]+\.wikipedia\.org ]]; then
   handle_wikipedia "$URL"
 else
-  handle_fallback "$URL"
+  if ! handle_markdown_fallback "$URL"; then
+    handle_fallback "$URL"
+  fi
 fi

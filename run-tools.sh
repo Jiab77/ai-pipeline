@@ -7,7 +7,7 @@
 #
 # Made by Gemini 3.5 Flash Extended / Improved by Jiab77 & Jarvis
 #
-# Version 0.2.2 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
+# Version 0.2.3 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
@@ -23,7 +23,7 @@ BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
 SCRIPT_DIR="$(realpath "${0%/*}")"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
-WEB_FETCH="${SCRIPT_DIR}/web_fetch.sh"
+WEB_FETCH="${SCRIPT_DIR}/web-fetch.sh"
 LOG_FILE="${SCRIPT_NAME}.log"
 
 # Arguments

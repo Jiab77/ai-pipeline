@@ -99,7 +99,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 | :--- | :--- |
 | [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.6.2)**: Manages arguments (both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter/Vercel, and manages memory with complete robust JQ payload immunization. |
 | [`run-tools.sh`](run-tools.sh) | **Execution Runner (v0.2.3)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
-| [`web-fetch.sh`](web-fetch.sh) | **Smart Web Crawler Engine**: Employs domain-specific API endpoints (GitHub, GitLab, Wikipedia) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. |
+| [`web-fetch.sh`](web-fetch.sh) | **Smart Web Crawler Engine (v0.1.0)**: Employs domain-specific API endpoints (GitHub, GitLab, Wikipedia) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. |
 | [`tools.json`](tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for Function Calling (matching the OpenRouter model spec). |
 | [`tools-light.json`](tools-light.json) | **Declaration Schemas**: Simplified version for small local models |
 

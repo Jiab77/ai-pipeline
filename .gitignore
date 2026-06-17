@@ -1,6 +1,7 @@
 # Files that must never be published
 data/
+models/
 test.sh
 run-tools-test.sh
 run-tools.log
-web_fetch.log
+web-fetch.log

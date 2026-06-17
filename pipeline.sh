@@ -15,7 +15,7 @@
 #  - https://vercel.com/docs/ai-gateway/capabilities/zdr
 #  - https://openrouter.ai/docs/guides/features/zdr
 #
-# Version: 0.6.2
+# Version: 0.6.3
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -429,7 +429,7 @@ set_cpu_cores() {
   fi
   if [[ -n $cores ]]; then
     if is_termux; then
-      MAX_CORES=$(( cores > 1 ? cores - 2 : 1 ))    # Leave at least two CPU cores to prevent burning mobile phones
+      MAX_CORES=$(( cores > 1 ? cores / 2 : 1 ))    # Use half of available CPU cores to prevent burning mobile devices
     else
       MAX_CORES=$(( cores > 1 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
     fi
@@ -2237,21 +2237,21 @@ init_pipeline() {
       llamacpp)
         # Downloading models for llama.cpp
         log_info "Preloading required local models for llama.cpp server..."
-        log_info "Preloading '${CHAT_MODEL}'...\n"
+        log_info "Preloading '${CHAT_MODEL}'..."
         LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${CHAT_MODEL}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
-        log ; log_info "Preloading '${LLAMACPP_ROUTER}:${quant_upper}'...\n"
+        llama-cli -hf "${CHAT_MODEL}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMACPP_ROUTER}:${quant_upper}'..."
         LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_ROUTER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
-        log ; log_info "Preloading '${LLAMACPP_ARCHITECT}:${quant_upper}'...\n"
+        llama-cli -hf "${LLAMACPP_ROUTER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMACPP_ARCHITECT}:${quant_upper}'..."
         LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_ARCHITECT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
-        log ; log_info "Preloading '${LLAMACPP_CODER}:${quant_upper}'...\n"
+        llama-cli -hf "${LLAMACPP_ARCHITECT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMACPP_CODER}:${quant_upper}'..."
         LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_CODER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
-        log ; log_info "Preloading '${LLAMACPP_JUDGE}:${quant_upper}'...\n"
+        llama-cli -hf "${LLAMACPP_CODER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMACPP_JUDGE}:${quant_upper}'..."
         LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_JUDGE}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        llama-cli -hf "${LLAMACPP_JUDGE}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
         log_debug "Reloading llama.cpp GGUF models cache..."
         curl -sSL "${LLAMACPP_API_SRV}/models?reload=1" &>/dev/null || error "Failed to reload llama.cpp GGUF models cache."
         log ; log_success "All required local llama.cpp models preloaded successfully."

@@ -89,7 +89,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 🧅 **Tor Proxy Support**: Outbound connections to `openrouter.ai` can automatically be routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) using custom User-Agents for secure, private, and geo-independent requests.
 - 💾 **Structured JSON Memory**: Keeps a running context of your conversation in `data/messages.json` and persistent user/system profile rules in `data/memory.json`.
 - 🤖 **Local-First & Hybrid Approach**: Switch seamlessly between local inference servers (Ollama, llama.cpp running on GPU/CPU machines) and highly optimized cloud APIs (Google Gemini via OpenRouter).
-- 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, `sed` and `bash`.
+- 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, `sed`, `awk` and `bash`.
 
 ---
 
@@ -99,7 +99,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 | :--- | :--- |
 | [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.6.0)**: Manages arguments (both flags and seamless command synonyms), parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, handles server-hosting modes, issues requests to Ollama/llama.cpp/OpenRouter/Vercel, and manages memory with complete robust JQ payload immunization. |
 | [`run-tools.sh`](run-tools.sh) | **Execution Runner (v0.2.1)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
-| [`web_fetch.sh`](web_fetch.sh) | **Smart Web Crawler Engine**: Employs domain-specific API endpoints (GitHub, GitLab, Wikipedia) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. |
+| [`web-fetch.sh`](web-fetch.sh) | **Smart Web Crawler Engine**: Employs domain-specific API endpoints (GitHub, GitLab, Wikipedia) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. |
 | [`tools.json`](tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for Function Calling (matching the OpenRouter model spec). |
 
 ---

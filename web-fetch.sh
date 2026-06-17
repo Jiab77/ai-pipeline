@@ -4,12 +4,13 @@
 # ==============================================================================
 #
 # A smart, ultra-optimized web content fetcher that targets specific public
-# APIs (GitHub, GitLab, Wikipedia) for 100% fidelity, and falls back to a clean
-# HTML parser using curl & htmlq, or JS headless browser proxy.
+# APIs (GitHub, GitLab, CodeBerg, SourceHut, Wikipedia) for 100% fidelity,
+# and falls back to a clean HTML parser using curl & htmlq, or JS headless
+# browser proxy.
 #
 # Created by Jarvis & Jiab77
 #
-# Version: 0.1.0
+# Version: 0.2.0
 # ==============================================================================
 
 # Options
@@ -43,15 +44,15 @@ while [[ $# -gt 0 ]]; do
     --no-tor)
       USE_TOR=false
       shift
-      ;;
+    ;;
     -j|--js)
       USE_JS=true
       shift
-      ;;
+    ;;
     -*)
       echo "Error: Unknown option $1" >&2
       exit 1
-      ;;
+    ;;
     *)
       if [[ -z $URL ]]; then
         URL="$1"
@@ -60,7 +61,7 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       shift
-      ;;
+    ;;
   esac
 done
 
@@ -231,7 +232,7 @@ handle_raw_github() {
   log "Handling URL as Raw GitHub target: $url"
 
   # Remove protocol and domain
-  local path="${url#*://*/}"  # e.g., "Jiab77/ai-pipeline/refs/heads/main/README.md"
+  local path="${url#*://*/}"    # e.g., "Jiab77/ai-pipeline/refs/heads/main/README.md"
 
   local owner="${path%%/*}"
   local temp="${path#*/}"
@@ -423,7 +424,449 @@ handle_gitlab() {
   fi
 }
 
-# 3. WIKIPEDIA ROUTER
+# 4. CODEBERG ROUTER (Forgejo/Gitea compatible)
+handle_codeberg() {
+  local url="$1"
+  log "Handling URL as Codeberg target: $url"
+
+  # Clean trailing slash or .git
+  url="${url%.git}"
+  url="${url%/}"
+
+  if [[ $url =~ ^https?://(www.)?codeberg.org/([^/]+)/([^/]+)/raw/(branch|commit|tag)/([^/]+)/(.+)$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    local ref_type="${BASH_REMATCH[4]}"
+    local ref="${BASH_REMATCH[5]}"
+    local file_path="${BASH_REMATCH[6]}"
+
+    log "Codeberg Raw: owner=$owner repo=$repo ref_type=$ref_type ref=$ref file=$file_path"
+    
+    local raw_content
+    if raw_content=$(curl "${CURL_OPTS[@]}" "$url"); then
+      local ext="${file_path##*.}"
+      [[ $ext == "$file_path" ]] && ext="text" # no extension
+
+      echo "# 📄 File: $file_path (Codeberg Raw)"
+      echo "> **Repository:** [$owner/$repo]($url) | **Ref:** \`$ref\`"
+      echo ""
+      echo "\`\`\`$ext"
+      echo "$raw_content"
+      echo "\`\`\`"
+    else
+      echo "Error: Could not retrieve raw file from $url" >&2
+      exit 2
+    fi
+
+  elif [[ $url =~ ^https?://(www.)?codeberg.org/([^/]+)/([^/]+)/src/(branch|commit|tag)/([^/]+)/(.+)$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    local ref_type="${BASH_REMATCH[4]}"
+    local ref="${BASH_REMATCH[5]}"
+    local file_path="${BASH_REMATCH[6]}"
+
+    log "Codeberg Src: owner=$owner repo=$repo ref_type=$ref_type ref=$ref file=$file_path"
+
+    local raw_url="https://codeberg.org/$owner/$repo/raw/$ref_type/$ref/$file_path"
+    local raw_content
+
+    if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
+      local ext="${file_path##*.}"
+      [[ $ext == "$file_path" ]] && ext="text"
+
+      echo "# 📄 File: $file_path (Codeberg)"
+      echo "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`"
+      echo ""
+      echo "\`\`\`$ext"
+      echo "$raw_content"
+      echo "\`\`\`"
+    else
+      # It might be a directory or some other resource. Let's try the contents API!
+      local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/contents/$file_path?ref=$ref"
+      local json_data
+      if json_data=$(curl "${CURL_OPTS[@]}" "$api_url" 2>/dev/null); then
+        # Check if it's a directory (i.e. returns a JSON array)
+        if jq -e 'type == "array"' <<< "$json_data" >/dev/null 2>&1; then
+          echo "# 📂 Directory (Codeberg): \`/$file_path\`"
+          echo "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`"
+          echo ""
+          echo "| Name | Type | Size | Download Link |"
+          echo "| --- | --- | --- | --- |"
+
+          while read -r row; do
+            [[ -z $row ]] && continue
+            local name type size download_url
+            name=$(jq -rc '.name' <<< "$row")
+            type=$(jq -rc '.type' <<< "$row")
+            size=$(jq -rc '.size' <<< "$row")
+            download_url=$(jq -rc '.download_url // empty' <<< "$row")
+
+            local size_str="${size} B"
+            if [[ $size -gt 1048576 ]]; then
+              size_str="$(echo "scale=2; $size / 1048576" | bc) MB"
+            elif [[ $size -gt 1024 ]]; then
+              size_str="$(echo "scale=2; $size / 1024" | bc) KB"
+            fi
+
+            if [[ $type == "dir" ]]; then
+              echo "| 📁 $name | \`$type\` | - | [View](${url}/${name}) |"
+            else
+              echo "| 📄 $name | \`$type\` | $size_str | [Raw Link]($download_url) |"
+            fi
+          done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
+        else
+          echo "Error: Could not retrieve raw file or directory listing from Codeberg." >&2
+          exit 2
+        fi
+      else
+        echo "Error: Could not retrieve raw file from $raw_url" >&2
+        exit 2
+      fi
+    fi
+
+  elif [[ $url =~ ^https?://(www.)?codeberg.org/([^/]+)/([^/]+)/src/([^/]+)/(.+)$ ]]; then
+    # No branch/commit/tag specified in URL but we have a src path, e.g. /src/main/assets
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    local ref="${BASH_REMATCH[4]}"
+    local file_path="${BASH_REMATCH[5]}"
+
+    log "Codeberg Src (Implicit Ref): owner=$owner repo=$repo ref=$ref file=$file_path"
+
+    # We can try to fetch from API using implicit ref
+    local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/contents/$file_path?ref=$ref"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url" 2>/dev/null); then
+      if jq -e 'type == "array"' <<< "$json_data" >/dev/null 2>&1; then
+        echo "# 📂 Directory (Codeberg): \`/$file_path\`"
+        echo "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`"
+        echo ""
+        echo "| Name | Type | Size | Download Link |"
+        echo "| --- | --- | --- | --- |"
+
+        while read -r row; do
+          [[ -z $row ]] && continue
+          local name type size download_url
+          name=$(jq -rc '.name' <<< "$row")
+          type=$(jq -rc '.type' <<< "$row")
+          size=$(jq -rc '.size' <<< "$row")
+          download_url=$(jq -rc '.download_url // empty' <<< "$row")
+
+          local size_str="${size} B"
+          if [[ $size -gt 1048576 ]]; then
+            size_str="$(echo "scale=2; $size / 1048576" | bc) MB"
+          elif [[ $size -gt 1024 ]]; then
+            size_str="$(echo "scale=2; $size / 1024" | bc) KB"
+          fi
+
+          if [[ $type == "dir" ]]; then
+            echo "| 📁 $name | \`$type\` | - | [View](${url}/${name}) |"
+          else
+            echo "| 📄 $name | \`$type\` | $size_str | [Raw Link]($download_url) |"
+          fi
+        done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
+      else
+        local raw_url="https://codeberg.org/$owner/$repo/raw/branch/$ref/$file_path"
+        local raw_content
+        if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
+          local ext="${file_path##*.}"
+          [[ $ext == "$file_path" ]] && ext="text"
+          echo "# 📄 File: $file_path (Codeberg)"
+          echo "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`"
+          echo ""
+          echo "\`\`\`$ext"
+          echo "$raw_content"
+          echo "\`\`\`"
+        else
+          echo "Error: Could not retrieve raw file from $raw_url" >&2
+          exit 2
+        fi
+      fi
+    else
+      echo "Error: Could not retrieve info for $file_path" >&2
+      exit 2
+    fi
+
+  else
+    # Repository home URL!
+    # e.g., https://codeberg.org/Forgejo/forgejo
+    if [[ $url =~ ^https?://(www.)?codeberg.org/([^/]+)/([^/]+)/?$ ]]; then
+      local owner="${BASH_REMATCH[2]}"
+      local repo="${BASH_REMATCH[3]}"
+
+      log "Codeberg Repo Home: owner=$owner repo=$repo"
+
+      local api_url="https://codeberg.org/api/v1/repos/$owner/$repo"
+      local meta_json
+      if ! meta_json=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+        echo "Error: Could not retrieve repository metadata from $api_url" >&2
+        exit 2
+      fi
+
+      local name desc stars forks issues lang license def_branch web_url
+      name=$(jq -rc '.name' <<< "$meta_json")
+      desc=$(jq -rc '.description' <<< "$meta_json")
+      stars=$(jq -rc '.stars_count' <<< "$meta_json")
+      forks=$(jq -rc '.forks_count' <<< "$meta_json")
+      issues=$(jq -rc '.open_issues_count' <<< "$meta_json")
+      lang=$(jq -rc '.language' <<< "$meta_json")
+      license=$(jq -rc '.license // "None"' <<< "$meta_json")
+      def_branch=$(jq -rc '.default_branch' <<< "$meta_json")
+      web_url=$(jq -rc '.html_url' <<< "$meta_json")
+
+      echo "# 🏔️ Codeberg: $owner / $name"
+      echo "> **Description:** $desc"
+      echo ""
+      echo "### 📊 Repository Statistics"
+      echo "- ⭐ **Stars:** $stars | 🍴 **Forks:** $forks | 🐛 **Issues:** $issues"
+      echo "- 💻 **Language:** $lang | 📄 **License:** $license | 🌿 **Default Branch:** $def_branch"
+      echo "- 🌐 **Web:** [$web_url]($web_url)"
+      echo ""
+      echo "---"
+      echo ""
+
+      # Try to fetch default branch README.md
+      local readme_url="https://codeberg.org/$owner/$repo/raw/branch/$def_branch/README.md"
+      local readme_content
+      if readme_content=$(curl "${CURL_OPTS[@]}" "$readme_url" 2>/dev/null); then
+        echo "### 📖 README.md"
+        echo ""
+        echo "$readme_content"
+      else
+        # Try lowercase readme
+        readme_url="https://codeberg.org/$owner/$repo/raw/branch/$def_branch/readme.md"
+        if readme_content=$(curl "${CURL_OPTS[@]}" "$readme_url" 2>/dev/null); then
+          echo "### 📖 readme.md"
+          echo ""
+          echo "$readme_content"
+        else
+          echo "*No README found or error fetching README.*"
+        fi
+      fi
+    else
+      echo "Error: Invalid Codeberg URL format." >&2
+      exit 1
+    fi
+  fi
+}
+
+# 5. SOURCEHUT ROUTER
+handle_sourcehut() {
+  local url="$1"
+  log "Handling URL as SourceHut target: $url"
+
+  # For SourceHut, we must use a CLI user agent (like curl) to bypass the "go-away" bot check.
+  local sourcehut_curl_opts=()
+  for opt in "${CURL_OPTS[@]}"; do
+    if [[ $opt == "$USER_AGENT" ]]; then
+      sourcehut_curl_opts+=("curl/7.81.0")
+    else
+      sourcehut_curl_opts+=("$opt")
+    fi
+  done
+
+  # Clean trailing slash or .git
+  url="${url%.git}"
+  url="${url%/}"
+
+  # Check if it's a Hub Project Page directly
+  if [[ $url =~ ^https?://(www.)?sr.ht/~([^/]+)/([^/]+)/?$ ]]; then
+    local owner="~${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    log "SourceHut Hub Project: owner=$owner repo=$repo"
+
+    # Fetch from sr.ht (add trailing slash to be safe and avoid redirects)
+    local hub_url="https://sr.ht/$owner/$repo/"
+    local html_data
+    if html_data=$(curl "${sourcehut_curl_opts[@]}" "$hub_url") && [[ -n $html_data ]]; then
+      local title desc main_text
+      title=$(htmlq "title" --text <<< "$html_data" | xargs)
+      desc=$(htmlq ".header-extension" --text <<< "$html_data" | xargs)
+      main_text=$(htmlq ".markdown" --text <<< "$html_data" 2>/dev/null)
+
+      echo "# 🌌 SourceHut Project: $title"
+      if [[ -n $desc ]]; then
+        echo "> **Description:** $desc"
+      fi
+      echo "> **Source Page:** [$hub_url]($hub_url)"
+      echo "---"
+      echo ""
+      if [[ -n $main_text ]]; then
+        echo "### 📖 Project README"
+        echo ""
+        echo "$main_text"
+      else
+        echo "*No README found on project page.*"
+      fi
+      return 0
+    else
+      echo "Error: Could not retrieve SourceHut Hub project from $hub_url" >&2
+      exit 2
+    fi
+
+  elif [[ $url =~ ^https?://git.sr.ht/~([^/]+)/([^/]+)/blob/([^/]+)/(.+)$ ]]; then
+    local owner="~${BASH_REMATCH[1]}"
+    local repo="${BASH_REMATCH[2]}"
+    local branch="${BASH_REMATCH[3]}"
+    local file_path="${BASH_REMATCH[4]}"
+
+    log "SourceHut Raw/Blob: owner=$owner repo=$repo branch=$branch file=$file_path"
+
+    local raw_content
+    if raw_content=$(curl "${sourcehut_curl_opts[@]}" "$url" 2>/dev/null); then
+      local ext="${file_path##*.}"
+      [[ $ext == "$file_path" ]] && ext="text"
+
+      echo "# 📄 File: $file_path (SourceHut)"
+      echo "> **Repository:** [$owner/$repo](${url%%/blob/*}) | **Branch:** \`$branch\`"
+      echo ""
+      echo "\`\`\`$ext"
+      echo "$raw_content"
+      echo "\`\`\`"
+    else
+      # FALLBACK TO HUB PROJECT PAGE if git blob returns 404!
+      log "Git raw/blob returned 404, falling back to Hub project page..."
+      local hub_url="https://sr.ht/$owner/$repo/"
+      local html_data
+      if html_data=$(curl "${sourcehut_curl_opts[@]}" "$hub_url" 2>/dev/null) && [[ -n $html_data ]]; then
+        local title desc main_text
+        title=$(htmlq "title" --text <<< "$html_data" | xargs)
+        desc=$(htmlq ".header-extension" --text <<< "$html_data" | xargs)
+        main_text=$(htmlq ".markdown" --text <<< "$html_data" 2>/dev/null)
+
+        echo "# 🌌 SourceHut Project (Fallback from blob 404): $title"
+        if [[ -n $desc ]]; then
+          echo "> **Description:** $desc"
+        fi
+        echo "> **Source Page:** [$hub_url]($hub_url)"
+        echo "---"
+        echo ""
+        if [[ -n $main_text ]]; then
+          echo "### 📖 Project README"
+          echo ""
+          echo "$main_text"
+        else
+          echo "*No README found on project page.*"
+        fi
+        return 0
+      else
+        echo "Error: Could not retrieve raw file from $url or Hub fallback from $hub_url" >&2
+        exit 2
+      fi
+    fi
+
+  elif [[ $url =~ ^https?://git.sr.ht/~([^/]+)/([^/]+)/tree/([^/]+)/item/(.+)$ ]]; then
+    local owner="~${BASH_REMATCH[1]}"
+    local repo="${BASH_REMATCH[2]}"
+    local branch="${BASH_REMATCH[3]}"
+    local file_path="${BASH_REMATCH[4]}"
+
+    log "SourceHut Tree Item: owner=$owner repo=$repo branch=$branch file=$file_path"
+
+    local raw_url="https://git.sr.ht/$owner/$repo/blob/$branch/$file_path"
+    local raw_content
+    if raw_content=$(curl "${sourcehut_curl_opts[@]}" "$raw_url" 2>/dev/null); then
+      local ext="${file_path##*.}"
+      [[ $ext == "$file_path" ]] && ext="text"
+
+      echo "# 📄 File: $file_path (SourceHut)"
+      echo "> **Repository:** [$owner/$repo](${url%%/tree/*}) | **Branch:** \`$branch\`"
+      echo ""
+      echo "\`\`\`$ext"
+      echo "$raw_content"
+      echo "\`\`\`"
+    else
+      echo "Error: Could not retrieve raw file from $raw_url" >&2
+      exit 2
+    fi
+
+  elif [[ $url =~ ^https?://git.sr.ht/~([^/]+)/([^/]+)/?$ ]]; then
+    local owner="~${BASH_REMATCH[1]}"
+    local repo="${BASH_REMATCH[2]}"
+
+    log "SourceHut Repo Home: owner=$owner repo=$repo"
+
+    local html_data
+    if html_data=$(curl "${sourcehut_curl_opts[@]}" "$url" 2>/dev/null); then
+      # Parse metadata using htmlq
+      local title def_branch clone_url
+      title=$(htmlq "title" --text <<< "$html_data" | xargs)
+      def_branch=$(htmlq 'meta[name="vcs:default-branch"]' --attribute content <<< "$html_data" 2>/dev/null | head -n 1)
+      [[ -z $def_branch ]] && def_branch="master"
+      
+      clone_url=$(htmlq 'meta[name="vcs:clone"]' --attribute content <<< "$html_data" 2>/dev/null | head -n 1)
+
+      echo "# 🌌 SourceHut: $title"
+      if [[ -n $clone_url ]]; then
+        echo "> **Clone:** \`git clone $clone_url\`"
+      fi
+      echo "> **Default Branch:** \`$def_branch\`"
+      echo "---"
+      echo ""
+
+      # Attempt to fetch README.md
+      local readme_url="https://git.sr.ht/$owner/$repo/blob/$def_branch/README.md"
+      local readme_content
+      if readme_content=$(curl "${sourcehut_curl_opts[@]}" "$readme_url" 2>/dev/null); then
+        echo "### 📖 README.md"
+        echo ""
+        echo "$readme_content"
+      else
+        # Try lowercase readme
+        readme_url="https://git.sr.ht/$owner/$repo/blob/$def_branch/readme.md"
+        if readme_content=$(curl "${sourcehut_curl_opts[@]}" "$readme_url" 2>/dev/null); then
+          echo "### 📖 readme.md"
+          echo ""
+          echo "$readme_content"
+        else
+          # Just display the page elements we can parse cleanly
+          local main_text
+          main_text=$(htmlq "p, h1, h2, h3, h4, pre" --text <<< "$html_data" 2>/dev/null)
+          if [[ -n $main_text ]]; then
+            echo "$main_text"
+          else
+            echo "*No README found and page could not be parsed.*"
+          fi
+        fi
+      fi
+    else
+      # FALLBACK TO HUB PROJECT PAGE if git repo returns 404!
+      log "Git repo home returned 404, falling back to Hub project page..."
+      local hub_url="https://sr.ht/$owner/$repo/"
+      if html_data=$(curl "${sourcehut_curl_opts[@]}" "$hub_url" 2>/dev/null) && [[ -n $html_data ]]; then
+        local title desc main_text
+        title=$(htmlq "title" --text <<< "$html_data" | xargs)
+        desc=$(htmlq ".header-extension" --text <<< "$html_data" | xargs)
+        main_text=$(htmlq ".markdown" --text <<< "$html_data" 2>/dev/null)
+
+        echo "# 🌌 SourceHut Project (Fallback from Git 404): $title"
+        if [[ -n $desc ]]; then
+          echo "> **Description:** $desc"
+        fi
+        echo "> **Source Page:** [$hub_url]($hub_url)"
+        echo "---"
+        echo ""
+        if [[ -n $main_text ]]; then
+          echo "### 📖 Project README"
+          echo ""
+          echo "$main_text"
+        else
+          echo "*No README found on project page.*"
+        fi
+        return 0
+      else
+        echo "Error: Could not retrieve repository home from $url or Hub fallback from $hub_url" >&2
+        exit 2
+      fi
+    fi
+  else
+    echo "Error: Invalid SourceHut URL format." >&2
+    exit 1
+  fi
+}
+
+
+# 6. WIKIPEDIA ROUTER
 handle_wikipedia() {
   local url="$1"
   log "Handling URL as Wikipedia target: $url"
@@ -464,7 +907,7 @@ handle_wikipedia() {
   fi
 }
 
-# 3b. MARKDOWN PROBE FALLBACK ROUTER
+# 7. MARKDOWN PROBE FALLBACK ROUTER
 handle_markdown_fallback() {
   local url="$1"
   log "Checking for Markdown direct availability or probe: $url"
@@ -492,9 +935,12 @@ handle_markdown_fallback() {
     local body_chunk_lc
     body_chunk_lc=$(echo "$body_chunk" | tr '[:upper:]' '[:lower:]')
 
-    if [[ $body_chunk_lc == *"<doctype"* ]] ||        [[ $body_chunk_lc == *"<html"* ]] ||        [[ $body_chunk_lc == *"<body"* ]] ||        [[ $body_chunk_lc == *"<head"* ]]; then
-      log "Probe URL $target_url returned HTML instead of raw Markdown."
-      return 1
+    if [[ $body_chunk_lc == *"<doctype"* ]] || \
+       [[ $body_chunk_lc == *"<html"* ]] || \
+       [[ $body_chunk_lc == *"<body"* ]] || \
+       [[ $body_chunk_lc == *"<head"* ]]; then
+        log "Probe URL $target_url returned HTML instead of raw Markdown."
+        return 1
     fi
 
     # SUCCESS!
@@ -522,7 +968,7 @@ handle_markdown_fallback() {
   fi
 }
 
-# 4. GENERAL FALLBACK ROUTER (Using htmlq)
+# 8. GENERAL FALLBACK ROUTER (Using htmlq)
 handle_fallback() {
   local url="$1"
 
@@ -576,13 +1022,17 @@ handle_fallback() {
 
 # --- MAIN ROUTING LOGIC ---
 
-if [[ $URL =~ (www\.)?github\.com ]]; then
+if [[ $URL =~ (www.)?github.com ]]; then
   handle_github "$URL"
-elif [[ $URL =~ raw\.githubusercontent\.com ]]; then
+elif [[ $URL =~ raw.githubusercontent.com ]]; then
   handle_raw_github "$URL"
-elif [[ $URL =~ (www\.)?gitlab\.com ]]; then
+elif [[ $URL =~ (www.)?gitlab.com ]]; then
   handle_gitlab "$URL"
-elif [[ $URL =~ [a-z0-9-]+\.wikipedia\.org ]]; then
+elif [[ $URL =~ (www.)?codeberg.org ]]; then
+  handle_codeberg "$URL"
+elif [[ $URL =~ (www.)?(git.)?sr.ht ]]; then
+  handle_sourcehut "$URL"
+elif [[ $URL =~ [a-z0-9-]+.wikipedia.org ]]; then
   handle_wikipedia "$URL"
 else
   if ! handle_markdown_fallback "$URL"; then

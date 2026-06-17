@@ -24,9 +24,7 @@
             "description": "First line to read, 1-based (default: 1)"
           }
         },
-        "required": [
-          "path"
-        ]
+        "required": ["path"]
       }
     }
   },
@@ -51,9 +49,7 @@
             "description": "Base directory to search in"
           }
         },
-        "required": [
-          "path"
-        ]
+        "required": ["path"]
       }
     }
   },
@@ -86,10 +82,7 @@
             "description": "If true, include line numbers in results"
           }
         },
-        "required": [
-          "path",
-          "pattern"
-        ]
+        "required": ["path", "pattern"]
       }
     }
   },
@@ -114,9 +107,7 @@
             "description": "Timeout in seconds (default 10, max 60)"
           }
         },
-        "required": [
-          "command"
-        ]
+        "required": ["command"]
       }
     }
   },
@@ -137,10 +128,7 @@
             "description": "Path of the file to write"
           }
         },
-        "required": [
-          "path",
-          "content"
-        ]
+        "required": ["path", "content"]
       }
     }
   },
@@ -187,10 +175,7 @@
             "description": "Path to the file to edit"
           }
         },
-        "required": [
-          "path",
-          "changes"
-        ]
+        "required": ["path", "changes"]
       }
     }
   },
@@ -207,9 +192,7 @@
             "description": "Unified diff content in git diff format"
           }
         },
-        "required": [
-          "diff"
-        ]
+        "required": ["diff"]
       }
     }
   },
@@ -237,9 +220,7 @@
             "description": "The search query terms to lock up (e.g. 'cachyos arch linux')"
           }
         },
-        "required": [
-          "query"
-        ]
+        "required": ["query"]
       }
     }
   },
@@ -266,9 +247,7 @@
             "default": "socks5h://127.0.0.1:9050"
           }
         },
-        "required": [
-          "url"
-        ]
+        "required": ["url"]
       }
     }
   }

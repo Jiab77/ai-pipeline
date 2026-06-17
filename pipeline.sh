@@ -5,7 +5,7 @@
 #
 # This script handles 'ollama', 'llama.cpp' and 'openrouter' backends.
 #
-# Lead: Jiab77
+# Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
 # Note: This is a WiP and will be improved during next iterations.
@@ -15,44 +15,46 @@
 #  - https://vercel.com/docs/ai-gateway/capabilities/zdr
 #  - https://openrouter.ai/docs/guides/features/zdr
 #
-# Version: 0.6.1
+# Version: 0.6.2
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
 
 # Config
-# RULES="Don't cut or break lines."
-RUN_MODE="chat"    # Expected values: simple, multi, chat, server
-SERVER_MODE="web"   # Expected values: ollama, llamacpp, web
-BACKEND="gemini"    # Expected values: ollama, llamacpp or gemini
-PROVIDER="vercel"   # Expected values: openrouter, vercel
-HEARTBEAT_THRESHOLD=15    # Trigger context consolidation to avoid amnesia and keep context extremely light
-CREDENTIALS="${HOME}/.creds"    # Or any other location or filename you prefer.
-USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"    # You can also set any other user-agents.
+RUN_MODE="chat"                                           # Expected values: simple, multi, chat, server
+SERVER_MODE="web"                                         # Expected values: ollama, llamacpp, web
+BACKEND="gemini"                                          # Expected values: ollama, llamacpp or gemini
+PROVIDER="vercel"                                         # Expected values: openrouter, vercel
+PROVIDER_API_KEY=""                                       # /!\ NEVER PUBLISH IT /!\
+MEMORY_TYPE="json"                                        # Expected values: sql, markdown, json
+HEARTBEAT_THRESHOLD=15                                    # Trigger context consolidation to avoid amnesia and keep context extremely light
+CREDENTIALS="${HOME}/.creds"                              # Or any other location or filename you prefer.
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"    # You can also set any other user-agent.
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
-TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
-MESSAGES_FILE="messages.json"
-MEMORY_FILE="memory.json"
 PULL_MODELS=false
 DEBUG=true
 USE_TOR=true    # Set to 'false' only for debugging
+USE_TOOLS=true  # This will be used to enable / disable tools based on a given model
 
 # Internals
-SCRIPT_DIR="$(dirname "$0")"
-SCRIPT_FILE="$(basename "$0")"
-SCRIPT_NAME="${SCRIPT_FILE//.sh}"
+SCRIPT_DIR="$(realpath "${0%/*}")"
+SCRIPT_FILE="${0##*/}"
+SCRIPT_NAME="${SCRIPT_FILE%.*}"
 DATA_STORE="${SCRIPT_DIR}/data"
-BASE_TOOLS="${SCRIPT_DIR}/tools.json"
+BASE_MODELS="${SCRIPT_DIR}/models"
 WEB_SERVER="${SCRIPT_DIR}/web/server.php"
+TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
+BIN_FIGLET=$(command -v figlet 2>/dev/null)
+TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+
+# TODO: Check if all the temp files below are required when using SQLite db
+TOOLS_OUTPUT="/tmp/tools_output.txt"
 TEMP_MEMORY_SYSTEM="/tmp/memory_sys.txt"
 TEMP_MEMORY_USER="/tmp/memory_usr.txt"
 TEMP_TOOLS_OUTPUT="/tmp/tools_output.json"
 TEMP_PAYLOAD_ASSISTANT="/tmp/payload_assistant.json"
 TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
-TOOLS_OUTPUT="/tmp/tools_output.txt"
-TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
-BIN_FIGLET=$(command -v figlet 2>/dev/null)
 
 # Soul
 AI_NAME="Jarvis"
@@ -77,35 +79,29 @@ ATTRIBUTION_TITLE="Minimalist Experimental AI Pipeline"
 ATTRIBUTION_CATEGORIES="cli-agent,cloud-agent"
 
 # Gemini 3.5 Flash
-# TODO: Use a JSON file for configuring external providers settings
-# Note: Still acceptable for now but might be a nightmare later if we handle more external providers
-if [[ $PROVIDER == "vercel" ]]; then
-  PROVIDER_API_URL="https://ai-gateway.vercel.sh/v1/chat/completions"
-else
-  PROVIDER_API_URL="https://openrouter.ai/api/v1/chat/completions"
-fi
 PROVIDER_API_MODEL="google/gemini-3.5-flash"
-PROVIDER_API_KEY=""    # /!\ NEVER PUBLISH IT /!\
 
 # Models - llama.cpp
 LLAMACPP_API_SRV="http://localhost:8080"
 LLAMACPP_API_URL="${LLAMACPP_API_SRV}/v1/chat/completions"
 LLAMACPP_CHAT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
+LLAMACPP_CHAT_BIG="LiquidAI/LFM2.5-8B-A1B-GGUF"
 LLAMACPP_ROUTER="LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
 LLAMACPP_ARCHITECT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
 LLAMACPP_CODER="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
 LLAMACPP_JUDGE="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
-LLAMACPP_CACHE="/mnt/models/llama.cpp"
+LLAMACPP_CACHE="${BASE_MODELS}/llama.cpp"
 
 # Models - Ollama
 OLLAMA_API_SRV="http://localhost:11434"
 OLLAMA_API_URL="${OLLAMA_API_SRV}/v1/chat/completions"
 OLLAMA_CHAT="hf.co/${LLAMACPP_CHAT}"
+OLLAMA_CHAT_BIG="hf.co/${LLAMACPP_CHAT_BIG}"
 OLLAMA_ROUTER="hf.co/${LLAMACPP_ROUTER}"
 OLLAMA_ARCHITECT="hf.co/${LLAMACPP_ARCHITECT}"
 OLLAMA_CODER="hf.co/${LLAMACPP_CODER}"
 OLLAMA_JUDGE="hf.co/${LLAMACPP_JUDGE}"
-OLLAMA_CACHE="/mnt/models/ollama"
+OLLAMA_CACHE="${BASE_MODELS}/ollama"
 
 # Internals
 OLLAMA_FLAGS="--nowordwrap --hidethinking"
@@ -152,7 +148,7 @@ CLR_CYAN="[36m"
 CLR_WHITE="[37m"
 
 # Emojis/Icons
-ICON_INFO="ℹ️ "
+ICON_INFO="ℹ️  "
 ICON_SUCCESS="✅"
 ICON_WARNING="⚠️ "
 ICON_ERROR="❌"
@@ -306,17 +302,6 @@ error() {
   exit 255
 }
 
-get_chat_model() {
-  local chat_model
-  local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
-  case $BACKEND in
-    ollama) chat_model="${OLLAMA_CHAT}:${quant_upper}" ;;
-    llamacpp) chat_model="${LLAMACPP_CHAT}:${quant_upper}" ;;
-    gemini) chat_model="$PROVIDER_API_MODEL" ;;
-  esac
-  echo -n "$chat_model"
-}
-
 # Extracted from the 'bash-funcs' project
 is_termux() {
   [[ $(printenv | grep -ci "termux") -ne 0 ]] && return 0
@@ -359,12 +344,40 @@ create_local_data_store() {
 }
 
 create_local_model_cache() {
-  if is_termux; then
-    OLLAMA_CACHE="${HOME}/models/ollama"
-    LLAMACPP_CACHE="${HOME}/models/llama.cpp"
-  fi
+  # if is_termux; then
+  #   OLLAMA_CACHE="${HOME}/models/ollama"
+  #   LLAMACPP_CACHE="${HOME}/models/llama.cpp"
+  # fi
   mkdir -p "$OLLAMA_CACHE"
   mkdir -p "$LLAMACPP_CACHE"
+}
+
+get_memory_size() {
+  local total_memory ; total_memory=$(grep "MemTotal:" /proc/meminfo | awk '{ print $2 }')
+  echo -n "$total_memory"
+}
+
+get_chat_model() {
+  local chat_model
+  local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
+  local raw_memory_size ; raw_memory_size=$(get_memory_size)
+  local memory_size ; memory_size=$((raw_memory_size/1024/1024))
+
+  # Set big chat model if device have more than 8GB RAM
+  if [[ $memory_size -gt 8 ]]; then
+    case $BACKEND in
+      ollama) chat_model="${OLLAMA_CHAT_BIG}:${quant_upper}" ;;
+      llamacpp) chat_model="${LLAMACPP_CHAT_BIG}:${quant_upper}" ;;
+      gemini) chat_model="$PROVIDER_API_MODEL" ;;
+    esac
+  else
+    case $BACKEND in
+      ollama) chat_model="${OLLAMA_CHAT}:${quant_upper}" ;;
+      llamacpp) chat_model="${LLAMACPP_CHAT}:${quant_upper}" ;;
+      gemini) chat_model="$PROVIDER_API_MODEL" ;;
+    esac
+  fi
+  echo -n "$chat_model"
 }
 
 set_temp_files() {
@@ -375,6 +388,33 @@ set_temp_files() {
     TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
     TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
     TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
+  fi
+}
+
+set_base_tools() {
+  local raw_memory_size ; raw_memory_size=$(get_memory_size)
+  local memory_size ; memory_size=$((raw_memory_size/1024/1024))
+
+  # Set big chat model if device have more than 8GB RAM
+  case $BACKEND in
+    ollama|llamacpp)
+      if [[ $memory_size -gt 8 ]]; then
+        BASE_TOOLS="${SCRIPT_DIR}/tools.json"
+      else
+        BASE_TOOLS="${SCRIPT_DIR}/tools-light.json"
+      fi
+    ;;
+    gemini) BASE_TOOLS="${SCRIPT_DIR}/tools.json" ;;
+  esac
+}
+
+set_api_provider() {
+  # TODO: Use a JSON file for configuring external providers settings
+  # Note: Still acceptable for now but might be a nightmare later if we handle more external providers
+  if [[ $PROVIDER == "vercel" ]]; then
+    PROVIDER_API_URL="https://ai-gateway.vercel.sh/v1/chat/completions"
+  else
+    PROVIDER_API_URL="https://openrouter.ai/api/v1/chat/completions"
   fi
 }
 
@@ -389,13 +429,35 @@ set_cpu_cores() {
   fi
   if [[ -n $cores ]]; then
     if is_termux; then
-      MAX_CORES=$(( cores / 2 ))   # This should prevent burning mobile phones
+      MAX_CORES=$(( cores > 1 ? cores - 2 : 1 ))    # Leave at least two CPU cores to prevent burning mobile phones
     else
       MAX_CORES=$(( cores > 1 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
     fi
   else
     error "Unable to detect CPU cores."
   fi
+}
+
+set_memory_type() {
+  case $MEMORY_TYPE in
+    # For small local models
+    markdown)
+      MEMORY_FILE="MEMORY.md"
+      MESSAGES_FILE="MESSAGES.md"
+    ;;
+
+    # Our current storage format
+    json)
+      MEMORY_FILE="memory.json"
+      MESSAGES_FILE="messages.json"
+    ;;
+
+    # The futur format for bigger / cloud models able to handle it
+    sql)
+      MEMORY_FILE="memory.db"
+      MESSAGES_FILE="$MEMORY_FILE"
+    ;;
+  esac
 }
 
 show_banner() {
@@ -469,6 +531,7 @@ serve() {
       OLLAMA_MODELS="$OLLAMA_CACHE" \
       OLLAMA_NUM_PARALLEL=1 \
       OLLAMA_KEEP_ALIVE="$MAX_LIFETIME" \
+      OLLAMA_IGPU_ENABLE=true \
       OLLAMA_FLASH_ATTENTION=true \
       OLLAMA_KV_CACHE_TYPE="$QUANTIZATION" \
       OLLAMA_CONTEXT_LENGTH="$MAX_CONTEXT" \
@@ -561,8 +624,8 @@ call_task_agent() {
   local system_inst="$2"
   local user_content="$3"
   local purpose_msg="$4"
-  local tools_option="${5:-all}"      # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
-  local enable_reasoning="${6:-true}" # true or false
+  local tools_option="${5:-all}"        # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
+  local enable_reasoning="${6:-true}"   # true or false
   local active_model
 
   # Select the right agent model
@@ -598,7 +661,7 @@ call_task_agent() {
     tools_payload=$(<"$BASE_TOOLS")
   elif [[ "$tools_option" == "readonly" ]]; then
     # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
-    tools_payload=$(jq '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
+    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
   fi
 
   # Initialize local MESSAGES array in-memory for this specific agent's execution loop
@@ -680,7 +743,7 @@ call_task_agent() {
     if [[ -n $tools && $tools != "null" ]]; then
       # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
       if [[ "$tools_option" == "none" ]]; then
-        log_warn "Received unexpected tool calls despite tools disabled!" >&2
+        log_warn "Received unexpected tool calls despite tools disabled!"
         break
       fi
 
@@ -700,7 +763,7 @@ call_task_agent() {
           "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
         else
           echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-          log_warn "Tool handler not executable." >&2
+          log_warn "Tool handler not executable."
         fi
 
         # 4. Fallback safeguard for empty output
@@ -718,7 +781,7 @@ call_task_agent() {
           if new_msgs=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
             ALL_MESSAGES="$new_msgs"
           else
-            log_warn "fromjson failed, using fallback --arg serialization" >&2
+            log_warn "fromjson failed, using fallback --arg serialization"
             ALL_MESSAGES=$(jq -rc \
               --arg id "$tool_id" \
               --arg name "$tool_name" \
@@ -728,7 +791,7 @@ call_task_agent() {
           fi
           rm -f "$TEMP_TOOLS_OUTPUT"
         else
-          log_warn "Unable to parse tool output with rawfile, using fallback formatting" >&2
+          log_warn "Unable to parse tool output with rawfile, using fallback formatting"
           local fallback_content
           fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
           ALL_MESSAGES=$(jq -rc \
@@ -779,18 +842,18 @@ call_gemini_task_agent() {
   local system_inst="$1"
   local user_content="$2"
   local purpose_msg="$3"
-  local tools_option="${4:-all}"      # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
-  local enable_reasoning="${5:-true}" # true or false
+  local tools_option="${4:-all}"        # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
+  local enable_reasoning="${5:-true}"   # true or false
 
   log_info "${purpose_msg} (${CLR_B_YELLOW}${PROVIDER_API_MODEL}${ANSI_RESET}) [Tools: ${CLR_B_GREEN}${tools_option}${ANSI_RESET} | Reasoning: ${CLR_B_GREEN}${enable_reasoning}${ANSI_RESET}]..."
 
   # Build the dynamic tools payload based on the tools_option constraint
   local tools_payload=""
   if [[ "$tools_option" == "all" ]]; then
-    tools_payload=$(cat "$BASE_TOOLS")
+    tools_payload=$(<"$BASE_TOOLS")
   elif [[ "$tools_option" == "readonly" ]]; then
     # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
-    tools_payload=$(jq '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
+    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
   fi
 
   # Initialize local MESSAGES array in-memory for this specific agent's execution loop
@@ -801,7 +864,7 @@ call_gemini_task_agent() {
     '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
   )
 
-  local final_content=""
+  local final_content
 
   while true; do
     # Write payload messages to temp file for jq --rawfile
@@ -841,7 +904,7 @@ call_gemini_task_agent() {
     fi
 
     if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res")
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
       error "Unexpected API error.\n\n${err_msg}\n"
     fi
 
@@ -872,7 +935,7 @@ call_gemini_task_agent() {
     if [[ -n $tools && $tools != "null" ]]; then
       # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
       if [[ "$tools_option" == "none" ]]; then
-        log_warn "Received unexpected tool calls despite tools disabled!" >&2
+        log_warn "Received unexpected tool calls despite tools disabled!"
         break
       fi
 
@@ -892,7 +955,7 @@ call_gemini_task_agent() {
           "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
         else
           echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-          log_warn "Tool handler not executable." >&2
+          log_warn "Tool handler not executable."
         fi
 
         # 4. Fallback safeguard for empty output
@@ -910,7 +973,7 @@ call_gemini_task_agent() {
           if new_msgs=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
             ALL_MESSAGES="$new_msgs"
           else
-            log_warn "fromjson failed, using fallback --arg serialization" >&2
+            log_warn "fromjson failed, using fallback --arg serialization"
             ALL_MESSAGES=$(jq -rc \
               --arg id "$tool_id" \
               --arg name "$tool_name" \
@@ -920,7 +983,7 @@ call_gemini_task_agent() {
           fi
           rm -f "$TEMP_TOOLS_OUTPUT"
         else
-          log_warn "Unable to parse tool output with rawfile, using fallback formatting" >&2
+          log_warn "Unable to parse tool output with rawfile, using fallback formatting"
           local fallback_content
           fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
           ALL_MESSAGES=$(jq -rc \
@@ -1262,16 +1325,35 @@ send_message() {
         # Write payload variables to temporary files inside the loop to capture any updates
         printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
-        JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$CHAT_MODEL" \
-          --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-          --rawfile tools "$BASE_TOOLS" \
-          '{
-            model: $model,
-            messages: ($msgs | fromjson),
-            reasoning: {enabled: true}
-          } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
-        )
+        # TODO: Find a better way to set model parameters
+        if [[ $BACKEND == "gemini" ]]; then
+          JSON_PAYLOAD=$(jq -rc -n \
+            --arg model "$CHAT_MODEL" \
+            --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+            --rawfile tools "$BASE_TOOLS" \
+            '{
+              model: $model,
+              messages: ($msgs | fromjson),
+              reasoning: {enabled: true}
+            } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+          )
+        else
+          # This part includes proper models settings for LFM based models
+          JSON_PAYLOAD=$(jq -rc -n \
+            --arg model "$CHAT_MODEL" \
+            --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+            --rawfile tools "$BASE_TOOLS" \
+            '{
+              model: $model,
+              messages: ($msgs | fromjson),
+              reasoning: {enabled: true},
+              temperature: 0.1,
+              top_k: 50,
+              repetition_penality: 1.05
+            } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+          )
+        fi
+        [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
 
         # Sending request and store response
         RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
@@ -1412,13 +1494,15 @@ send_message() {
 }
 
 run_chat() {
+  local backend_upper ; backend_upper=$(to_upper "$BACKEND")
+  local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
+
   set_console_title "${SCRIPT_FILE}: Chat Mode."
   show_banner
   log_info "Initializing chat context..."
-  local backend_upper ; backend_upper=$(to_upper "$BACKEND")
-  local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
-  log_info "Active Backend : ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
-  log_info "Active Provider : ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
+  log_info "Active Backend: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
+  [[ $BACKEND == "gemini" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
+  log_info "Active Model: ${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET}"
   log_info "Conversation online. Type ${CLR_B_GREEN}/help${ANSI_RESET} to view commands."
 
   while true; do
@@ -1469,11 +1553,16 @@ run_chat() {
   exit
 }
 
+# TODO: Add missing logic here for 'sql' / 'json' / 'markdown' implementation
+# Note: Our current working memory type is 'json'.
 run_pipeline() {
+  local backend_upper ; backend_upper=$(to_upper "$BACKEND")
+  local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
+
   set_console_title "${SCRIPT_FILE}: Pipeline Mode."
   log_section "PIPELINE MODE ACTIVATED"
-  local backend_upper ; backend_upper=$(to_upper "$BACKEND")
-  log_info "Active Backend : ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
+  log_info "Active Backend: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
+  [[ $BACKEND == "gemini" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
 
   # Context
   if [[ -n $INPUT_FILE2 && -r $INPUT_FILE && -r $INPUT_FILE2 ]]; then
@@ -1582,16 +1671,34 @@ run_pipeline() {
           # Write payload variables to temporary files inside the loop to capture any updates
           printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
-          JSON_PAYLOAD=$(jq -rc -n \
-            --arg model "$CHAT_MODEL" \
-            --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-            --rawfile tools "$BASE_TOOLS" \
-            '{
-              model: $model,
-              messages: ($msgs | fromjson),
-              reasoning: {enabled: true}
-            } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
-          )
+          # TODO: Find a better way to set model parameters
+          if [[ $BACKEND == "gemini" ]]; then
+            JSON_PAYLOAD=$(jq -rc -n \
+              --arg model "$CHAT_MODEL" \
+              --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+              --rawfile tools "$BASE_TOOLS" \
+              '{
+                model: $model,
+                messages: ($msgs | fromjson),
+                reasoning: {enabled: true}
+              } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+            )
+          else
+            # This part includes proper models settings for LFM based models
+            JSON_PAYLOAD=$(jq -rc -n \
+              --arg model "$CHAT_MODEL" \
+              --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+              --rawfile tools "$BASE_TOOLS" \
+              '{
+                model: $model,
+                messages: ($msgs | fromjson),
+                reasoning: {enabled: true},
+                temperature: 0.5,
+                top_k: 50,
+                repetition_penalty: 1.05
+              } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+            )
+          fi
           [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
 
           # Sending request and store response
@@ -1668,7 +1775,7 @@ run_pipeline() {
                   ALL_MESSAGES=$(jq -rc \
                     --arg id "$tool_id" \
                     --arg name "$tool_name" \
-                    --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
+                    --arg content "$(<"$TEMP_TOOLS_OUTPUT")" \
                     '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                   )
                 fi
@@ -1786,19 +1893,41 @@ run_pipeline() {
         fi
         printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
         printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
-        JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$CHAT_MODEL" \
-          --rawfile system "$TEMP_MEMORY_SYSTEM" \
-          --rawfile user "$TEMP_MEMORY_USER" \
-          '{
-            model: $model,
-            messages: [
-              {role: "system", content: $system},
-              {role: "user", content: $user}
-            ],
-            reasoning: {enabled: true}
-          }'
-        )
+
+        # TODO: Find a better way to set model parameters
+        if [[ $BACKEND == "gemini" ]]; then
+          JSON_PAYLOAD=$(jq -rc -n \
+            --arg model "$CHAT_MODEL" \
+            --rawfile system "$TEMP_MEMORY_SYSTEM" \
+            --rawfile user "$TEMP_MEMORY_USER" \
+            '{
+              model: $model,
+              messages: [
+                {role: "system", content: $system},
+                {role: "user", content: $user}
+              ],
+              reasoning: {enabled: true}
+            }'
+          )
+        else
+          # This part includes proper models settings for LFM based models
+          JSON_PAYLOAD=$(jq -rc -n \
+            --arg model "$CHAT_MODEL" \
+            --rawfile system "$TEMP_MEMORY_SYSTEM" \
+            --rawfile user "$TEMP_MEMORY_USER" \
+           '{
+              model: $model,
+              messages: [
+                {role: "system", content: $system},
+                {role: "user", content: $user}
+              ],
+              reasoning: {enabled: true},
+              temperature: 0.1,
+              top_k: 50,
+              repetition_penalty: 1.05
+            }'
+          )
+        fi
 
         # Sending request and store response
         RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
@@ -1857,7 +1986,6 @@ run_pipeline() {
     exit $?   # End of Compare Mode
 
   # Route C: Task Mode
-  # TODO: Finish the 'task' part
   else
     log_info "Task mode detected. Preparing execution via backend '${CLR_B_YELLOW}${BACKEND}${ANSI_RESET}' in mode '${CLR_B_GREEN}${RUN_MODE}${ANSI_RESET}'"
 
@@ -2058,6 +2186,9 @@ init_pipeline() {
   set_console_title "${SCRIPT_FILE}: Initializing..."
   set_cpu_cores
   set_temp_files
+  set_base_tools
+  set_api_provider
+  set_memory_type
   create_local_model_cache
   create_local_data_store
 
@@ -2081,18 +2212,23 @@ init_pipeline() {
   CHAT_MODEL="$(get_chat_model)"
 
   # Download models when necessary
-  [[ $BACKEND == "ollama" || $BACKEND == "llamacpp" ]] && PULL_MODELS=true    # Force models download for local backends
+  [[ ! $BACKEND == "gemini" && ! $RUN_MODE == "server" ]] && PULL_MODELS=true    # Force models download for local backends
   if [[ $PULL_MODELS == true ]]; then
     # Backend Selector
     case $BACKEND in
       # Local Backend: Ollama
       ollama)
         # Downloading models for ollama
-        log_info "Preloading required local models for Ollama server...\n"
-        OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_CHAT}:${quant_upper}"
+        log_info "Preloading required local models for Ollama server..."
+        log_info "Preloading '${CHAT_MODEL}'...\n"
+        OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${CHAT_MODEL}"
+        log ; log_info "Preloading '${OLLAMA_ROUTER}:${quant_upper}'...\n"
         OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_ROUTER}:${quant_upper}"
+        log ; log_info "Preloading '${OLLAMA_ARCHITECT}:${quant_upper}'...\n"
         OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_ARCHITECT}:${quant_upper}"
+        log ; log_info "Preloading '${OLLAMA_CODER}:${quant_upper}'...\n"
         OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_CODER}:${quant_upper}"
+        log ; log_info "Preloading '${OLLAMA_JUDGE}:${quant_upper}'...\n"
         OLLAMA_MODELS="$OLLAMA_CACHE" ollama pull "${OLLAMA_JUDGE}:${quant_upper}"
         log ; log_success "All required local Ollama models preloaded successfully."
       ;;
@@ -2100,15 +2236,20 @@ init_pipeline() {
       # Local Backend: llama.cpp
       llamacpp)
         # Downloading models for llama.cpp
-        log_info "Preloading required local models llama.cpp server...\n"
+        log_info "Preloading required local models for llama.cpp server..."
+        log_info "Preloading '${CHAT_MODEL}'...\n"
         LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_CHAT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        llama-cli -hf "${CHAT_MODEL}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        log ; log_info "Preloading '${LLAMACPP_ROUTER}:${quant_upper}'...\n"
         LLAMA_CACHE="$LLAMACPP_CACHE" \
         llama-cli -hf "${LLAMACPP_ROUTER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        log ; log_info "Preloading '${LLAMACPP_ARCHITECT}:${quant_upper}'...\n"
         LLAMA_CACHE="$LLAMACPP_CACHE" \
         llama-cli -hf "${LLAMACPP_ARCHITECT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        log ; log_info "Preloading '${LLAMACPP_CODER}:${quant_upper}'...\n"
         LLAMA_CACHE="$LLAMACPP_CACHE" \
         llama-cli -hf "${LLAMACPP_CODER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
+        log ; log_info "Preloading '${LLAMACPP_JUDGE}:${quant_upper}'...\n"
         LLAMA_CACHE="$LLAMACPP_CACHE" \
         llama-cli -hf "${LLAMACPP_JUDGE}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 5
         log_debug "Reloading llama.cpp GGUF models cache..."
@@ -2145,21 +2286,22 @@ while [[ $# -ne 0 ]]; do
 
     # Modes
     --chat|chat)
-      log_info "Running modes loaded: ${CLR_B_GREEN}CHAT INTERACTIVE${ANSI_RESET}"
+      log_info "Running mode loaded: ${CLR_B_GREEN}CHAT INTERACTIVE${ANSI_RESET}"
       RUN_MODE="chat" ; shift
     ;;
     --multi|multi)
-      log_info "Running modes loaded: ${CLR_B_GREEN}MULTI-AGENT PIPELINE${ANSI_RESET}"
+      log_info "Running mode loaded: ${CLR_B_GREEN}MULTI-AGENT PIPELINE${ANSI_RESET}"
       RUN_MODE="multi" ; shift
     ;;
     --simple|simple)
-      log_info "Running modes loaded: ${CLR_B_GREEN}SIMPLE SINGLE-AGENT${ANSI_RESET}"
+      log_info "Running mode loaded: ${CLR_B_GREEN}SIMPLE SINGLE-AGENT${ANSI_RESET}"
       RUN_MODE="simple" ; shift
     ;;
     --server|server)
-      log_info "Running modes loaded: ${CLR_B_GREEN}API SERVER MODE${ANSI_RESET}"
+      log_info "Running mode loaded: ${CLR_B_GREEN}API SERVER MODE${ANSI_RESET}"
       RUN_MODE="server" ; shift
       SERVER_MODE="$1" ; shift
+      [[ ! $SERVER_MODE == "web" ]] && BACKEND="$SERVER_MODE"
     ;;
     *)
       # All flags set, leaving the loop

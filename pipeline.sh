@@ -15,7 +15,7 @@
 #  - https://vercel.com/docs/ai-gateway/capabilities/zdr
 #  - https://openrouter.ai/docs/guides/features/zdr
 #
-# Version: 0.6.3
+# Version: 0.6.4
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -148,7 +148,7 @@ CLR_CYAN="[36m"
 CLR_WHITE="[37m"
 
 # Emojis/Icons
-ICON_INFO="ℹ️  "
+ICON_INFO="ℹ️ "
 ICON_SUCCESS="✅"
 ICON_WARNING="⚠️ "
 ICON_ERROR="❌"
@@ -344,10 +344,6 @@ create_local_data_store() {
 }
 
 create_local_model_cache() {
-  # if is_termux; then
-  #   OLLAMA_CACHE="${HOME}/models/ollama"
-  #   LLAMACPP_CACHE="${HOME}/models/llama.cpp"
-  # fi
   mkdir -p "$OLLAMA_CACHE"
   mkdir -p "$LLAMACPP_CACHE"
 }
@@ -587,7 +583,7 @@ api_call() {
            jq -rc '.'
     ;;
 
-    # External Backend: OpenRouter / Gemini
+    # External Backend: OpenRouter, Vercel / Gemini
     gemini)
       [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
       case $PROVIDER in
@@ -678,7 +674,7 @@ call_task_agent() {
     # Write payload messages to temp file for jq --rawfile
     printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
-    # Build the OpenAI compliant Gemini Request Payload
+    # Build the OpenAI compliant Request Payload
     local payload
     if [[ -z $tools_payload || $tools_payload == "[]" || "$tools_option" == "none" ]]; then
       payload=$(jq -rc -n \
@@ -1349,7 +1345,7 @@ send_message() {
               reasoning: {enabled: true},
               temperature: 0.1,
               top_k: 50,
-              repetition_penality: 1.05
+              repetition_penalty: 1.05
             } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
           )
         fi
@@ -2182,6 +2178,11 @@ run_pipeline() {
 
 init_pipeline() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
+
+  # Fix Emojis/Icons for Termux
+  if is_termux; then
+    ICON_INFO="ℹ️  "
+  fi
 
   set_console_title "${SCRIPT_FILE}: Initializing..."
   set_cpu_cores

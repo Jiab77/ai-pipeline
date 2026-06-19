@@ -33,10 +33,11 @@ RUN chmod +x pipeline.sh run-tools.sh web_fetch.sh 2>/dev/null || true
 
 # Configure Tor to run in the background
 RUN echo "Log notice stdout" >> /etc/tor/torrc && \
-    echo "SocksPort 0.0.0.0:9050" >> /etc/tor/torrc
+    echo "SocksPort 0.0.0.0:9050" >> /etc/tor/torrc && \
+    echo "HTTPTunnelPort 9080" >> /etc/tor/torrc
 
 # Expose PHP server port and Tor ports
-EXPOSE 8080 9050
+EXPOSE 8080 9050 9080
 
 # Default entrypoint starts Tor in the background and launches interactive or pipeline mode
 ENTRYPOINT ["/bin/bash", "-c", "tor & sleep 2 && ./pipeline.sh \"$@\""]

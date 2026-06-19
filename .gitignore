@@ -1,6 +1,10 @@
+# NodeJS
+node_modules
+
 # Files that must never be published
 data/
 models/
+tools/web-browse/tests/
 test.sh
 run-tools-test.sh
 run-tools.log

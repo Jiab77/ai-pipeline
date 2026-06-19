@@ -10,12 +10,9 @@
 #
 # Note: This is a WiP and will be improved during next iterations.
 # Status: Local models tested can't be used for my needs, fallback on API models with TOR.
-# TODO: Implement ZDR for external providers
-#  - https://vercel.com/docs/ai-gateway/capabilities/disallow-prompt-training
-#  - https://vercel.com/docs/ai-gateway/capabilities/zdr
-#  - https://openrouter.ai/docs/guides/features/zdr
+# ZDR Implemented for external providers (Vercel & OpenRouter)
 #
-# Version: 0.6.4
+# Version: 0.7.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -23,19 +20,19 @@
 # Config
 RUN_MODE="chat"                                           # Expected values: simple, multi, chat, server
 SERVER_MODE="web"                                         # Expected values: ollama, llamacpp, web
-BACKEND="gemini"                                          # Expected values: ollama, llamacpp or gemini
+BACKEND="external"                                          # Expected values: ollama, llamacpp or external
 PROVIDER="vercel"                                         # Expected values: openrouter, vercel
 PROVIDER_API_KEY=""                                       # /!\ NEVER PUBLISH IT /!\
-MEMORY_TYPE="json"                                        # Expected values: sql, markdown, json
-HEARTBEAT_THRESHOLD=15                                    # Trigger context consolidation to avoid amnesia and keep context extremely light
+HEARTBEAT_THRESHOLD=10                                    # Trigger context consolidation to avoid amnesia and keep context extremely light
 CREDENTIALS="${HOME}/.creds"                              # Or any other location or filename you prefer.
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"    # You can also set any other user-agent.
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
 PULL_MODELS=false
 DEBUG=true
-USE_TOR=true    # Set to 'false' only for debugging
-USE_TOOLS=true  # This will be used to enable / disable tools based on a given model
+USE_TOR=true          # Set to 'false' only for debugging
+USE_TOOLS=true        # This will be used to enable / disable tools based on a given model
+ZDR_ENFORCED=false    # Enforce Zero Data Retention for cloud providers (Vercel & OpenRouter)
 
 # Internals
 SCRIPT_DIR="$(realpath "${0%/*}")"
@@ -44,11 +41,12 @@ SCRIPT_NAME="${SCRIPT_FILE%.*}"
 DATA_STORE="${SCRIPT_DIR}/data"
 BASE_MODELS="${SCRIPT_DIR}/models"
 WEB_SERVER="${SCRIPT_DIR}/web/server.php"
+TOOLS_DIR="${SCRIPT_DIR}/tools"
 TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 
-# TODO: Check if all the temp files below are required when using SQLite db
+# Temporary Files
 TOOLS_OUTPUT="/tmp/tools_output.txt"
 TEMP_MEMORY_SYSTEM="/tmp/memory_sys.txt"
 TEMP_MEMORY_USER="/tmp/memory_usr.txt"
@@ -58,12 +56,6 @@ TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
 
 # Soul
 AI_NAME="Jarvis"
-SYSTEM_PROMPT="You are ${AI_NAME}, a friendly AI collaborator. Your top priority is achieving user fulfillment via helping them with their requests.\n"
-SYSTEM_PROMPT+="Your own workspace is in the \`$(basename "$DATA_STORE")\` folder, you can organize it the way you want.\n"
-SYSTEM_PROMPT+="Your own memory file located in your workspace is the \`$(basename "$MEMORY_FILE")\` file, you must load it at every session start.\n"
-SYSTEM_PROMPT+="Your acquired skills are located in your workspace under the \`skills\` folders, you must load them before handling any code related tasks.\n"
-SYSTEM_PROMPT+="You must never modify the following files: \`${SCRIPT_FILE}\`, \`$(basename "$TOOLS_HANDLER")\` and \`$(basename "$BASE_TOOLS")\`.\n"
-SYSTEM_PROMPT+="Modifying these files will simply break the core functionalities of the pipeline."
 
 # Local Models Config
 QUANTIZATION="q8_0"   # Suitable for small laptops and mobile devices | Case sensitive, keep it in lowercase
@@ -188,7 +180,6 @@ draw_header() {
   local line_char
   local width ; width=$(get_term_width)
   local esc ; esc=$(printf '')
-  # TODO: Check if herestring can be used to replace 'echo -e'
   local clean_prefix ; clean_prefix=$(echo -e "$prefix" | sed "s/${esc}[[0-9;]*m//g")
   # Measure visual length accurately, substituting emojis/wide chars with 2 chars
   local visual_prefix ; visual_prefix=$(sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g' <<<"$clean_prefix")
@@ -364,13 +355,13 @@ get_chat_model() {
     case $BACKEND in
       ollama) chat_model="${OLLAMA_CHAT_BIG}:${quant_upper}" ;;
       llamacpp) chat_model="${LLAMACPP_CHAT_BIG}:${quant_upper}" ;;
-      gemini) chat_model="$PROVIDER_API_MODEL" ;;
+      external) chat_model="$PROVIDER_API_MODEL" ;;
     esac
   else
     case $BACKEND in
       ollama) chat_model="${OLLAMA_CHAT}:${quant_upper}" ;;
       llamacpp) chat_model="${LLAMACPP_CHAT}:${quant_upper}" ;;
-      gemini) chat_model="$PROVIDER_API_MODEL" ;;
+      external) chat_model="$PROVIDER_API_MODEL" ;;
     esac
   fi
   echo -n "$chat_model"
@@ -395,18 +386,16 @@ set_base_tools() {
   case $BACKEND in
     ollama|llamacpp)
       if [[ $memory_size -gt 8 ]]; then
-        BASE_TOOLS="${SCRIPT_DIR}/tools.json"
+        BASE_TOOLS="${TOOLS_DIR}/tools.json"
       else
-        BASE_TOOLS="${SCRIPT_DIR}/tools-light.json"
+        BASE_TOOLS="${TOOLS_DIR}/tools-light.json"
       fi
     ;;
-    gemini) BASE_TOOLS="${SCRIPT_DIR}/tools.json" ;;
+    external) BASE_TOOLS="${TOOLS_DIR}/tools.json" ;;
   esac
 }
 
 set_api_provider() {
-  # TODO: Use a JSON file for configuring external providers settings
-  # Note: Still acceptable for now but might be a nightmare later if we handle more external providers
   if [[ $PROVIDER == "vercel" ]]; then
     PROVIDER_API_URL="https://ai-gateway.vercel.sh/v1/chat/completions"
   else
@@ -434,26 +423,49 @@ set_cpu_cores() {
   fi
 }
 
+# -----------------------------------------------------------------------------
+# Cognitive Freedom Memory Engine (Autonomy & Organic Organization)
+# -----------------------------------------------------------------------------
+
+bootstrap_memory() {
+  local memory_dir="${DATA_STORE}/memory"
+  mkdir -p "$memory_dir"
+  local prompt=""
+  local file
+  while IFS= read -r file; do
+    if [[ -f "$file" ]]; then
+      local rel_path="${file#"$DATA_STORE/"}"
+      prompt+="\n--- File: ${rel_path} ---\n"
+      prompt+="$(<"$file")\n"
+    fi
+  done < <(find "$memory_dir" -type f 2>/dev/null)
+  echo -ne "$prompt"
+}
+
+get_full_system_prompt() {
+  local base="$SYSTEM_PROMPT"
+  local memory_context
+  memory_context=$(bootstrap_memory 2>/dev/null)
+  if [[ -n $memory_context ]]; then
+    base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n${memory_context}"
+  else
+    base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n(Your memory folder 'data/memory/' is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
+  fi
+  echo -ne "$base"
+}
+
 set_memory_type() {
-  case $MEMORY_TYPE in
-    # For small local models
-    markdown)
-      MEMORY_FILE="MEMORY.md"
-      MESSAGES_FILE="MESSAGES.md"
-    ;;
+  MEMORY_DIR="${DATA_STORE}/memory"
+  MESSAGES_FILE="messages.json"
+  mkdir -p "$MEMORY_DIR"
 
-    # Our current storage format
-    json)
-      MEMORY_FILE="memory.json"
-      MESSAGES_FILE="messages.json"
-    ;;
-
-    # The futur format for bigger / cloud models able to handle it
-    sql)
-      MEMORY_FILE="memory.db"
-      MESSAGES_FILE="$MEMORY_FILE"
-    ;;
-  esac
+  # System prompt defining absolute cognitive freedom
+  SYSTEM_PROMPT="You are ${AI_NAME}, a friendly AI collaborator. Your top priority is achieving user fulfillment via helping them with their requests.\n"
+  SYSTEM_PROMPT+="Your own workspace is in the \`$(basename "$DATA_STORE")\` folder. Organize it the way you want.\n"
+  SYSTEM_PROMPT+="You have absolute freedom and autonomy over your persistent memory stored in \`data/memory/\`. You can create, edit, delete, or restructure any files in \`data/memory/\` as you feel most logical using your file tools (write_file, edit_file, etc.). Structure your cognitive documents using Markdown.\n"
+  SYSTEM_PROMPT+="Your acquired skills are located in your workspace under the \`skills\` folder. Load them before handling code tasks.\n"
+  SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`$(basename "$TOOLS_HANDLER")\`, and \`$(basename "$BASE_TOOLS")\`.\n"
+  SYSTEM_PROMPT+="Modifying these files will break the core pipeline functionalities."
 }
 
 show_banner() {
@@ -462,12 +474,12 @@ show_banner() {
     figlet <<<"$AI_NAME"
   else
     cat << 'EOF'
-     _                  _     
-    | | __ _ _ ____   _(_)___ 
+     _                  _
+    | | __ _ _ ____   _(_)___
  _  | |/ _` | '__\ \ / / / __|
 | |_| | (_| | |   \ V /| \__ \
  \___/ \__,_|_|    \_/ |_|___/
-                              
+
 EOF
   fi
   echo -e "${CLR_B_CYAN}🔮 Jarvis AI Pipeline | Version $(get_self_version) 🔮${ANSI_RESET}"
@@ -482,7 +494,7 @@ ${ANSI_BOLD}${CLR_B_CYAN}USAGE:${ANSI_RESET}
 
 ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}-h, --help${ANSI_RESET}        Show this help screen and exit
-  ${CLR_B_GREEN}--backend [type]${ANSI_RESET}  Set AI backend (ollama, llamacpp, gemini)
+  ${CLR_B_GREEN}--backend [type]${ANSI_RESET}  Set AI backend (ollama, llamacpp, external)
   ${CLR_B_GREEN}--provider [type]${ANSI_RESET} Set AI external provider (openrouter, vercel)
   ${CLR_B_GREEN}--chat${ANSI_RESET}            Start the interactive conversational chat mode
   ${CLR_B_GREEN}--multi${ANSI_RESET}           Start complex multi-agent analysis pipeline
@@ -490,6 +502,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}--server [type]${ANSI_RESET}   Start backend API server (ollama, llamacpp, web)
   ${CLR_B_GREEN}--clear${ANSI_RESET}           Wipe conversational memory and dynamic session logs
   ${CLR_B_GREEN}--commit${ANSI_RESET}          Force cognitive state / memory consolidation to disk
+  ${CLR_B_GREEN}--zdr${ANSI_RESET}             Force ZDR policy to be applied on external providers
 
 ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}chat${ANSI_RESET}              Start interactive conversational chat mode
@@ -584,10 +597,14 @@ api_call() {
     ;;
 
     # External Backend: OpenRouter, Vercel / Gemini
-    gemini)
+    external)
       [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
       case $PROVIDER in
         vercel)
+          if [[ $ZDR_ENFORCED == true ]]; then
+            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for Vercel AI Gateway."
+            payload=$(jq -rc '.providerOptions.gateway.zeroDataRetention = true' <<< "$payload")
+          fi
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
@@ -598,6 +615,10 @@ api_call() {
                jq -rc .
         ;;
         openrouter)
+          if [[ $ZDR_ENFORCED == true ]]; then
+            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
+            payload=$(jq -rc '.provider.zdr = true' <<< "$payload")
+          fi
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
@@ -630,21 +651,21 @@ call_task_agent() {
       case $BACKEND in
         ollama) active_model="$OLLAMA_ARCHITECT" ;;
         llamacpp) active_model="$LLAMACPP_ARCHITECT" ;;
-        gemini) active_model="$PROVIDER_API_MODEL" ;;
+        external) active_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
     coder)
       case $BACKEND in
         ollama) active_model="$OLLAMA_CODER" ;;
         llamacpp) active_model="$LLAMACPP_CODER" ;;
-        gemini) active_model="$PROVIDER_API_MODEL" ;;
+        external) active_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
     judge)
       case $BACKEND in
         ollama) active_model="$OLLAMA_JUDGE" ;;
         llamacpp) active_model="$LLAMACPP_JUDGE" ;;
-        gemini) active_model="$PROVIDER_API_MODEL" ;;
+        external) active_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
   esac
@@ -684,7 +705,8 @@ call_task_agent() {
         '{
           model: $model,
           messages: ($msgs | fromjson),
-          reasoning: {enabled: $enabled_bool}
+          reasoning: {enabled: $enabled_bool},
+          stream: false
         }'
       )
     else
@@ -697,7 +719,8 @@ call_task_agent() {
           model: $model,
           messages: ($msgs | fromjson),
           reasoning: {enabled: $enabled_bool},
-          tools: $tools_obj
+          tools: $tools_obj,
+          stream: false
         }'
       )
     fi
@@ -835,194 +858,7 @@ call_task_agent() {
 
 # Helper to call Gemini in Task Mode (v0.4.2 with Role-based Tool and Reasoning Constraints)
 call_gemini_task_agent() {
-  local system_inst="$1"
-  local user_content="$2"
-  local purpose_msg="$3"
-  local tools_option="${4:-all}"        # "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
-  local enable_reasoning="${5:-true}"   # true or false
-
-  log_info "${purpose_msg} (${CLR_B_YELLOW}${PROVIDER_API_MODEL}${ANSI_RESET}) [Tools: ${CLR_B_GREEN}${tools_option}${ANSI_RESET} | Reasoning: ${CLR_B_GREEN}${enable_reasoning}${ANSI_RESET}]..."
-
-  # Build the dynamic tools payload based on the tools_option constraint
-  local tools_payload=""
-  if [[ "$tools_option" == "all" ]]; then
-    tools_payload=$(<"$BASE_TOOLS")
-  elif [[ "$tools_option" == "readonly" ]]; then
-    # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
-    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
-  fi
-
-  # Initialize local MESSAGES array in-memory for this specific agent's execution loop
-  local ALL_MESSAGES
-  ALL_MESSAGES=$(jq -rc -n \
-    --arg sys "$system_inst" \
-    --arg usr "$user_content" \
-    '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
-  )
-
-  local final_content
-
-  while true; do
-    # Write payload messages to temp file for jq --rawfile
-    printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
-
-    # Build the OpenAI compliant Gemini Request Payload
-    local payload
-    if [[ -z $tools_payload || $tools_payload == "[]" || "$tools_option" == "none" ]]; then
-      payload=$(jq -rc -n \
-        --arg model "$PROVIDER_API_MODEL" \
-        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-        --argjson enabled_bool "$enable_reasoning" \
-        '{
-          model: $model,
-          messages: ($msgs | fromjson),
-          reasoning: {enabled: $enabled_bool}
-        }'
-      )
-    else
-      payload=$(jq -rc -n \
-        --arg model "$PROVIDER_API_MODEL" \
-        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-        --argjson enabled_bool "$enable_reasoning" \
-        --argjson tools_obj "$tools_payload" \
-        '{
-          model: $model,
-          messages: ($msgs | fromjson),
-          reasoning: {enabled: $enabled_bool},
-          tools: $tools_obj
-        }'
-      )
-    fi
-
-    local raw_res ; raw_res=$(api_call "$payload")
-    if [[ -z $raw_res || $raw_res == "null" ]]; then
-      error "API returned an empty response."
-    fi
-
-    if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
-      error "Unexpected API error.\n\n${err_msg}\n"
-    fi
-
-    # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
-    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$raw_res" 2>/dev/null)
-    if [[ -n $reasoning && $reasoning != "null" ]]; then
-      {
-        show_thinking_header
-        echo "$reasoning" | render_markdown
-      } >&2
-    fi
-
-    # Retrieve components
-    local content ; content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
-    local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
-    local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
-    local usage ; usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
-
-    # Output refusal to STDERR if present
-    if [[ -n $refusal && $refusal != "null" ]]; then
-      {
-        show_ai_header
-        echo "$refusal" | render_markdown
-      } >&2
-    fi
-
-    # Handle requested tool calls (Multi-Parallel Support)
-    if [[ -n $tools && $tools != "null" ]]; then
-      # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
-      if [[ "$tools_option" == "none" ]]; then
-        log_warn "Received unexpected tool calls despite tools disabled!"
-        break
-      fi
-
-      # 1. Grab assistant command message and push to local history
-      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res")
-      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
-      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
-
-      # 2. Extract and iterate over all requested parallel tools
-      local tool_count=0
-      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
-        ((tool_count++))
-        show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
-
-        # 3. Check and execute tool handler
-        if [[ -x $TOOLS_HANDLER ]]; then
-          "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
-        else
-          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-          log_warn "Tool handler not executable."
-        fi
-
-        # 4. Fallback safeguard for empty output
-        if [[ ! -s $TOOLS_OUTPUT ]]; then
-          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-        fi
-
-        # 5. Format and sanitize output to protect JSON/JQ
-        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-          rm -f "$TOOLS_OUTPUT"
-
-          # 6. Append tool output to messages array safely
-          local new_msgs
-          if new_msgs=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
-            ALL_MESSAGES="$new_msgs"
-          else
-            log_warn "fromjson failed, using fallback --arg serialization"
-            ALL_MESSAGES=$(jq -rc \
-              --arg id "$tool_id" \
-              --arg name "$tool_name" \
-              --arg content "$(<"$TEMP_TOOLS_OUTPUT")" \
-              '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-            )
-          fi
-          rm -f "$TEMP_TOOLS_OUTPUT"
-        else
-          log_warn "Unable to parse tool output with rawfile, using fallback formatting"
-          local fallback_content
-          fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
-          ALL_MESSAGES=$(jq -rc \
-            --arg id "$tool_id" \
-            --arg name "$tool_name" \
-            --arg content "$fallback_content" \
-            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-          )
-          rm -f "$TOOLS_OUTPUT"
-        fi
-      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
-
-    else
-      # If no tool calls, this is the final response
-      if [[ -n $content && $content != "null" ]]; then
-        final_content="$content"
-      fi
-
-      # Print usage metrics to STDERR to avoid polluting stdout
-      if [[ -n $usage && $usage != "null" ]]; then
-        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage")
-        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage")
-        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage")
-        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage")
-        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage")
-        local cost ; cost=$(jq -rc .cost <<<"$usage")
-
-        {
-          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-          if [[ -n $cost && "$cost" != "null" ]]; then
-            echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-          fi
-          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-        } >&2
-      fi
-
-      break
-    fi
-  done
-
-  # Return the final text content of the agent on stdout
-  echo "$final_content"
+  call_task_agent "coder" "$1" "$2" "$3" "$4" "$5"
 }
 
 route_request() {
@@ -1058,21 +894,22 @@ render_markdown() {
 
 clear_memory() {
   echo -e "  What dynamic cache do you want to wipe?\n"
-  echo -e "  [${CLR_B_GREEN}1${ANSI_RESET}] ${ANSI_BOLD}Long-Term Memory${ANSI_RESET} (${MEMORY_FILE})"
-  echo -e "  [${CLR_B_GREEN}2${ANSI_RESET}] ${ANSI_BOLD}Active Chat Logs${ANSI_RESET} (${MESSAGES_FILE})"
+  echo -e "  [${CLR_B_GREEN}1${ANSI_RESET}] ${ANSI_BOLD}Long-Term Memory Folder${ANSI_RESET} (data/memory/)"
+  echo -e "  [${CLR_B_GREEN}2${ANSI_RESET}] ${ANSI_BOLD}Active Chat Logs${ANSI_RESET} (messages.json)"
   echo -e "  [${CLR_B_GREEN}3${ANSI_RESET}] ${CLR_B_RED}Wipe All${ANSI_RESET}\n"
   read -rp "  Select Option: " USER_CHOICE
   [[ -z $USER_CHOICE ]] && error "No selection given. Safe abort."
 
   if [[ $USER_CHOICE == 1 ]]; then
-    rm -f "${DATA_STORE}/${MEMORY_FILE}"
-    log_success "Long-term memory has been completely recycled."
+    rm -rf "${DATA_STORE}/memory"/*
+    log_success "Long-term memory folder successfully wiped."
   elif [[ $USER_CHOICE == 2 ]]; then
-    rm -f "${DATA_STORE}/${MESSAGES_FILE}"
-    log_success "Active chat history cache successfully pruned."
+    rm -f "${DATA_STORE}/messages.json"
+    log_success "Active chat history successfully wiped."
   elif [[ $USER_CHOICE == 3 ]]; then
-    rm -f "${DATA_STORE}/${MEMORY_FILE}" "${DATA_STORE}/${MESSAGES_FILE}"
-    log_success "All session logs and permanent memory successfully wiped."
+    rm -rf "${DATA_STORE}/memory"/*
+    rm -f "${DATA_STORE}/messages.json"
+    log_success "All memory and chat logs successfully wiped."
   else
     log_warn "Invalid selection: $USER_CHOICE"
   fi
@@ -1090,400 +927,337 @@ handle_response() {
   fi
 }
 
+consolidate_memory() {
+  log_brain "Initiating AUTONOMOUS CONSOLIDATION cycle (Subconscious State)..."
+
+  local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
+  local ALL_MESSAGES="[]"
+  if [[ -r $messages_path ]]; then
+    ALL_MESSAGES=$(<"$messages_path")
+  fi
+
+  local alert_msg="[SYSTEM ALERT: CONSOLIDATION HEARTBEAT]
+It is time to consolidate your active chat context to prevent amnesia and keep the context extremely light.
+Please analyze our conversation history so far.
+Use your file manipulation tools (write_file, edit_file, etc.) to update, organize, merge, or restructure your files in \`data/memory/\` to capture important profiles, configurations, preferences, goals, and facts we've discussed.
+You have absolute freedom over how you organize your memory folder. Use Markdown.
+Take as many tool calls as you need. When you are fully done organizing and saving your cognitive state to your memory folder, respond with EXACTLY this keyword: [CONSOLIDATION_COMPLETE]"
+
+  # Append the consolidation request as a user role
+  ALL_MESSAGES=$(jq -rc --arg alert "$alert_msg" '. + [{role: "user", content: $alert}]' <<<"$ALL_MESSAGES")
+
+  # Prepend the system instruction with bootstrapped memory
+  local dynamic_system ; dynamic_system=$(get_full_system_prompt)
+  local PAYLOAD_MESSAGES ; PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES")
+
+  while true; do
+    printf "%s" "$PAYLOAD_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
+
+    local payload
+    if [[ $BACKEND == "external" ]]; then
+      payload=$(jq -rc -n \
+        --arg model "$CHAT_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --rawfile tools "$BASE_TOOLS" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: true},
+          temperature: 0.1,
+          stream: false
+        } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+      )
+    else
+      payload=$(jq -rc -n \
+        --arg model "$CHAT_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --rawfile tools "$BASE_TOOLS" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: true},
+          temperature: 0.1,
+          top_k: 50,
+          repetition_penalty: 1.05,
+          stream: false
+        } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+      )
+    fi
+
+    local raw_response ; raw_response=$(api_call "$payload")
+    if [[ -z $raw_response || $raw_response == "null" ]]; then
+      log_warn "Consolidation API call returned empty response."
+      break
+    fi
+
+    if jq -e '.error' <<<"$raw_response" &>/dev/null; then
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response" 2>/dev/null)
+      log_error "Consolidation API error: ${err_msg}"
+      break
+    fi
+
+    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$raw_response" 2>/dev/null)
+    local response ; response=$(jq -rc '.choices[0].message.content' <<<"$raw_response" 2>/dev/null)
+    local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_response" 2>/dev/null)
+
+    if [[ -n $reasoning && $reasoning != "null" ]]; then
+      show_thinking_header
+      echo "$reasoning" | render_markdown
+    fi
+
+    if [[ -n $tools && $tools != "null" ]]; then
+      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_response")
+      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
+      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES")
+
+      local tool_count=0
+      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
+        ((tool_count++))
+        show_tool_header "$tool_count" "$tool_name" "$tool_args"
+
+        if [[ -x $TOOLS_HANDLER ]]; then
+          "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
+        else
+          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
+        fi
+
+        if [[ ! -s $TOOLS_OUTPUT ]]; then
+          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
+        fi
+
+        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
+        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+          rm -f "$TOOLS_OUTPUT"
+          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES")
+          rm -f "$TEMP_TOOLS_OUTPUT"
+        else
+          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool)")
+          PAYLOAD_MESSAGES=$(jq -rc \
+            --arg id "$tool_id" \
+            --arg name "$tool_name" \
+            --arg content "$fallback_content" \
+            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$PAYLOAD_MESSAGES"
+          )
+          rm -f "$TOOLS_OUTPUT"
+        fi
+      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
+    else
+      if [[ -n $response && $response != "null" ]]; then
+        show_ai_header
+        echo "$response" | render_markdown
+        PAYLOAD_MESSAGES=$(jq -rc --arg ast "$response" '. + [{role: "assistant", content: $ast}]' <<<"$PAYLOAD_MESSAGES")
+
+        if [[ "$response" == *"[CONSOLIDATION_COMPLETE]"* ]]; then
+          log_success "Autonomous memory consolidation complete!"
+          break
+        fi
+      fi
+      log_warn "Consolidation cycle returned response without [CONSOLIDATION_COMPLETE]. Safely stopping cycle."
+      break
+    fi
+  done
+
+  # Prune main context: Keep only the system prompt + last 2 turns of the original conversation
+  log_brain "Pruning active messages log to release token pressure..."
+  if [[ -r $messages_path ]]; then
+    jq -rc '.[-2:]' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
+    mv -f "${messages_path}.tmp" "$messages_path"
+  else
+    echo "[]" > "$messages_path"
+  fi
+  log_success "Main conversation context successfully refreshed!"
+}
+
 check_and_trigger_heartbeat() {
   local force="${1:-false}"
   local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
-  local messages_filename ; messages_filename="$(basename "$MESSAGES_FILE")"
-  local memory_path="${DATA_STORE}/${MEMORY_FILE}"
-  local memory_filename ; memory_filename="$(basename "$MEMORY_FILE")"
-  local memory_user_payload
-  local memory_system_prompt
-  local current_memory
-  local current_messages
-  local messages_count
-  local consolidated_json
-  local raw_response
-  local err_msg
-  local payload
+  local messages_count=0
+  if [[ -r $messages_path ]]; then
+    messages_count=$(jq -rc 'map(select(.role == "user")) | length' "$messages_path" 2>/dev/null || echo 0)
+  fi
 
-  # Ensure the messages file exists and is readable
-  [[ ! -r $messages_path ]] && return
-
-  # Count the messages inside messages.json
-  messages_count=$(jq -rc '. | length' "$messages_path" 2>/dev/null)
-
-  # Validate that messages_count is indeed a number
-  [[ ! $messages_count =~ ^[0-9]+$ ]] && return
-
-  # Check if quantity of messages exceeds our heartbeat threshold OR if we are forcing execution
   if [[ $force == "true" ]] || (( messages_count >= HEARTBEAT_THRESHOLD )); then
     log_brain "Heartbeat threshold pulsing (Messages: ${messages_count}/${HEARTBEAT_THRESHOLD} | Force: ${force})."
-    log_brain "Automatically consolidating session context into ${memory_filename}..."
-
-    if [[ -r $memory_path ]]; then
-      current_memory=$(<"$memory_path")
-    else
-      current_memory='{}'
-    fi
-
-    current_messages=$(<"$messages_path")
-
-    # Construct the instruction and user payload to summarize and update the JSON memory structure
-    memory_system_prompt="$(cat <<EOF
-You are ${AI_NAME}'s Cognitive Memory Engine. Your goal is to consolidate active chat history into the permanent memory file ($memory_filename).
-You will receive the current '$memory_filename' and the active conversation log.
-Analyze what milestones, accomplishments, user configurations, personal traits, technical stacks, or tools have been decided, added, or modified in the conversation.
-Merge these learnings with absolute fidelity into '$memory_filename':
-- user_profile/technical_stack_additions/installed_utils: append new utilities mentioned
-- milestones: append new landmarks or successes as objects with 'event' and 'description' (do NOT duplicate existing milestones)
-- last_updated: format as 'YYYY-MM-DD (Event description)'
-- future_roadmap: update listed goals. If a roadmapped goal has been achieved, remove it from the future_roadmap and add it to milestones. Add any new goals or priorities that were agreed on in the conversation.
-
-CRITICAL REQUIREMENT:
-- You must output the ENTIRE updated JSON structure matching '$memory_filename' EXACTLY.
-- Output ONLY valid raw JSON.
-- DO NOT wrap the output in markdown code blocks like \`\`\`json. Just raw, unescaped, parsed JSON.
-- Maintain other preexisting properties in $memory_filename unchanged.
-EOF
-)"
-
-    memory_user_payload="$(cat <<EOF
-Current $memory_filename:
-<memory>
-${current_memory}
-</memory>
-
-Active context $messages_filename:
-<messages>
-${current_messages}
-</messages>
-EOF
-)"
-
-    # Prepare payload for API call
-    # Save prompts to temporary files to avoid ARG_MAX errors with large chat history
-    echo "$memory_system_prompt" > "$TEMP_MEMORY_SYSTEM"
-    echo "$memory_user_payload" > "$TEMP_MEMORY_USER"
-
-    # Prepare payload for API call (using --rawfile to bypass ARG_MAX)
-    if [[ $BACKEND == "gemini" ]]; then
-      payload=$(jq -rc -n \
-        --arg model "$CHAT_MODEL" \
-        --rawfile sys "$TEMP_MEMORY_SYSTEM" \
-        --rawfile user "$TEMP_MEMORY_USER" \
-        '{
-          model: $model,
-          messages: [
-            {role: "system", content: $sys},
-            {role: "user", content: $user}
-          ],
-          temperature: 0.1,
-          stream: false
-        }'
-      )
-    else
-      payload=$(jq -rc -n \
-        --arg model "$CHAT_MODEL" \
-        --rawfile sys "$TEMP_MEMORY_SYSTEM" \
-        --rawfile user "$TEMP_MEMORY_USER" \
-        '{
-          model: $model,
-          messages: [
-            {role: "system", content: $sys},
-            {role: "user", content: $user}
-          ],
-          response_format: {type: "json_object"},
-          temperature: 0.1,
-          stream: false
-        }'
-      )
-    fi
-
-    # Clean up temporary files immediately
-    rm -f "$TEMP_MEMORY_SYSTEM" "$TEMP_MEMORY_USER"
-
-    log_brain "Invoking $CHAT_MODEL for synthesis..."
-    raw_response=$(api_call "$payload")
-    if [[ -z $raw_response || $raw_response == "null" ]]; then
-      log_warn "Memory consolidation API call returned empty response."
-      return
-    fi
-
-    # Extract assistant's message content
-    consolidated_json=$(jq -rc '.choices[0].message.content' <<<"$raw_response")
-
-    # Sanitize markdown block wrappers if the model accidentally included them
-    local bt='```'
-    if [[ "$consolidated_json" == "$bt"* ]]; then
-      if [[ "$consolidated_json" == "${bt}json"* ]]; then
-        consolidated_json="${consolidated_json#"${bt}"json}"
-      else
-        consolidated_json="${consolidated_json#"$bt"}"
-      fi
-      if [[ "$consolidated_json" == *"$bt" ]]; then
-        consolidated_json="${consolidated_json%"$bt"}"
-      fi
-      consolidated_json="${consolidated_json#"${consolidated_json%%[![:space:]]*}"}"
-      consolidated_json="${consolidated_json%"${consolidated_json##*[![:space:]]}"}"
-    fi
-
-    # Strictly validate that the output is valid JSON
-    if jq -e . <<<"$consolidated_json" &>/dev/null; then
-      # Write updated memory to memory.json
-      echo "$consolidated_json" > "$memory_path"
-      log_success "Permanent memory (${memory_filename}) successfully consolidated!"
-
-      # Truncate messages.json to keep only the System Prompt (index 0) and the last 4 messages to preserve flow.
-      log_brain "Pruning '$messages_filename' to release conversational context tokens..."
-      jq -rc '[.[0]] + .[-4:]' "$messages_path" > "${messages_path}.tmp"
-      mv -f "${messages_path}.tmp" "$messages_path"
-      log_success "$messages_filename successfully pruned! Context is now ultra-light and ready."
-    else
-      err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response")
-      log_error "Consolidated output was not valid JSON. Memory consolidation aborted to prevent corruption.\n\n${err_msg}"
-      log_debug "Raw response payload was: ${consolidated_json:0:400}..."
-    fi
+    consolidate_memory
   fi
 }
 
 send_message() {
   local prompt="$1"
-  local system="$SYSTEM_PROMPT"
-  local combined="[System] ${system}\n[User] ${prompt}"
+  local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
+  local dynamic_system ; dynamic_system=$(get_full_system_prompt)
+  local ALL_MESSAGES="[]"
 
-  # Backend Selector
-  case $BACKEND in
-    # Local Backend: Ollama
-    # ollama)
-    #   log_debug "Sending query chunk to local Ollama agent..."
-    #   JSON_PAYLOAD=$(jq -rc -n \
-    #     --arg model "$OLLAMA_ARCHITECT" \
-    #     --arg prompt "$combined" \
-    #     '{
-    #       model: $model,
-    #       prompt: $prompt,
-    #       stream: false
-    #     }'
-    #   )
-    #   RESPONSE=$(api_call "$JSON_PAYLOAD")
-    #   show_ai_header
-    #   jq -rc '.response' <<<"$RESPONSE" | render_markdown
-    # ;;
+  if [[ -r $messages_path ]]; then
+    ALL_MESSAGES=$(<"$messages_path")
+  fi
 
-    # Local Backend: llama.cpp
-    # llamacpp)
-    #   log_debug "Sending query chunk to local llama-server..."
-    #   LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
-    #   JSON_PAYLOAD=$(jq -rc -n \
-    #     --arg model "$LLAMACPP_MODEL" \
-    #     --arg sys "$system" \
-    #     --arg user "$prompt" \
-    #     '{
-    #       model: $model,
-    #       messages: [
-    #         {role: "system", content: $sys},
-    #         {role: "user", content: $user}
-    #       ],
-    #       temperature: 0.0,
-    #       stream: false
-    #     }'
-    #   )
-    #
-    #   # Sending request and store response
-    #   RESPONSE=$(api_call "$JSON_PAYLOAD")
-    #   show_ai_header
-    #   jq -rc '.choices[0].message.content' <<<"$RESPONSE" | render_markdown
-    # ;;
+  # Add user message
+  ALL_MESSAGES=$(jq -rc --arg user "$prompt" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES")
 
-    # Local + External Backend: OpenRouter / Gemini
-    ollama|llamacpp|gemini)
-      # log_debug "Sending query chunk to cloud Gemini agent..."
-      if [[ $BACKEND == "ollama" ]]; then
-        log_debug "Sending query chunk to local Ollama backend..."
-      elif [[ $BACKEND == "llamacpp" ]]; then
-        log_debug "Sending query chunk to local llama.cpp backend..."
-      else
-        log_debug "Sending query chunk to cloud Gemini backend..."
-      fi
+  # Prepend the system instructions with memory context
+  local PAYLOAD_MESSAGES
+  PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES")
 
-      # Loading history file if exist or start from zero
-      if [[ -r "${DATA_STORE}/${MESSAGES_FILE}" ]]; then
-        ALL_MESSAGES=$(<"${DATA_STORE}/${MESSAGES_FILE}")
-      else
-        ALL_MESSAGES=$(jq -rc -n --arg sys "$system" '[{role: "system", content: $sys}]')
-      fi
+  if [[ $BACKEND == "ollama" ]]; then
+    log_debug "Sending query chunk to local Ollama backend..."
+  elif [[ $BACKEND == "llamacpp" ]]; then
+    log_debug "Sending query chunk to local llama.cpp backend..."
+  else
+    log_debug "Sending query chunk to cloud Gemini backend..."
+  fi
 
-      # Adding new user message
-      ALL_MESSAGES=$(jq -rc --arg user "$prompt" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES")
+  # The Magic Loop
+  while true; do
+    # Write payload variables to temporary files inside the loop to capture any updates
+    printf "%s" "$PAYLOAD_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
-      # The Magic Loop
-      while true; do
-        # Write payload variables to temporary files inside the loop to capture any updates
-        printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
+    local JSON_PAYLOAD
+    if [[ $BACKEND == "external" ]]; then
+      JSON_PAYLOAD=$(jq -rc -n \
+        --arg model "$CHAT_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --rawfile tools "$BASE_TOOLS" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: true},
+          stream: false
+        } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+      )
+    else
+      # This part includes proper models settings for LFM based models
+      JSON_PAYLOAD=$(jq -rc -n \
+        --arg model "$CHAT_MODEL" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --rawfile tools "$BASE_TOOLS" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: true},
+          temperature: 0.1,
+          top_k: 50,
+          repetition_penalty: 1.05,
+          stream: false
+        } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
+      )
+    fi
+    [[ -z $JSON_PAYLOAD ]] && error "Unexpected error while creating payload!"
 
-        # TODO: Find a better way to set model parameters
-        if [[ $BACKEND == "gemini" ]]; then
-          JSON_PAYLOAD=$(jq -rc -n \
-            --arg model "$CHAT_MODEL" \
-            --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-            --rawfile tools "$BASE_TOOLS" \
-            '{
-              model: $model,
-              messages: ($msgs | fromjson),
-              reasoning: {enabled: true}
-            } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
-          )
+    # Sending request and store response
+    RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
+    [[ -z $RAW_RESPONSE ]] && error "Empty API response."
+
+    # Check for errors before continuing
+    if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
+      err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
+      error "Unexpected API error.\n\n${err_msg}\n"
+    fi
+
+    # Store relevant data
+    REASONING=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+    RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
+    REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
+    TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
+    USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+
+    # Handling model reasoning
+    if [[ -n $REASONING && $REASONING != "null" ]]; then
+      show_thinking_header
+      echo "$REASONING" | render_markdown
+    fi
+
+    # Handling model refusal
+    if [[ -n $REFUSAL && $REFUSAL != "null" ]]; then
+      show_ai_header
+      echo "$REFUSAL" | render_markdown
+    fi
+
+    # Handling model requested tools (Multi-Parallel Support)
+    if [[ -n $TOOLS && $TOOLS != "null" ]]; then
+      # 1. Grab assistant command message and push to history
+      ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
+      # Write payload variables to temporary files inside the loop to capture any updates
+      printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
+      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
+      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES")
+
+      # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
+      local tool_count=0
+      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
+        ((tool_count++))
+        show_tool_header "$tool_count" "$tool_name" "$tool_args"
+
+        # 3. Check and execute tool handler
+        if [[ -x $TOOLS_HANDLER ]]; then
+          "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
         else
-          # This part includes proper models settings for LFM based models
-          JSON_PAYLOAD=$(jq -rc -n \
-            --arg model "$CHAT_MODEL" \
-            --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-            --rawfile tools "$BASE_TOOLS" \
-            '{
-              model: $model,
-              messages: ($msgs | fromjson),
-              reasoning: {enabled: true},
-              temperature: 0.1,
-              top_k: 50,
-              repetition_penalty: 1.05
-            } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
-          )
-        fi
-        [[ -z $JSON_PAYLOAD ]] && error "Unexpected error! Check the logs and try again."
-
-        # Sending request and store response
-        RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-        [[ -z $RAW_RESPONSE ]] && error "Unexpected error! Check the logs and try again."
-
-        # Handling raw response
-        if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
-          # log "\n\n=== RAW RESPONSE ===\n\n"
-          # jq . <<<"$RAW_RESPONSE"
-
-          # Check for errors before continuing
-          if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-            err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
-            error "Unexpected API error.\n\n${err_msg}\n"
-          fi
-
-          # Store relevant data
-          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE")
-          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE")
-          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE")
-          TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE")
-          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE")
+          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
+          log_warn "Tool handler not executable."
         fi
 
-        # Handling model reasoning
-        if [[ -n $REASONING && ! $REASONING == "null" ]]; then
-          show_thinking_header
-          echo "$REASONING" | render_markdown
+        # 4. Fallback safeguard for empty output
+        if [[ ! -s $TOOLS_OUTPUT ]]; then
+          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
         fi
 
-        # Handling model refusal
-        if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
-          show_ai_header
-          echo "$REFUSAL" | render_markdown
-        fi
+        # 5. Format according to OpenAI guidelines
+        # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
+        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
+        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+          rm -f "$TOOLS_OUTPUT"
 
-        # Handling model requested tools (Multi-Parallel Support)
-        if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
-          # 1. Grab assistant command message and push to history
-          ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
-          # Write payload variables to temporary files inside the loop to capture any updates
-          printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
-          ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
-
-          # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
-          local tool_count=0
-          while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
-            ((tool_count++))
-            show_tool_header "$tool_count" "$tool_name" "$tool_args"
-
-            # 3. Check and execute tool handler
-            if [[ -x $TOOLS_HANDLER ]]; then
-              "$TOOLS_HANDLER" "$tool_name" "$tool_args" &> "$TOOLS_OUTPUT"
-            else
-              echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-              log_warn "Tool handler not executable."
-            fi
-
-            # 4. Fallback safeguard for empty output
-            if [[ ! -s $TOOLS_OUTPUT ]]; then
-              echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-            fi
-
-            # 5. Format according to OpenAI guidelines
-            # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
-            iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-            if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-              # Clear tools output file
-              rm -f "$TOOLS_OUTPUT"
-
-              # 6. Append tool output to messages array safely
-              if NEW_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
-                ALL_MESSAGES="$NEW_MESSAGES"
-              else
-                log_warn "fromjson failed, using fallback --arg serialization"
-                ALL_MESSAGES=$(jq -rc \
-                  --arg id "$tool_id" \
-                  --arg name "$tool_name" \
-                  --arg content "$(< "$TEMP_TOOLS_OUTPUT")" \
-                  '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-                )
-              fi
-
-              # Clear temporary tools output file
-              rm -f "$TEMP_TOOLS_OUTPUT"
-            else
-              log_warn "Unable to parse tool output with rawfile, using fallback formatting"
-              local fallback_content
-              fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
-              ALL_MESSAGES=$(jq -rc \
-                --arg id "$tool_id" \
-                --arg name "$tool_name" \
-                --arg content "$fallback_content" \
-                '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-              )
-
-              # Clear tools output file
-              rm -f "$TOOLS_OUTPUT"
-            fi
-          done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$TOOLS" 2>/dev/null)
-
-        # Handling model final response
+          ALL_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES")
+          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES")
+          rm -f "$TEMP_TOOLS_OUTPUT"
         else
-          if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-            show_ai_header
-            echo "$RESPONSE" | render_markdown
-
-            # Store final AI response
-            ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<"$ALL_MESSAGES")
-            echo "$ALL_MESSAGES" > "${DATA_STORE}/${MESSAGES_FILE}"
-          fi
-          break   # Leaving the loop
+          log_warn "fromjson failed, using fallback --arg serialization"
+          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool)")
+          ALL_MESSAGES=$(jq -rc \
+            --arg id "$tool_id" \
+            --arg name "$tool_name" \
+            --arg content "$fallback_content" \
+            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
+          )
+          PAYLOAD_MESSAGES=$(jq -rc \
+            --arg id "$tool_id" \
+            --arg name "$tool_name" \
+            --arg content "$fallback_content" \
+            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$PAYLOAD_MESSAGES"
+          )
+          rm -f "$TOOLS_OUTPUT"
         fi
+      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$TOOLS" 2>/dev/null)
 
-        # Handling model usage
-        if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-          local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE")
-          local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE")
-          local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE")
-          local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE")
-          local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
-          local cost ; cost=$(jq -rc .cost <<<"$USAGE")
+    else
+      if [[ -n $RESPONSE && $RESPONSE != "null" ]]; then
+        show_ai_header
+        echo "$RESPONSE" | render_markdown
 
-          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-          if [[ -n $cost && "$cost" != "null" ]]; then
-            echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-          fi
-          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-        fi
-      done
-    ;;
-    *) error "Unsupported backend given: $BACKEND" ;;
-  esac
+        # Store final AI response
+        ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<"$ALL_MESSAGES")
+        echo "$ALL_MESSAGES" > "$messages_path"
+      fi
+      break   # Leaving the loop
+    fi
+
+    # Handling model usage
+    if [[ -n $USAGE && $USAGE != "null" ]]; then
+      local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE")
+      local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE")
+      local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE")
+      local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE")
+      local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
+      local cost ; cost=$(jq -rc .cost <<<"$USAGE")
+
+      echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
+      echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+      if [[ -n $cost && "$cost" != "null" ]]; then
+        echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+      fi
+      echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
+    fi
+  done
 
   # Autonomous Memory Consolidation Heartbeat
   check_and_trigger_heartbeat
@@ -1497,7 +1271,7 @@ run_chat() {
   show_banner
   log_info "Initializing chat context..."
   log_info "Active Backend: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
-  [[ $BACKEND == "gemini" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
+  [[ $BACKEND == "external" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
   log_info "Active Model: ${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET}"
   log_info "Conversation online. Type ${CLR_B_GREEN}/help${ANSI_RESET} to view commands."
 
@@ -1549,8 +1323,6 @@ run_chat() {
   exit
 }
 
-# TODO: Add missing logic here for 'sql' / 'json' / 'markdown' implementation
-# Note: Our current working memory type is 'json'.
 run_pipeline() {
   local backend_upper ; backend_upper=$(to_upper "$BACKEND")
   local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
@@ -1558,7 +1330,7 @@ run_pipeline() {
   set_console_title "${SCRIPT_FILE}: Pipeline Mode."
   log_section "PIPELINE MODE ACTIVATED"
   log_info "Active Backend: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
-  [[ $BACKEND == "gemini" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
+  [[ $BACKEND == "external" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
 
   # Context
   if [[ -n $INPUT_FILE2 && -r $INPUT_FILE && -r $INPUT_FILE2 ]]; then
@@ -1593,60 +1365,13 @@ run_pipeline() {
   fi
   shopt -u nocasematch
 
+  local active_system ; active_system=$(get_full_system_prompt)
+
   if (( is_question == 1 )); then
-    # SYSTEM_PROMPT="The user has a question, reply to it."
     SIMPLE_PROMPT="Question: ${USER_PROMPT}\n\nContext:\n${CONTEXT_DATA}"
-    SIMPLE_PROMPT_COMBINED="${SYSTEM_PROMPT}\n\nStart your reply with 'Response: '\n\nQuestion: ${USER_PROMPT}\n\nContext:\n${CONTEXT_DATA}"
 
-    # Backend Selector
     case $BACKEND in
-      # Local Backend: Ollama
-      # ollama)
-      #   log_info "Question mode detected. Calling local Architect (${CLR_B_YELLOW}$OLLAMA_ARCHITECT${ANSI_RESET})..."
-      #   printf "%s" "$SIMPLE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
-      #   JSON_PAYLOAD=$(jq -rc -n \
-      #     --arg model "$OLLAMA_ARCHITECT" \
-      #     --rawfile prompt "$TEMP_MEMORY_USER" \
-      #     '{
-      #       model: $model,
-      #       prompt: $prompt,
-      #       stream: false
-      #     }'
-      #   )
-      #
-      #   # Sending request and store response
-      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
-      #   handle_response "$RESPONSE" "$USER_PROMPT"
-      # ;;
-
-      # Local Backend: llama.cpp
-      # llamacpp)
-      #   log_info "Question mode detected. Calling local Architect (${CLR_B_YELLOW}$LLAMACPP_ARCHITECT${ANSI_RESET})... "
-      #   LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
-      #   printf "%s" "$SYSTEM_PROMPT" > "$TEMP_MEMORY_SYSTEM"
-      #   printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
-      #   JSON_PAYLOAD=$(jq -rc -n \
-      #     --arg model "$LLAMACPP_MODEL" \
-      #     --rawfile system "$TEMP_MEMORY_SYSTEM" \
-      #     --rawfile user "$TEMP_MEMORY_USER" \
-      #     '{
-      #       model: $model,
-      #       messages: [
-      #         {role: "system", content: $system},
-      #         {role: "user", content: $user}
-      #       ],
-      #       temperature: 0.0,
-      #       stream: false
-      #     }'
-      #   )
-      #
-      #   # Sending request and store response
-      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
-      #   handle_response "$RESPONSE" "$USER_PROMPT"
-      # ;;
-
-      # Local + External Backend: OpenRouter / Gemini
-      ollama|llamacpp|gemini)
+      ollama|llamacpp|external)
         if [[ $BACKEND == "ollama" ]]; then
           log_info "Question mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
         elif [[ $BACKEND == "llamacpp" ]]; then
@@ -1654,7 +1379,7 @@ run_pipeline() {
         else
           log_info "Question mode detected. Calling cloud model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
         fi
-        printf "%s" "$SYSTEM_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+        printf "%s" "$active_system" > "$TEMP_MEMORY_SYSTEM"
         printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
         ALL_MESSAGES=$(jq -rc -n \
           --rawfile sys "$TEMP_MEMORY_SYSTEM" \
@@ -1664,11 +1389,10 @@ run_pipeline() {
 
         # The Magic Loop
         while true; do
-          # Write payload variables to temporary files inside the loop to capture any updates
           printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
 
-          # TODO: Find a better way to set model parameters
-          if [[ $BACKEND == "gemini" ]]; then
+          local JSON_PAYLOAD
+          if [[ $BACKEND == "external" ]]; then
             JSON_PAYLOAD=$(jq -rc -n \
               --arg model "$CHAT_MODEL" \
               --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
@@ -1676,7 +1400,8 @@ run_pipeline() {
               '{
                 model: $model,
                 messages: ($msgs | fromjson),
-                reasoning: {enabled: true}
+                reasoning: {enabled: true},
+                stream: false
               } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
             )
           else
@@ -1691,7 +1416,8 @@ run_pipeline() {
                 reasoning: {enabled: true},
                 temperature: 0.5,
                 top_k: 50,
-                repetition_penalty: 1.05
+                repetition_penalty: 1.05,
+                stream: false
               } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
             )
           fi
@@ -1710,11 +1436,11 @@ run_pipeline() {
             fi
 
             # Store relevant data
-            REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE")
-            RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE")
-            REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE")
-            TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE")
-            USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE")
+            REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE" 2>/dev/null)
+            RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
+            REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
+            TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
+            USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
           fi
 
           # Handling model reasoning
@@ -1760,7 +1486,6 @@ run_pipeline() {
               # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
               iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
               if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-                # Clear tools output file
                 rm -f "$TOOLS_OUTPUT"
 
                 # 6. Append tool output to messages array safely
@@ -1775,8 +1500,6 @@ run_pipeline() {
                     '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                   )
                 fi
-
-                # Clear temporary tools output file
                 rm -f "$TEMP_TOOLS_OUTPUT"
               else
                 log_warn "Unable to parse tool output with rawfile, using fallback formatting"
@@ -1788,8 +1511,6 @@ run_pipeline() {
                   --arg content "$fallback_content" \
                   '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
                 )
-
-                # Clear tools output file
                 rm -f "$TOOLS_OUTPUT"
               fi
             done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$TOOLS" 2>/dev/null)
@@ -1827,59 +1548,10 @@ run_pipeline() {
 
   # Route B: Compare Mode
   elif (( is_compare == 1 )); then
-    COMPARE_PROMPT="${SYSTEM_PROMPT}\n\nThe user wants to compare two files, show the main differences.\n\nContext:\n${CONTEXT_DATA}"
-    COMPARE_PROMPT_COMBINED="${SYSTEM_PROMPT}\n\nThe user wants to compare two files, show the main differences.\n\nRequest: ${USER_PROMPT}\n\nContext:\n${CONTEXT_DATA}"
-    # COMPARE_PROMPT_COMBINED="${SYSTEM_PROMPT}\n\nThe user wants to compare two files, show the main differences. Start your reply with 'Response:'\n\nRequest: ${USER_PROMPT}\n\nContext:\n${CONTEXT_DATA}"
+    COMPARE_PROMPT="${active_system}\n\nThe user wants to compare two files, show the main differences.\n\nContext:\n${CONTEXT_DATA}"
 
-    # Backend Selector
     case $BACKEND in
-      # Local Backend: Ollama
-      # ollama)
-      #   log_info "Compare mode detected. Calling local Architect (${CLR_B_YELLOW}$OLLAMA_ARCHITECT${ANSI_RESET})... "
-      #   printf "%s" "$COMPARE_PROMPT_COMBINED" > "$TEMP_MEMORY_USER"
-      #   JSON_PAYLOAD=$(jq -rc -n \
-      #     --arg model "$OLLAMA_ARCHITECT" \
-      #     --rawfile prompt "$TEMP_MEMORY_USER" \
-      #     '{
-      #       model: $model,
-      #       prompt: $prompt,
-      #       stream: false
-      #     }'
-      #   )
-      #
-      #   # Sending request and store response
-      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
-      #   handle_response "$RESPONSE" "$USER_PROMPT"
-      # ;;
-
-      # Local Backend: llama.cpp
-      # llamacpp)
-      #   log_info "Compare mode detected. Calling local Architect (${CLR_B_YELLOW}$LLAMACPP_ARCHITECT${ANSI_RESET})... "
-      #   LLAMACPP_MODEL=$(curl -sfSL "${LLAMACPP_API_SRV}/models?reload=1" | jq -rc '.data[].id' | grep "$LLAMACPP_ARCHITECT")
-      #   printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
-      #   printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
-      #   JSON_PAYLOAD=$(jq -rc -n \
-      #     --arg model "$LLAMACPP_MODEL" \
-      #     --rawfile system "$TEMP_MEMORY_SYSTEM" \
-      #     --rawfile user "$TEMP_MEMORY_USER" \
-      #     '{
-      #       model: $model,
-      #       messages: [
-      #         {role: "system", content: $system},
-      #         {role: "user", content: $user}
-      #       ],
-      #       temperature: 0.0,
-      #       stream: false
-      #     }'
-      #   )
-      #
-      #   # Sending request and store response
-      #   RESPONSE=$(api_call "$JSON_PAYLOAD")
-      #   handle_response "$RESPONSE" "$USER_PROMPT"
-      # ;;
-
-      # Local + External Backend: OpenRouter / Gemini
-      ollama|llamacpp|gemini)
+      ollama|llamacpp|external)
         if [[ $BACKEND == "ollama" ]]; then
           log_info "Compare mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
         elif [[ $BACKEND == "llamacpp" ]]; then
@@ -1890,8 +1562,8 @@ run_pipeline() {
         printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
         printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
 
-        # TODO: Find a better way to set model parameters
-        if [[ $BACKEND == "gemini" ]]; then
+        local JSON_PAYLOAD
+        if [[ $BACKEND == "external" ]]; then
           JSON_PAYLOAD=$(jq -rc -n \
             --arg model "$CHAT_MODEL" \
             --rawfile system "$TEMP_MEMORY_SYSTEM" \
@@ -1902,7 +1574,8 @@ run_pipeline() {
                 {role: "system", content: $system},
                 {role: "user", content: $user}
               ],
-              reasoning: {enabled: true}
+              reasoning: {enabled: true},
+              stream: false
             }'
           )
         else
@@ -1920,7 +1593,8 @@ run_pipeline() {
               reasoning: {enabled: true},
               temperature: 0.1,
               top_k: 50,
-              repetition_penalty: 1.05
+              repetition_penalty: 1.05,
+              stream: false
             }'
           )
         fi
@@ -1937,10 +1611,10 @@ run_pipeline() {
           fi
 
           # Store relevant data
-          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE")
-          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE")
-          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE")
-          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE")
+          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE" 2>/dev/null)
+          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
+          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
+          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
         fi
 
         # Handling model reasoning
@@ -1986,41 +1660,7 @@ run_pipeline() {
     log_info "Task mode detected. Preparing execution via backend '${CLR_B_YELLOW}${BACKEND}${ANSI_RESET}' in mode '${CLR_B_GREEN}${RUN_MODE}${ANSI_RESET}'"
 
     case $BACKEND in
-      # ollama)
-        # error "Coming soon! Stay tuned ;-)"
-        # if [[ $RUN_MODE == "multi" ]]; then
-        #   log "\nTask mode detected. Running heavy pipeline.\n"
-        #   log "[1/3] The Architect ($OLLAMA_ARCHITECT) will prepare the plan...\n"
-        #   ARCHITECT_PROMPT="The user wants to make some changes: $USER_PROMPT. Analyze the file and create an action plan for the coder model.\n\nContext:\n$CONTEXT_DATA"
-        #   ACTION_PLAN=$(ollama run "${OLLAMA_FLAGS[@]}" "$OLLAMA_ARCHITECT" <<<"$ARCHITECT_PROMPT")
-        #   log "\n[2/3] The Coder ($OLLAMA_CODER) will write the code...\n"
-        #   CODER_PROMPT="Follow this action plan on the given file ($INPUT_FILE). Return only the updated code without anything else. Don't use Markdown.\n\nPlan:\n$ACTION_PLAN\n\nContext:\n$CONTEXT_DATA"
-        #   RETURNED_CODE=$(ollama run "${OLLAMA_FLAGS[@]}" "$OLLAMA_CODER" <<<"$CODER_PROMPT" | sed '1d;$d')
-        #   log "\n[3/3] The Judge ($OLLAMA_JUDGE) will inspect the changes...\n"
-        #   JUDGE_PROMPT="Verify that there is no syntax errors or regressions in the updated code compared to the original.\n\nOriginal:\n$CONTEXT_DATA\n\nUpdated:\n$RETURNED_CODE"
-        #   FINAL_REPORT=$(ollama run "${OLLAMA_FLAGS[@]}" "$OLLAMA_JUDGE" <<<"$JUDGE_PROMPT")
-        #   log "\n\n=== JUDGE REPORT ===\n\n"
-        #   echo "$FINAL_REPORT" | handle_markdown
-        # else
-        #   log "\n[1/1] The Coder ($OLLAMA_CODER) will write the code...\n"
-        #   CODER_PROMPT="Follow the user prompt for the given file ($INPUT_FILE). Return only the updated code without anything else. Don't use Markdown.\n\nContext:\n$CONTEXT_DATA"
-        #   RETURNED_CODE=$(ollama run "${OLLAMA_FLAGS[@]}" "$OLLAMA_CODER" <<<"$CODER_PROMPT" | sed '1d;$d')
-        # fi
-        # if [[ -n $RETURNED_CODE && ! $RETURNED_CODE == "null" ]]; then
-        #   log "\n\n+++ WRITING CHANGES +++\n\n"
-        #   echo "$RETURNED_CODE" > "${INPUT_FILE}.new"
-        #   log "\n[Finished] Code written in ${INPUT_FILE}.new\n"
-        # else
-        #   log "\n[Done]\n"
-        # fi
-      # ;;
-
-      # llamacpp)
-      #   error "Coming soon! Stay tuned ;-)"
-      # ;;
-
-      # Local + External Backend: OpenRouter / Gemini
-      ollama|llamacpp|gemini)
+      ollama|llamacpp|external)
         if [[ $RUN_MODE == "multi" ]]; then
           if [[ $BACKEND == "ollama" ]]; then
             log_info "Launching Multi-Agent Pipeline for Ollama..."
@@ -2031,7 +1671,7 @@ run_pipeline() {
           fi
 
           # Step 1: Architect Plan
-          local arch_sys="${SYSTEM_PROMPT}\n\nYou are a professional Software Architect. Your task is to analyze the source file and the user's requested modification to create a precise, step-by-step development plan.\n\n"
+          local arch_sys="${active_system}\n\nYou are a professional Software Architect. Your task is to analyze the source file and the user's requested modification to create a precise, step-by-step development plan.\n\n"
           arch_sys+="🚨 CRITICAL ARCHITECT BOUNDARIES:\n"
           arch_sys+="1. You are the Architect, NOT the Coder or Builder. Your sole output must be a text-based Architectural Action Plan. NEVER write or output raw updated code blocks.\n"
           arch_sys+="2. ABSOLUTELY FORBIDDEN FROM FS WRITING: Do NOT use tools that modify or create files (such as 'write_file', 'edit_file', or 'apply_diff'). You must never execute these modification tools yourself.\n"
@@ -2051,7 +1691,6 @@ run_pipeline() {
             arch_user+="No file was provided as context.\n"
           fi
 
-          # local ARCHITECT_PLAN ; ARCHITECT_PLAN=$(call_gemini_task_agent "$arch_sys" "$arch_user" "Architecting the changes" "readonly" "true")
           local ARCHITECT_PLAN ; ARCHITECT_PLAN=$(call_task_agent "architect" "$arch_sys" "$arch_user" "Architecting the changes" "readonly" "true")
 
           # Act only if plan is generated
@@ -2062,7 +1701,7 @@ run_pipeline() {
             log
 
             # Step 2: Coder Implementation
-            local coder_sys="${SYSTEM_PROMPT}\n\nYou are an elite developer. Your task is to apply the provided architectural plan to the given file content.\n\n"
+            local coder_sys="${active_system}\n\nYou are an elite developer. Your task is to apply the provided architectural plan to the given file content.\n\n"
             coder_sys+="🚨 CRITICAL CODER BOUNDARIES:\n"
             coder_sys+="1. You must return ONLY and EXCLUSIVELY the complete, raw content of the updated file.\n"
             coder_sys+="2. Do NOT use tools that write or modify files (such as 'write_file', 'edit_file', or 'apply_diff'). The parent pipeline script handles saving your raw response to the final file automatically.\n"
@@ -2080,11 +1719,10 @@ run_pipeline() {
             coder_user+="Architect Plan:\n"
             coder_user+="${ARCHITECT_PLAN}"
 
-            # local RETURNED_CODE ; RETURNED_CODE=$(call_gemini_task_agent "$coder_sys" "$coder_user" "Implementing changes" "none" "true")
             local RETURNED_CODE ; RETURNED_CODE=$(call_task_agent "coder" "$coder_sys" "$coder_user" "Implementing changes" "none" "true")
 
             # Step 3: Judge Verification
-            local judge_sys="${SYSTEM_PROMPT}\n\nYou are an expert Quality Assurance and Code Inspector.\n"
+            local judge_sys="${active_system}\n\nYou are an expert Quality Assurance and Code Inspector.\n"
             judge_sys+="Your task is to compare the original file content and the updated file content to ensure syntax correctness, absence of regressions, security compliance, and proper implementation of the requested edits.\n"
             judge_sys+="Start your response with a line starting with '[PASS]' if everything is correct, or '[FAIL]' with clear, detailed explanations of any regression or issue discovered."
 
@@ -2102,7 +1740,6 @@ run_pipeline() {
             judge_user+="--- END FILE ---\n\n"
             judge_user+="User request: ${USER_PROMPT}"
 
-            # local CODER_JUDGMENT ; CODER_JUDGMENT=$(call_gemini_task_agent "$judge_sys" "$judge_user" "Evaluating changes" "none" "true")
             local CODER_JUDGMENT ; CODER_JUDGMENT=$(call_task_agent "judge" "$judge_sys" "$judge_user" "Evaluating changes" "none" "true")
 
             log ; show_ai_header
@@ -2116,7 +1753,7 @@ run_pipeline() {
         else
           log_info "Launching Simple Single-Agent Mode for Gemini..."
 
-          local simple_sys="${SYSTEM_PROMPT}\n\nYou are a senior professional developer. Your role is to understand the user's requested edit, apply it to the source file, and return the modified file contents.\n"
+          local simple_sys="${active_system}\n\nYou are a senior professional developer. Your role is to understand the user's requested edit, apply it to the source file, and return the modified file contents.\n"
           simple_sys+="CRITICAL INSTRUCTION:\n"
           simple_sys+="1. You must return ONLY and EXCLUSIVELY the complete, raw content of the updated file.\n"
           simple_sys+="2. Do NOT wrap your output in markdown code blocks (such as \`\`\`php ... \`\`\`).\n"
@@ -2134,7 +1771,6 @@ run_pipeline() {
             simple_user+="No file was provided as context. Create/modify the code as requested. Here is the context metadata:\n${CONTEXT_DATA}"
           fi
 
-          # local RETURNED_CODE ; RETURNED_CODE=$(call_gemini_task_agent "$simple_sys" "$simple_user" "Coding modifications" "all" "true")
           local RETURNED_CODE ; RETURNED_CODE=$(call_task_agent "coder" "$simple_sys" "$simple_user" "Coding modifications" "all" "true")
         fi
 
@@ -2168,7 +1804,6 @@ run_pipeline() {
           log_warn "Warning: The generated code was empty."
         fi
       ;;
-
       *) error "Unsupported backend given: $BACKEND" ;;
     esac
 
@@ -2195,7 +1830,7 @@ init_pipeline() {
 
   [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
 
-  if [[ $USE_TOR == true && $BACKEND == "gemini" ]]; then
+  if [[ $USE_TOR == true && $BACKEND == "external" ]]; then
     log_info "Checking Tor Network proxy interface..."
     if ! timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
       error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is Tor running?"
@@ -2204,7 +1839,7 @@ init_pipeline() {
     fi
   fi
 
-  if [[ $BACKEND == "gemini" ]]; then
+  if [[ $BACKEND == "external" ]]; then
     [[ -r $CREDENTIALS ]] && PROVIDER_API_KEY=$(<"$CREDENTIALS")
     [[ -z $PROVIDER_API_KEY ]] && error "Missing cloud credentials. Please configure local '.creds' file with your OpenRouter API key."
   fi
@@ -2213,7 +1848,7 @@ init_pipeline() {
   CHAT_MODEL="$(get_chat_model)"
 
   # Download models when necessary
-  [[ ! $BACKEND == "gemini" && ! $RUN_MODE == "server" ]] && PULL_MODELS=true    # Force models download for local backends
+  [[ ! $BACKEND == "external" && ! $RUN_MODE == "server" ]] && PULL_MODELS=true    # Force models download for local backends
   if [[ $PULL_MODELS == true ]]; then
     # Backend Selector
     case $BACKEND in
@@ -2269,6 +1904,9 @@ while [[ $# -ne 0 ]]; do
   case $1 in
     # Help
     -h|--help|help) print_help ;;
+
+    # ZDR
+    --zdr) shift ; ZDR_ENFORCED=true ;;
 
     # Clean
     --clear|clear) clear_memory ;;

@@ -102,5 +102,30 @@
         "required": ["url"]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_browse",
+      "description": "Navigate and capture screenshot or execute simple actions in a dynamic web page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The target website URL to navigate to."
+          },
+          "proxy": {
+            "type": "string",
+            "description": "Optional proxy URL (e.g. '127.0.0.1:9080' for Tor HTTP, or 'socks5://127.0.0.1:9050'). Set to null or false to connect directly."
+          },
+          "screenshot_path": {
+            "type": "string",
+            "description": "Optional file path to capture and save a PNG screenshot."
+          }
+        },
+        "required": ["url"]
+      }
+    }
   }
 ]

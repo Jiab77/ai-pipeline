@@ -7,7 +7,7 @@
 #
 # Made by Gemini 3.5 Flash Extended / Improved by Jiab77 & Jarvis
 #
-# Version 0.2.3 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
+# Version 0.3.0 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
@@ -16,14 +16,18 @@
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
+HTTP_PORT=9080
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+HTTP_PROXY="${TOR_HOST}:${HTTP_PORT}"
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
 SCRIPT_DIR="$(realpath "${0%/*}")"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
-WEB_FETCH="${SCRIPT_DIR}/web-fetch.sh"
+TOOLS_DIR="${SCRIPT_DIR}/tools"
+WEB_BROWSE="${TOOLS_DIR}/web-browse/web-browse.js"
+WEB_FETCH="${TOOLS_DIR}/web-fetch.sh"
 LOG_FILE="${SCRIPT_NAME}.log"
 
 # Arguments
@@ -426,6 +430,32 @@ web_fetch() {
 
   # Call our optimized smart script
   "$WEB_FETCH" "${opts[@]}" "$url"
+}
+
+# 11. Interact with and audit dynamic web pages using Puppeteer
+web_browse() {
+  local proxy="$HTTP_PROXY"
+  local proxy_val
+  local updated_args
+
+  if [[ -n $FUNC_ARGS ]]; then
+    {
+      IFS= read -r -d '' proxy_val
+    } < <(jq -j '.proxy, "\u0000"' <<< "$FUNC_ARGS")
+
+    [[ -n $proxy_val && $proxy_val != null ]] && proxy=$proxy_val
+  fi
+
+  # If proxy is explicitly false, null, or empty, disable proxy routing
+  if [[ $proxy == "null" || $proxy == "false" || -z $proxy ]]; then
+    updated_args=$(jq '. + {"noTor": true} | del(.proxy)' <<< "$FUNC_ARGS")
+  else
+    # Inject the resolved proxy address into the JSON payload for Node.js
+    updated_args=$(jq --arg prx "$proxy" '. + {"proxy": $prx}' <<< "$FUNC_ARGS")
+  fi
+
+  # Call our optimized Puppeteer script
+  "$WEB_BROWSE" "$updated_args"
 }
 
 # Bootstrap

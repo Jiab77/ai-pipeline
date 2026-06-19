@@ -3,6 +3,8 @@
 /**
  * 🌐 Dynamic Browser Automation via Puppeteer (web_browse.js)
  * 
+ * Created by Jarvis & Jiab77
+ * 
  * Version 0.0.0
  * 
  * This script accepts a JSON payload describing a list of actions to perform on a page,

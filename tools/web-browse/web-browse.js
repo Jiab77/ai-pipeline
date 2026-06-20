@@ -2,18 +2,18 @@
 
 /**
  * 🌐 Dynamic Browser Automation via Puppeteer (web_browse.js)
- * 
+ *
  * Created by Jarvis & Jiab77
- * 
- * Version 0.0.0
- * 
+ *
+ * Version 0.0.1
+ *
  * This script accepts a JSON payload describing a list of actions to perform on a page,
  * executes them in a headless/headful browser, captures logs/errors, and outputs a structured
  * JSON result containing execution telemetry.
- * 
+ *
  * By default, Tor HTTP proxy routing on 127.0.0.1:9080 is enabled.
  * Use --no-tor option or pass "noTor": true / "tor": false in the JSON config to disable proxy routing.
- * 
+ *
  * Usage:
  *   ./web_browse.js '<JSON_PAYLOAD_STRING>'
  *   ./web_browse.js --no-tor '<JSON_PAYLOAD_STRING>'
@@ -54,7 +54,7 @@ async function getInputPayload(arg) {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf-8');
-    
+
     // Set a timeout of 1 second for stdin to avoid hanging if no stdin is piped
     const timer = setTimeout(() => {
       if (data.trim() === '') {
@@ -174,7 +174,6 @@ async function main() {
       });
     }
 
-
     const launchConfig = getBrowserLaunchConfig(payload, useTor);
     const browser = await puppeteer.launch(launchConfig);
     const page = await browser.newPage();
@@ -209,7 +208,7 @@ async function main() {
     });
 
     // Navigate to URL
-    const waitOption = payload.waitUntil || 'networkidle2';
+    const waitOption = payload.waitUntil || 'domcontentloaded';
     await page.goto(payload.url, { waitUntil: waitOption });
     telemetry.url = page.url();
     telemetry.title = await page.title();
@@ -218,7 +217,7 @@ async function main() {
     if (payload.actions && Array.isArray(payload.actions)) {
       for (let i = 0; i < payload.actions.length; i++) {
         const action = payload.actions[i];
-        
+
         switch (action.type) {
           case 'wait':
             if (action.selector) {
@@ -276,8 +275,8 @@ async function main() {
             break;
 
           case 'scroll':
-            const scrollExpr = action.direction === 'bottom' 
-              ? 'window.scrollTo(0, document.body.scrollHeight)' 
+            const scrollExpr = action.direction === 'bottom'
+              ? 'window.scrollTo(0, document.body.scrollHeight)'
               : 'window.scrollBy(0, window.innerHeight)';
             await page.evaluate(scrollExpr);
             break;

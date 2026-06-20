@@ -5,6 +5,8 @@ node_modules
 data/
 models/
 tools/web-browse/tests/
+pipeline.conf
+test.conf
 test.sh
 run-tools-test.sh
 run-tools.log

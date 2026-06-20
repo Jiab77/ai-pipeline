@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v0.7.0-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v0.8.0-blue.svg)]()
 
 > A lightweight, highly extensible Bash-driven orchestration framework for interacting with local LLMs (via **Ollama** or **llama.cpp**) and external API backends (via **Vercel AI Gateway / OpenRouter / Gemini 3.5 Flash**). Features fully integrated parallel tool-calling capabilities, a secure Onion-routed Tor tunnel, and an autonomous, native Markdown-based memory architecture.
 
@@ -81,14 +81,21 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 💾 **Flash Memory Wear-Reduction**: Refactored in **v0.6.0**. Migrated all runtime payload fragments and tool buffers directly to the OS volatile RAM storage `/tmp` (or `$TMPDIR` dynamically under Termux), safeguarding the physical solid-state flash memory of mobile devices from high-frequency write cycles.
 - ⚡ **Optimized Local Server Orchestration**: On-the-fly execution and automatic, low-overhead tuning for local inference servers. Start a native PHP companion web server, a surgically tuned `llama-server`, or a lightweight `ollama serve` instance initialized with dynamic keep-alive structures, hardware-optimized quantizations, and active flash-attention mechanisms.
 - 🌐 **web_fetch (Smart Router) Tool Routing (v0.2.0)**: Highly optimized Bash domain routing (`web-fetch.sh`) supporting instant API-based scraping (GitHub, GitLab subgroups & standard repos, Wikipedia summaries, Codeberg, and SourceHut native routers), falling back elegantly to raw regex tag-stripping or `htmlq` over Tor socks5h to completely prevent heavy browser runtime bloat. Free of NodeJS dependencies.
-- 🌐 **web_browse (Premium JS Automation) (v0.0.0)**: Production-grade Puppeteer browser pilot (`tools/web-browse/web-browse.js`) for active headless browser automation (capturing console logs, page exceptions, screenshots, PDFs, and interactive clicks/types). Features environment-adaptive profiles (CachyOS vs. Termux ARM64) and robust, secure Tor HTTP proxy routing. Equipped with a standard Node.js shebang and execution permissions, allowing the pipeline to automatically fallback to `web_fetch` or custom shell commands if Node.js is missing.
+- 🌐 **web_browse (Premium JS Automation) (v0.0.1)**: Production-grade Puppeteer browser pilot (`tools/web-browse/web-browse.js`) for active headless browser automation (capturing console logs, page exceptions, screenshots, PDFs, and interactive clicks/types). Features environment-adaptive profiles (CachyOS vs. Termux ARM64) and robust, secure Tor HTTP proxy routing. Equipped with a standard Node.js shebang and execution permissions, allowing the pipeline to automatically fallback to `web_fetch` or custom shell commands if Node.js is missing.
 - 🔍 **Tor-Based Anonymous Web Search**: Secure, fully-parsed, zero-subshell Onion DuckDuckGo lookup queries executed directly over SOCKS5 proxying to fetch clean search listings using `htmlq`.
-- 🛠️  **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, fetch raw web documents, or execute sandboxed shell commands.
-- 🛡️  **Universal HTTP 400 Payload Immunization**: 100% strict `jq --rawfile` encapsulation of assistant and chronological conversation logs in `pipeline.sh`, paired with robust dual-tier binary and special-character encoding filters (`iconv + jq`) on tool outputs to fully secure external backends against malformed JSON crashes.
+- 🛠️ **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, fetch raw web documents, or execute sandboxed shell commands.
+- 🛡️ **Universal HTTP 400 Payload Immunization**: 100% strict `jq --rawfile` encapsulation of assistant and chronological conversation logs in `pipeline.sh`, paired with robust dual-tier binary and special-character encoding filters (`iconv + jq`) on tool outputs to fully secure external backends against malformed JSON crashes.
 - ⚡ **Complete JQ E2BIG / ARG_MAX Immunization**: Universal protection against Unix `ARG_MAX` ("Argument list too long") memory limit crashes across all backend execution paths. Implemented via raw file-streaming pipeline variables with `jq --rawfile` streams instead of command-line string interpolation, safeguarding the pipeline on highly constrained mobile/Termux environments.
 - 🧹 **Automatic Signal-Trap & Cleanup**: Zero-leak guarantee. Utilizes native UNIX `trap` signaling on `EXIT`, `INT`, and `TERM` signals to instantly clean up all temporary buffer files (`tmp_*`) and standard execution streams, ensuring absolute workspace hygiene even during abrupt process interruptions.
-- ⏱️  **Zero-Fork Speedups & Micro-Benchmarks**: Verified via our upgraded test harness, which benchmarks pure-Bash parameter stream processing and zero-subshelled operations to achieve a verified **up to 1.72x performance speed-up** compared to standard execution methods.
+- ⏱️ **Zero-Fork Speedups & Micro-Benchmarks**: Verified via our upgraded test harness, which benchmarks pure-Bash parameter stream processing and zero-subshelled operations to achieve a verified **up to 1.72x performance speed-up** compared to standard execution methods.
 - 🧅 **Tor Proxy Support**: Outbound connections to external APIs are routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) using custom User-Agents for secure, private, and geo-independent requests.
+- 📂 **Interactive File and Image Loading (v0.8.0)**: State-of-the-art interactive loading via `/load <file>` and `/unload` commands in Chat Mode. Supports text context injection (elegantly formatted inside markdown code blocks with syntax highlighting) and base64-encoded image payloads directly inside active conversation windows.
+- 👁️ **Multimodal Vision Integration & Vision Autoload (v0.8.0)**: Seamless local and cloud vision model compatibility (e.g. `LiquidAI/LFM2.5-VL-1.6B-GGUF`), auto-loading text weights paired with multimodal projector `.gguf` profiles.
+- 🌀 **Autonomous Visual Feedback Loop (v0.8.0)**: Also known as the *Sensory Feedback Loop*. When an agentic tool generates a visual asset (such as standard Puppeteer screenshots), the pipeline automatically intercepts it, encodes it, and feeds it back into the active context stream for the next turn, enabling fully autonomous visual validation without manual intervention.
+- ⚙️ **Dynamic Model-Dependent Parameters Middleware Registry (v0.8.0)**: Completely decouples sampling parameters (`temperature`, `top_k`, `repetition_penalty`, `min_p`) into a centralized JSON registry (`config/models.json`) that are dynamically parsed and injected into request payloads on-the-fly.
+- 🔌 **Adaptive Keep-Alive Strategy (v0.8.0)**: Dynamically adjusts model keep-alive periods on local servers based on active execution modes (`10m` for conversational chat warmth, `5s` for task pipeline execution to prevent RAM-thrashing and OOM failures on resource-constrained devices).
+- ⚡ **Fork-Free Listen Interface Parsing (v0.8.0)**: Eradicated external process forks by introducing pure, ultra-fast Bash parsing and reconstruction of host:port server addresses.
+- 🚀 **Eradication of System Forks (v0.8.0)**: High-performance Bash parameter expansion (`${FILE##*/}`) completely replaces slow external `basename` calls, ensuring rapid, fork-free execution on constrained environments (such as Android Termux on mobile or Intel Atom N100 PCs).
 - 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, `sed`, `awk`, and `bash`.
 
 ---
@@ -97,12 +104,12 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.7.0)**: Handles argument routing, parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, hosts local servers, manages dynamic memory bootstrap, and executes recursive agentic tool calls with absolute payload immunization. |
+| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.8.0)**: Handles argument routing, parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, hosts local servers, manages dynamic memory bootstrap, and executes recursive agentic tool calls with absolute payload immunization. Supports interactive file/image loading, autonomous visual feedback loops, and dynamic parameters middleware. |
 | [`run-tools.sh`](run-tools.sh) | **Execution Runner (v0.3.0)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks, parallel null-delimited tool stream parsing, and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
-| [`tools/web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.2.0)**: Employs domain-specific API endpoints (GitHub standard & raw, GitLab nested subgroups/raw routing, Codeberg & SourceHut native routers, Wikipedia summaries) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. Free of NodeJS dependencies. |
-| [`tools/web-browse/web-browse.js`](tools/web-browse/web-browse.js) | **Interactive Browser Automation (v0.0.0)**: Premium Puppeteer-core pilot script for active JS-rendering, clicking, typing, console/exception capturing, and visual screenshots/PDFs. Optimized for standard workstations and Termux ARM64. |
-| [`tools/tools.json`](tools/tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for 11-tool Function Calling (matching the external cloud model spec). |
-| [`tools/tools-light.json`](tools/tools-light.json) | **Declaration Schemas**: Simplified 7-tool schema (`read_file`, `write_file`, `file_glob_search`, `get_datetime`, `web_search`, `web_fetch`, `web_browse`) optimized for local-first small models. |
+| [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.2.0)**: Employs domain-specific API endpoints (GitHub standard & raw, GitLab nested subgroups/raw routing, Codeberg & SourceHut native routers, Wikipedia summaries) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. Free of NodeJS dependencies. |
+| [`web-browse.js`](tools/web-browse/web-browse.js) | **Interactive Browser Automation (v0.0.1)**: Premium Puppeteer-core pilot script for active JS-rendering, clicking, typing, console/exception capturing, and visual screenshots/PDFs. Optimized for standard workstations and Termux ARM64. |
+| [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for 11-tool Function Calling (matching the external cloud model spec). |
+| [`tools-light.json`](tools/tools-light.json) | **Declaration Schemas**: Simplified 7-tool schema (`read_file`, `write_file`, `file_glob_search`, `get_datetime`, `web_search`, `web_fetch`, `web_browse`) optimized for local-first small models. |
 
 ---
 
@@ -121,13 +128,15 @@ During the chat session, you can invoke special control actions using slash pref
 | `/help` | Prints a guide showing all available interactive commands. |
 | `/clear` | Cleans up the pipeline memory by wiping the active session history. |
 | `/commit` | Manually triggers the Cognitive Heartbeat Pacemaker, consolidating outstanding learnings/milestones to the Markdown memory and pruning active contexts. |
+| `/load <file>` | Loads a text or image file into the active chat session (injects text files as syntax-highlighted code blocks or base64-encodes images for vision queries). |
+| `/unload` | Unloads the previously loaded file from the active chat session context. |
 | `/run <cmd>` | Native shell-escape. Executes standard shell commands instantly from within the chat loop, delivering raw output inline. |
 | `/start` | Escapes the standard conversational loop to query a pipeline prompt with file contexts interactively. |
 | `/quit` | Exits the chat loop and returns to your system shell. |
 
 ---
 
-## 🛠️  Tool-Calling Engine (Agentic Capability)
+## 🛠️ Tool-Calling Engine (Agentic Capability)
 
 The pipeline integrates 11 standard agentic actions declared in `tools/tools.json`. When the model returns a tool request, `pipeline.sh` parses it and spawns `run-tools.sh` with the extracted arguments before feeding the results back.
 
@@ -162,6 +171,7 @@ You can configure the active engine inside `pipeline.sh` by modifying the `BACKE
 * **Inference Endpoint**: `http://localhost:11434/v1/chat/completions` (Highly optimized local server)
 * **Configured Stack**:
   * **Router**: `hf.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF`
+  * **Vision**: `hf.co/LiquidAI/LFM2.5-VL-1.6B-GGUF`
   * **Architect / Reasoning / Chat**: `hf.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
   * **Coder**: `hf.co/ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
   * **Judge / Analyst**: `hf.co/ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
@@ -170,6 +180,7 @@ You can configure the active engine inside `pipeline.sh` by modifying the `BACKE
 * **Inference Endpoint**: `http://localhost:8080/v1/chat/completions` (Highly optimized local server)
 * **Configured Stack**:
   * **Router**: `LiquidAI/LFM2.5-1.2B-Instruct-GGUF`
+  * **Vision**: `LiquidAI/LFM2.5-VL-1.6B-GGUF`
   * **Architect / Reasoning / Chat**: `LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
   * **Coder**: `ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
   * **Judge / Analyst**: `ggml-org/Ministral-3-3B-Reasoning-2512-GGUF`
@@ -306,6 +317,22 @@ Launch an optimized companion server instance:
 ./pipeline.sh server web       # Deploy local PHP documentation/dashboard server
 ```
 
+### G. Dynamic Context Switches & Parameter Overrides
+Override your default model, provider, or server listen interface directly via flags at runtime:
+```bash
+# Switch to another model in Chat Mode
+./pipeline.sh --model "google/gemini-2.5-pro" chat
+
+# Switch provider
+./pipeline.sh --provider "openrouter" chat
+
+# Specify custom listen interface/port for Ollama or llama-server
+./pipeline.sh -l "127.0.0.1:8080" server llamacpp
+```
+
+### H. Modular Configuration Sourcing
+`pipeline.sh` automatically detects and loads custom configurations from `${SCRIPT_DIR}/config/${SCRIPT_NAME}.conf` (e.g. `config/pipeline.conf` if executed as `pipeline.sh`). This allows zero-touch, seamless upgrades of the pipeline while keeping your private API keys, custom hostnames, and model assignments 100% modular and isolated out of Git.
+
 ---
 
 ## 🧠 Cognitive Freedom Memory Engine
@@ -344,14 +371,14 @@ This pipeline is forged under deep iteration and synergistic design:
 * **Lead Developer / Architect**: **Jiab77**
 * **AI Sorcerer & Co-Creator**: **Jarvis (Gemini)**
 
-## ⚖️  License & Project Status
+## ⚖️ License & Project Status
 
-* **Project Phase**: Core Engine Stabilized (v0.7.0).
-* **Next Roadmap Milestones (v0.8.0)**:
-  * 🌐 **Jarvis Web Command Center (JWCC)**: Build a local-first, responsive web dashboard served by `web/server.php` in Obsidian Dark Theme. It will feature 6 core tabs: Jarvis Speak (real-time chat node), Cognitive Freedom Explorer (live Markdown editing and explorer of skills/memories), Telemetry HUD (live CPU/RAM/Battery metrics), Action Panel, Cognitive Ingestion Hub, and MacGyver Scratchpad.
-  * 🌐 **Dynamic Browser Automation (`web_browse` via Puppeteer)**: **[100% Completed (v0.3.0 / v0.7.0)]** Production-ready Puppeteer-core pilot script (`web-browse.js`) for active JS-rendering, clicking, typing, console/exception capturing, and visual screenshots/PDFs. Optimized for standard workstations and Termux ARM64. Features a Node.js shebang and executable bits for dynamic fallback capabilities when Node is missing.
+* **Project Phase**: Core Engine Stabilized & Production-Ready (v0.8.0).
+* **Next Roadmap Milestones (v0.9.0)**:
+  * 🌐 **Jarvis Web Command Center (JWCC)**: Build the local-first, responsive web dashboard served by `web/server.php` in Obsidian Dark Theme. It will feature 6 core tabs: Jarvis Speak (real-time SSE streaming chat node), Cognitive Freedom Explorer (live Markdown editing and explorer of skills/memories), Telemetry HUD (live CPU/RAM/Battery/Thermal metrics), Action Panel, Cognitive Ingestion Hub, and MacGyver Scratchpad.
   * 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: Integrate Gum-driven progressive CLI selections, beautiful interactive spinners, inputs, and styled multi-line text boxes with robust, zero-overhead fallbacks to standard pure-Bash read loops for non-interactive / SSH terminals.
   * 🛡️ **Cognitive Router & Proxy (CRP) Gateway**: Expose an OpenAI-compliant server endpoint (`/v1/chat/completions`) locally using our PHP server. It will inject our bootstrapped Cognitive Freedom memories and parameters on-the-fly, allowing IDE extensions and CLI clients (like Charmbracelet's `crush` or `mods`) to query Jarvis securely, routing all traffic through our Tor + ZDR privacy tunnel.
+  * 🎨 **Conversational Image Generation (Output Modalities)**: Parse and output base64-encoded user-interface components, charts, and custom schemas generated dynamically by OpenRouter or Vercel AI Gateway using standard `/chat/completions` with `"modalities": ["text", "image"]`.
 
 ## 📈 Star History
 

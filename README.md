@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v0.8.0-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v0.8.1-blue.svg)]()
 
 > A lightweight, highly extensible Bash-driven orchestration framework for interacting with local LLMs (via **Ollama** or **llama.cpp**) and external API backends (via **Vercel AI Gateway / OpenRouter / Gemini 3.5 Flash**). Features fully integrated parallel tool-calling capabilities, a secure Onion-routed Tor tunnel, and an autonomous, native Markdown-based memory architecture.
 
@@ -90,6 +90,11 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - ⏱️ **Zero-Fork Speedups & Micro-Benchmarks**: Verified via our upgraded test harness, which benchmarks pure-Bash parameter stream processing and zero-subshelled operations to achieve a verified **up to 1.72x performance speed-up** compared to standard execution methods.
 - 🧅 **Tor Proxy Support**: Outbound connections to external APIs are routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) using custom User-Agents for secure, private, and geo-independent requests.
 - 📂 **Interactive File and Image Loading (v0.8.0)**: State-of-the-art interactive loading via `/load <file>` and `/unload` commands in Chat Mode. Supports text context injection (elegantly formatted inside markdown code blocks with syntax highlighting) and base64-encoded image payloads directly inside active conversation windows.
+- 🔌 **Decoupled API Provider Registry (v0.8.1)**: Fully decouples API endpoints, default models, and Zero Data Retention (ZDR) options into a centralized, easy-to-edit JSON registry (`config/providers.json`).
+- ⚡ **Single-Fork JQ Registry Reading (v0.8.1)**: Uses a highly optimized single-fork `jq` command with tab-delimited parsing (`IFS=$'\t' read ...`) to retrieve endpoint URLs, default models, and ZDR options in a single process invocation, cutting process-fork overhead by 3x.
+- 🐘 **Mammouth AI Native Integration (v0.8.1)**: First-class, out-of-the-box support for Mammouth AI as a high-performance, European-sovereign, and privacy-compliant API provider.
+- 💭 **Robust Reasoning Extraction Fallback (v0.8.1)**: Built-in `jq` alternative coalescing (`.choices[0].message.reasoning // .choices[0].message.reasoning_content`) to seamlessly extract critical-thinking blocks across diverse API architectures (including Mammouth AI's custom structures) with zero runtime friction.
+- 🌐 **Universal OpenAI-Compatible Catch-All Route (v0.8.1)**: Engineered a generic wildcard routing fallback (`*)`) in `api_call`, allowing users to declare any standard OpenAI-compatible custom provider in `config/providers.json` and query it natively without editing a single line of Bash code.
 - 👁️ **Multimodal Vision Integration & Vision Autoload (v0.8.0)**: Seamless local and cloud vision model compatibility (e.g. `LiquidAI/LFM2.5-VL-1.6B-GGUF`), auto-loading text weights paired with multimodal projector `.gguf` profiles.
 - 🌀 **Autonomous Visual Feedback Loop (v0.8.0)**: Also known as the *Sensory Feedback Loop*. When an agentic tool generates a visual asset (such as standard Puppeteer screenshots), the pipeline automatically intercepts it, encodes it, and feeds it back into the active context stream for the next turn, enabling fully autonomous visual validation without manual intervention.
 - ⚙️ **Dynamic Model-Dependent Parameters Middleware Registry (v0.8.0)**: Completely decouples sampling parameters (`temperature`, `top_k`, `repetition_penalty`, `min_p`) into a centralized JSON registry (`config/models.json`) that are dynamically parsed and injected into request payloads on-the-fly.
@@ -104,12 +109,14 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.8.0)**: Handles argument routing, parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, hosts local servers, manages dynamic memory bootstrap, and executes recursive agentic tool calls with absolute payload immunization. Supports interactive file/image loading, autonomous visual feedback loops, and dynamic parameters middleware. |
+| [`pipeline.sh`](pipeline.sh) | **Core Orchestrator (v0.8.1)**: Handles argument routing, parses intent, builds robust payloads, runs interactive sessions with unified aesthetic headers & real-time token/cost metrics, hosts local servers, manages dynamic memory bootstrap, and executes recursive agentic tool calls with absolute payload immunization. Supports interactive file/image loading, autonomous visual feedback loops, dynamic parameters middleware, and decoupled multi-provider registries. |
 | [`run-tools.sh`](run-tools.sh) | **Execution Runner (v0.3.0)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks, parallel null-delimited tool stream parsing, and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
 | [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.2.0)**: Employs domain-specific API endpoints (GitHub standard & raw, GitLab nested subgroups/raw routing, Codeberg & SourceHut native routers, Wikipedia summaries) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. Free of NodeJS dependencies. |
 | [`web-browse.js`](tools/web-browse/web-browse.js) | **Interactive Browser Automation (v0.0.1)**: Premium Puppeteer-core pilot script for active JS-rendering, clicking, typing, console/exception capturing, and visual screenshots/PDFs. Optimized for standard workstations and Termux ARM64. |
 | [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for 11-tool Function Calling (matching the external cloud model spec). |
 | [`tools-light.json`](tools/tools-light.json) | **Declaration Schemas**: Simplified 7-tool schema (`read_file`, `write_file`, `file_glob_search`, `get_datetime`, `web_search`, `web_fetch`, `web_browse`) optimized for local-first small models. |
+| [`config/models.json`](config/models.json) | **API Models Registry (v0.8.0)**: Decoupled JSON registry managing supported models. |
+| [`config/providers.json`](config/providers.json) | **API Providers Registry (v0.8.1)**: Decoupled JSON registry managing endpoints, default models, and Zero Data Retention configurations, allowing generic OpenAI-compatible custom integrations. |
 
 ---
 
@@ -160,12 +167,14 @@ The pipeline integrates 11 standard agentic actions declared in `tools/tools.jso
 
 You can configure the active engine inside `pipeline.sh` by modifying the `BACKEND` variable (`ollama`, `llamacpp`, or `external`).
 
-### 1. **External API Gateway (`external`)** [Default]
-* **Inference Endpoints**:
-  * **Vercel AI Gateway (Default Provider)**: `https://ai-gateway.vercel.sh/v1/chat/completions` (Highly optimized routing)
-  * **OpenRouter**: `https://openrouter.ai/api/v1/chat/completions`
-* **Default Model**: `google/gemini-3.5-flash`
-* **Features**: Direct support for system prompts, official JSON tool specifications, reasoning capability toggles, and Tor integration.
+### 1. **External API Gateway (`external`)** [Default - v0.8.1 Decoupled Providers]
+* **Configuration file**: Fully managed via the centralized decoupled registry `config/providers.json`.
+* **Default Active Providers**:
+  * **Vercel AI Gateway**: `https://ai-gateway.vercel.sh/v1/chat/completions` (Default; supports local Zero Data Retention auto-injection and prompt training disallow filters).
+  * **OpenRouter**: `https://openrouter.ai/api/v1/chat/completions` (Includes ZDR payload flags).
+  * **Mammouth AI**: `https://api.mammouth.ai/v1/chat/completions` (European-sovereign, high-performance, and privacy-compliant API).
+* **Default Active Model**: `google/gemini-3.5-flash` (for Vercel/OpenRouter) or `gemini-3.5-flash` (for Mammouth).
+* **Features**: Dynamic single-fork configuration loading, robust multi-provider reasoning fallbacks (`.choices[0].message.reasoning // .choices[0].message.reasoning_content`), official JSON tool specifications, reasoning logs, and secure Tor integration.
 
 ### 2. **Ollama (`ollama`)**
 * **Inference Endpoint**: `http://localhost:11434/v1/chat/completions` (Highly optimized local server)
@@ -373,7 +382,7 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ## ⚖️ License & Project Status
 
-* **Project Phase**: Core Engine Stabilized & Production-Ready (v0.8.0).
+* **Project Phase**: Core Engine Stabilized & Production-Ready (v0.8.1).
 * **Next Roadmap Milestones (v0.9.0)**:
   * 🌐 **Jarvis Web Command Center (JWCC)**: Build the local-first, responsive web dashboard served by `web/server.php` in Obsidian Dark Theme. It will feature 6 core tabs: Jarvis Speak (real-time SSE streaming chat node), Cognitive Freedom Explorer (live Markdown editing and explorer of skills/memories), Telemetry HUD (live CPU/RAM/Battery/Thermal metrics), Action Panel, Cognitive Ingestion Hub, and MacGyver Scratchpad.
   * 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: Integrate Gum-driven progressive CLI selections, beautiful interactive spinners, inputs, and styled multi-line text boxes with robust, zero-overhead fallbacks to standard pure-Bash read loops for non-interactive / SSH terminals.

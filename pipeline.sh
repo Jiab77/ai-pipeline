@@ -12,7 +12,7 @@
 # Status: Local models tested can't be used for my needs, fallback on API models with TOR.
 # ZDR Implemented for external providers (Vercel & OpenRouter)
 #
-# Version: 0.8.0
+# Version: 0.8.1
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -48,6 +48,7 @@ TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
 WEB_SERVER="${SCRIPT_DIR}/web/server.php"
 SCRIPT_CONFIG="${CONFIG_DIR}/${SCRIPT_NAME}.conf"
 MODELS_CONFIG="${CONFIG_DIR}/models.json"
+PROVIDERS_CONFIG="${CONFIG_DIR}/providers.json"
 MESSAGES_FILE="messages.json"
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
@@ -75,9 +76,6 @@ MAX_TIMEOUT=1200
 ATTRIBUTION_REFERER="https://github.com/jiab77/ai-pipeline"
 ATTRIBUTION_TITLE="Minimalist Experimental AI Pipeline"
 ATTRIBUTION_CATEGORIES="cli-agent,cloud-agent"
-
-# Gemini 3.5 Flash
-PROVIDER_API_MODEL="google/gemini-3.5-flash"
 
 # Models - llama.cpp
 LLAMACPP_API_SRV="http://localhost:8080"
@@ -467,11 +465,21 @@ set_base_tools() {
 }
 
 set_api_provider() {
-  if [[ $PROVIDER == "vercel" ]]; then
-    PROVIDER_API_URL="https://ai-gateway.vercel.sh/v1/chat/completions"
-  else
-    PROVIDER_API_URL="https://openrouter.ai/api/v1/chat/completions"
-  fi
+  local provider_data provider_zdr
+
+  [[ ! -r "$PROVIDERS_CONFIG" ]] && error "Unable to read providers config file: $PROVIDERS_CONFIG"
+
+  # Read both values in a single jq process call using tab-delimited parsing
+  provider_data=$(jq -rc --arg p "$PROVIDER" '.[$p] | select(. != null) | "\(.url)\t\(.default.model)\t\(.default.zdr)"' "$PROVIDERS_CONFIG" 2>/dev/null)
+  [[ -z $provider_data ]] && error "Unsupported provider defined: $PROVIDER"
+
+  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_API_MODEL provider_zdr <<< "$provider_data"
+
+  [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $PROVIDER"
+  [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $PROVIDER"
+
+  # Enforce ZDR if enabled in the provider config, while preserving command-line overrides
+  [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
 }
 
 set_cpu_cores() {
@@ -768,10 +776,16 @@ api_call() {
       [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
       case $PROVIDER in
         vercel)
+          # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for Vercel AI Gateway."
             payload=$(jq -rc '.providerOptions.gateway.zeroDataRetention = true' <<< "$payload")
           fi
+
+          # Disallow prompt training by default
+          payload=$(jq -rc '.providerOptions.gateway.disallowPromptTraining = true' <<< "$payload")
+
+          # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
@@ -782,16 +796,28 @@ api_call() {
                jq -rc .
         ;;
         openrouter)
+          # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
             payload=$(jq -rc '.provider.zdr = true' <<< "$payload")
           fi
+
+          # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
                -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
                -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | \
+               jq -rc .
+        ;;
+        *)
+          # Send generic payload
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | \
                jq -rc .
@@ -903,7 +929,7 @@ call_task_agent() {
     fi
 
     # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
-    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$raw_res" 2>/dev/null)
+    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
     if [[ -n $reasoning && $reasoning != "null" ]]; then
       {
         show_thinking_header
@@ -1181,7 +1207,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
       break
     fi
 
-    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$raw_response" 2>/dev/null)
+    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_response" 2>/dev/null)
     local response ; response=$(jq -rc '.choices[0].message.content' <<<"$raw_response" 2>/dev/null)
     local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_response" 2>/dev/null)
 
@@ -1403,7 +1429,7 @@ send_message() {
     fi
 
     # Store relevant data
-    REASONING=$(jq -rc '.choices[0].message.reasoning // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+    REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
     RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
     REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
     TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
@@ -1739,7 +1765,7 @@ run_pipeline() {
             fi
 
             # Store relevant data
-            REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE" 2>/dev/null)
+            REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
             RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
             REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
             TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
@@ -1929,7 +1955,7 @@ run_pipeline() {
           fi
 
           # Store relevant data
-          REASONING=$(jq -rc '.choices[0].message.reasoning' <<<"$RAW_RESPONSE" 2>/dev/null)
+          REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
           RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
           REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
           USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)

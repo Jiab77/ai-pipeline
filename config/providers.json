@@ -1,0 +1,23 @@
+{
+  "vercel": {
+    "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    "default": {
+      "model": "google/gemini-3.5-flash",
+      "zdr": false
+    }
+  },
+  "openrouter": {
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "default": {
+      "model": "google/gemini-3.5-flash",
+      "zdr": false
+    }
+  },
+  "mammouth": {
+    "url" : "https://api.mammouth.ai/v1/chat/completions",
+    "default": {
+      "model": "gemini-3.5-flash",
+      "zdr": false
+    }
+  }
+}

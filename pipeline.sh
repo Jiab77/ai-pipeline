@@ -12,7 +12,7 @@
 # Status: Local models tested can't be used for my needs, fallback on API models with TOR.
 # ZDR Implemented for external providers (Vercel & OpenRouter)
 #
-# Version: 0.8.1
+# Version: 0.8.2
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -244,7 +244,7 @@ log_warn() {
 }
 
 log_error() {
-  log "${CLR_B_RED}${ICON_ERROR}${ANSI_RESET} ${CLR_B_RED}Error: $*${ANSI_RESET}"
+  log "${CLR_B_RED}${ICON_ERROR}${ANSI_RESET} ${CLR_B_RED}[ERROR] $*${ANSI_RESET}"
 }
 
 log_brain() {
@@ -771,7 +771,7 @@ api_call() {
            jq -rc '.'
     ;;
 
-    # External Backend: OpenRouter, Vercel / Gemini
+    # External Backend: OpenRouter, Vercel, Mammouth AI
     external)
       [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
       case $PROVIDER in
@@ -795,12 +795,18 @@ api_call() {
                -d @- <<< "$payload" | \
                jq -rc .
         ;;
-        openrouter)
+        openrouter*)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
             payload=$(jq -rc '.provider.zdr = true' <<< "$payload")
           fi
+
+          # Force OpenRouter to route the request to the right provider / model for given parameters
+          payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload")
+
+          # Disallow prompt training by default
+          payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload")
 
           # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
@@ -925,7 +931,11 @@ call_task_agent() {
 
     if jq -e '.error' <<<"$raw_res" &>/dev/null; then
       local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res")
-      error "Unexpected API error.\n\n${err_msg}\n"
+      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res")
+      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_res")
+      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
+      log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
     fi
 
     # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
@@ -938,10 +948,23 @@ call_task_agent() {
     fi
 
     # Retrieve components
+    local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_response" 2>/dev/null)
+    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_response" 2>/dev/null)
     local content ; content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
     local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
     local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
     local usage ; usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
+
+    # Handling model resolving
+    [[ -n $resolved_model && $resolved_model != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
+
+    # Handling model reasoning
+    if [[ -n $reasoning && $reasoning != "null" ]]; then
+      {
+        show_thinking_header
+        echo "$reasoning" | render_markdown
+      } >&2
+    fi
 
     # Output refusal to STDERR if present
     if [[ -n $refusal && $refusal != "null" ]]; then
@@ -1195,27 +1218,47 @@ Take as many tool calls as you need. When you are fully done organizing and savi
       } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
     )
 
+    # Sending request and store response
     local raw_response ; raw_response=$(api_call "$payload")
     if [[ -z $raw_response || $raw_response == "null" ]]; then
       log_warn "Consolidation API call returned empty response."
       break
     fi
 
+    # Check for errors before continuing
     if jq -e '.error' <<<"$raw_response" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response" 2>/dev/null)
-      log_error "Consolidation API error: ${err_msg}"
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response")
+      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_response")
+      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_response")
+      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
+      log_error "Consolidation API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
       break
     fi
 
+    # Store relevant data
+    local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_response" 2>/dev/null)
     local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_response" 2>/dev/null)
     local response ; response=$(jq -rc '.choices[0].message.content' <<<"$raw_response" 2>/dev/null)
+    local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_response" 2>/dev/null)
     local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_response" 2>/dev/null)
 
+    # Handling model resolving
+    [[ -n $resolved_model && $resolved_model != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
+
+    # Handling model reasoning
     if [[ -n $reasoning && $reasoning != "null" ]]; then
       show_thinking_header
       echo "$reasoning" | render_markdown
     fi
 
+    # Handling model refusal
+    if [[ -n $refusal && $refusal != "null" ]]; then
+      show_ai_header
+      echo "$refusal" | render_markdown
+    fi
+
+    # Handling model requested tools (Multi-Parallel Support)
     if [[ -n $tools && $tools != "null" ]]; then
       local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_response")
       printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
@@ -1393,11 +1436,11 @@ send_message() {
   ALL_MESSAGES=$(jq -rc --arg prompt "$prompt" '. + [{role: "user", content: $prompt}]' <<<"$ALL_MESSAGES")
 
   if [[ $BACKEND == "ollama" ]]; then
-    log_debug "Sending query chunk to local Ollama backend (Model: ${active_model##*/})..."
+    log_debug "Sending query chunk to local Ollama backend (Model: ${active_model##*/})...\n"
   elif [[ $BACKEND == "llamacpp" ]]; then
-    log_debug "Sending query chunk to local llama.cpp backend (Model: ${active_model##*/})..."
+    log_debug "Sending query chunk to local llama.cpp backend (Model: ${active_model##*/})...\n"
   else
-    log_debug "Sending query chunk to cloud Gemini backend (Model: ${active_model##*/})..."
+    log_debug "Sending query chunk to external $PROVIDER backend (Model: $active_model)...\n"
   fi
 
   # The Magic Loop
@@ -1420,20 +1463,28 @@ send_message() {
 
     # Sending request and store response
     RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-    [[ -z $RAW_RESPONSE ]] && error "Empty API response."
+    [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && error "Empty API response."
 
     # Check for errors before continuing
     if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-      err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
-      error "Unexpected API error.\n\n${err_msg}\n"
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
+      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE")
+      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE")
+      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
+      log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
     fi
 
     # Store relevant data
+    RESOLVED_MODEL=$(jq -rc '.model' <<<"$RAW_RESPONSE" 2>/dev/null)
     REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
     RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
     REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
     TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
     USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+
+    # Handling model resolving
+    [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
 
     # Handling model reasoning
     if [[ -n $REASONING && $REASONING != "null" ]]; then
@@ -1754,23 +1805,28 @@ run_pipeline() {
 
           # Sending request and store response
           RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-          [[ -z $RAW_RESPONSE ]] && error "Empty API response."
+          [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && error "Empty API response."
 
-          # Handling raw response
-          if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
-            # Check for errors before continuing
-            if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-              err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
-              error "Unexpected API error.\n\n${err_msg}\n"
-            fi
-
-            # Store relevant data
-            REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
-            RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
-            REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
-            TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
-            USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+          # Check for errors before continuing
+          if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
+            local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
+            local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE")
+            local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE")
+            [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+            [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
+            log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
           fi
+
+          # Store relevant data
+          RESOLVED_MODEL=$(jq -rc '.model' <<<"$RAW_RESPONSE" 2>/dev/null)
+          REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
+          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
+          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
+          TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
+          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+
+          # Handling model resolving
+          [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
 
           # Handling model reasoning
           if [[ -n $REASONING && ! $REASONING == "null" ]]; then
@@ -1944,22 +2000,27 @@ run_pipeline() {
 
         # Sending request and store response
         RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-        [[ -z $RAW_RESPONSE ]] && error "Empty API response."
+        [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && error "Empty API response."
 
-        # Handling raw response
-        if [[ -n $RAW_RESPONSE && ! $RAW_RESPONSE == "null" ]]; then
-          # Check for errors before continuing
-          if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-            err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
-            error "Unexpected API error.\n\n${err_msg}\n"
-          fi
-
-          # Store relevant data
-          REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
-          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
-          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
-          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+        # Check for errors before continuing
+        if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
+          local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
+          local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE")
+          local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE")
+          [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+          [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
+          log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
         fi
+
+        # Store relevant data
+        RESOLVED_MODEL=$(jq -rc '.model' <<<"$RAW_RESPONSE" 2>/dev/null)
+        REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
+        RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
+        REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
+        USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+
+        # Handling model resolving
+        [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
 
         # Handling model reasoning
         if [[ -n $REASONING && ! $REASONING == "null" ]]; then
@@ -2011,7 +2072,7 @@ run_pipeline() {
           elif [[ $BACKEND == "llamacpp" ]]; then
             log_info "Launching Multi-Agent Pipeline for llama.cpp..."
           else
-            log_info "Launching Multi-Agent Pipeline for Gemini..."
+            log_info "Launching Multi-Agent Pipeline on external provider..."
           fi
 
           # Step 1: Architect Plan
@@ -2095,7 +2156,7 @@ run_pipeline() {
           fi
 
         else
-          log_info "Launching Simple Single-Agent Mode for Gemini..."
+          log_info "Launching Simple Single-Agent Mode external provider..."
 
           local simple_sys="${active_system}\n\nYou are a senior professional developer. Your role is to understand the user's requested edit, apply it to the source file, and return the modified file contents.\n"
           simple_sys+="CRITICAL INSTRUCTION:\n"

@@ -13,6 +13,13 @@
       "zdr": false
     }
   },
+  "openrouter-free": {
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "default": {
+      "model": "openrouter/free",
+      "zdr": false
+    }
+  },
   "mammouth": {
     "url" : "https://api.mammouth.ai/v1/chat/completions",
     "default": {

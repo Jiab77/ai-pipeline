@@ -10,6 +10,8 @@
  * - Intelligent dual-mode argument parsing (Options flags & Classic positional args)
  * - Safe process launching (PCNTL with Passthru graceful fallback)
  * - Deluxe responsive directory listing & diagnostics dashboard
+ * 
+ * Version: 1.0.1
  */
 
 // Define help option flags
@@ -556,7 +558,7 @@ $files = array_filter(scandir($dir), function($item) {
 
     <!-- Beautiful, clean premium footer -->
     <div class="footer-text">
-        ⚡ Engine powered by <strong>Simple PHP Web Server</strong> • Tailored in Obsidian Dark Theme with 💙 <br>
+        ⚡ Engine powered by <a href="https://github.com/Jiab77/simple-php-webserver" target="_blank" rel="noopener"><strong>Simple PHP Web Server</strong></a> • Tailored in Obsidian Dark Theme with 💙 <br>
         <span style="font-size: 0.8rem; margin-top: 0.5rem; display: inline-block; opacity: 0.5;">Fomantic UI v2.9.4 Secured via SRI Subresource Integrity</span>
     </div>
 

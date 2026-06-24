@@ -2,8 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v0.9.0-blue.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter%20%7C%20Mammouth%20AI-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v0.9.2-blue.svg)]()
 
 > A lightweight, highly extensible Bash-driven orchestration framework for interacting with local LLMs (via **Ollama** or **llama.cpp**) and external API backends (via **Vercel AI Gateway / OpenRouter / Mammouth AI**). Features fully integrated parallel tool-calling capabilities, a secure Onion-routed Tor tunnel, and an autonomous, native Markdown-based memory architecture.
 

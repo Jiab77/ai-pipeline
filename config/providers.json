@@ -1,8 +1,15 @@
 {
-  "vercel": {
-    "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+  "mammouth": {
+    "url": "https://api.mammouth.ai/v1/chat/completions",
     "default": {
-      "model": "google/gemini-3.5-flash",
+      "model": "gemini-3.5-flash",
+      "zdr": false
+    }
+  },
+  "openai": {
+    "url": "https://api.openai.com/v1/chat/completions",
+    "default": {
+      "model": "gpt-5.4",
       "zdr": false
     }
   },
@@ -20,10 +27,10 @@
       "zdr": false
     }
   },
-  "mammouth": {
-    "url" : "https://api.mammouth.ai/v1/chat/completions",
+  "vercel": {
+    "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
     "default": {
-      "model": "gemini-3.5-flash",
+      "model": "google/gemini-3.5-flash",
       "zdr": false
     }
   }

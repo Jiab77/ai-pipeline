@@ -9,7 +9,7 @@
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version: 0.9.1
+# Version: 0.9.2
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -676,6 +676,20 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+        openai)
+          # Apply ZDR policy when enabled
+          if [[ $ZDR_ENFORCED == true ]]; then
+            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
+            payload=$(jq -rc '.store = false' <<< "$payload")
+          fi
+
+          # Send custom payload
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | jq -rc .
+        ;;
         openrouter*)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
@@ -1028,6 +1042,7 @@ consolidate_memory() {
   local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
+  local errors=0
 
   [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
 
@@ -1075,6 +1090,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
       [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
       [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
       log_error "Consolidation API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
+      ((errors++))    # Increment errors counter
       break
     fi
 
@@ -1188,14 +1204,18 @@ Take as many tool calls as you need. When you are fully done organizing and savi
   done
 
   # Prune main context: Keep only the system prompt + last 2 turns of the original conversation
-  log_brain "Pruning active messages log to release token pressure..."
-  if [[ -r $messages_path ]]; then
-    jq -rc '.[-2:]' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
-    mv -f "${messages_path}.tmp" "$messages_path"
+  if [[ $errors -eq 0 ]]; then
+    log_brain "Pruning active messages log to release token pressure..."
+    if [[ -r $messages_path ]]; then
+      jq -rc '.[-2:]' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
+      mv -f "${messages_path}.tmp" "$messages_path"
+    else
+      echo "[]" > "$messages_path"
+    fi
+    log_success "Main conversation context successfully refreshed!"
   else
-    echo "[]" > "$messages_path"
+    log_warn "Unexpected error detected! Preserving conversation history."
   fi
-  log_success "Main conversation context successfully refreshed!"
 }
 
 check_and_trigger_heartbeat() {

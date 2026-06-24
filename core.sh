@@ -9,7 +9,7 @@
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version: 0.9.0
+# Version: 0.9.1
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -2078,7 +2078,7 @@ parse_cli_flags() {
   INPUT_FILE2="$3"
 }
 
-init_pipeline() {
+init_core() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
 
   # Fix Emojis/Icons for Termux
@@ -2179,7 +2179,7 @@ init_pipeline() {
 # -----------------------------------------------------------------------------
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   parse_cli_flags "$@"
-  init_pipeline
+  init_core
   if [[ $RUN_MODE == "server" ]]; then
     serve
   else

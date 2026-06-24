@@ -9,7 +9,7 @@
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version: 0.9.0
+# Version: 0.9.1
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -138,7 +138,7 @@ run_chat() {
 parse_cli_flags "$@"
 
 # Bootstrap core configurations and model settings
-init_pipeline
+init_core
 
 # Launch Interactive Loop or Pipeline depending on runtime state
 case $RUN_MODE in

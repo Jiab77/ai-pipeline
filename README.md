@@ -329,13 +329,13 @@ For automated, headless, or script-integrated execution, run the core pipeline d
 ### D. Clean Memory Store
 Clear cached chat history:
 ```bash
-./cli.sh --clear
+./cli.sh clear
 ```
 
 ### E. Manual Cognitive Consolidation
 Force immediate session context compression and memory syncing:
 ```bash
-./cli.sh --commit
+./cli.sh commit
 ```
 
 ### F. Unified Local Server Mode
@@ -350,10 +350,10 @@ Launch an optimized companion server instance:
 Override your default model, provider, or server listen interface directly via flags at runtime:
 ```bash
 # Switch to another model in Chat Mode
-./cli.sh --model "google/gemini-2.5-pro"
+./cli.sh model "google/gemini-2.5-pro"
 
 # Switch provider
-./cli.sh --provider "openrouter"
+./cli.sh provider "openrouter"
 
 # Specify custom listen interface/port for Ollama or llama-server
 ./core.sh -l "127.0.0.1:8080" server llamacpp

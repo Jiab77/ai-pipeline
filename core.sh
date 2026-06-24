@@ -1,42 +1,50 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034,SC2001
 #
-# Minimalist Experimental AI Pipeline by Jiab77
+# ai-pipeline-core - Sovereign Cognitive and Reasoning Engine
 #
-# This script handles 'ollama', 'llama.cpp' and 'openrouter' backends.
+# This script houses the core logic, configurations, API transports,
+# and tool orchestration loops of our modular AI pipeline.
 #
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Note: This is a WiP and will be improved during next iterations.
-# Status: Local models tested can't be used for my needs, fallback on API models with TOR.
-# ZDR Implemented for external providers (Vercel & OpenRouter)
-#
-# Version: 0.8.2
+# Version: 0.9.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
 
-# Config
-RUN_MODE="chat"                                           # Expected values: simple, multi, chat, server
-SERVER_MODE="web"                                         # Expected values: ollama, llamacpp, web
-BACKEND="external"                                        # Expected values: ollama, llamacpp or external
-PROVIDER="vercel"                                         # Expected values: openrouter, vercel
-PROVIDER_API_KEY=""                                       # /!\ NEVER PUBLISH IT /!\
-MEMORY_TYPE="markdown"                                    # Expected values: markdown, json, sql
-HEARTBEAT_THRESHOLD=10                                    # Trigger context consolidation to avoid amnesia and keep context extremely light
-CREDENTIALS="${HOME}/.creds"                              # Or any other location or filename you prefer.
-USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"    # You can also set any other user-agent.
+# -----------------------------------------------------------------------------
+# Core Configurations & Environment Discovery
+# -----------------------------------------------------------------------------
+
+# Core Run Modes & Fallbacks
+RUN_MODE="${RUN_MODE:-simple}"
+SERVER_MODE="${SERVER_MODE:-web}"
+BACKEND="${BACKEND:-external}"
+PROVIDER="${PROVIDER:-vercel}"
+PROVIDER_API_KEY=""
+MEMORY_TYPE="${MEMORY_TYPE:-markdown}"
+HEARTBEAT_THRESHOLD=10
+CREDENTIALS="${HOME}/.creds"
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
 PULL_MODELS=false
 DEBUG=true
-USE_TOR=true          # Set to 'false' only for debugging
-USE_TOOLS=true        # This will be used to enable / disable tools based on a given model
-ZDR_ENFORCED=false    # Enforce Zero Data Retention for cloud providers (Vercel & OpenRouter)
+USE_TOR=true          # Route cloud API calls through Tor proxy
+USE_TOOLS=true        # Enable/Disable tool calling capabilities
+ZDR_ENFORCED=false    # Enforce Zero Data Retention for cloud providers
+
+# Self-Discovery Paths (Dynamic Sandbox & Root Mounting)
+CORE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${CORE_SELF_DIR##*/}" == "data" ]]; then
+  SCRIPT_DIR="$(dirname "$CORE_SELF_DIR")"
+else
+  SCRIPT_DIR="$CORE_SELF_DIR"
+fi
 
 # Internals
-SCRIPT_DIR="$(realpath "${0%/*}")"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 DATA_STORE="${SCRIPT_DIR}/data"
@@ -44,7 +52,7 @@ MEMORY_DIR="${DATA_STORE}/memory"
 CONFIG_DIR="${SCRIPT_DIR}/config"
 MODELS_DIR="${SCRIPT_DIR}/models"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
-TOOLS_HANDLER="${SCRIPT_DIR}/run-tools.sh"
+TOOLS_HANDLER="${SCRIPT_DIR}/tools.sh"
 WEB_SERVER="${SCRIPT_DIR}/web/server.php"
 SCRIPT_CONFIG="${CONFIG_DIR}/${SCRIPT_NAME}.conf"
 MODELS_CONFIG="${CONFIG_DIR}/models.json"
@@ -53,7 +61,7 @@ MESSAGES_FILE="messages.json"
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 
-# Temporary Files
+# Temporary Files (Default to /tmp, adapts dynamically on Termux)
 TOOLS_OUTPUT="/tmp/tools_output.txt"
 TEMP_MEMORY_SYSTEM="/tmp/memory_sys.txt"
 TEMP_MEMORY_USER="/tmp/memory_usr.txt"
@@ -62,22 +70,22 @@ TEMP_TOOLS_OUTPUT="/tmp/tools_output.json"
 TEMP_PAYLOAD_ASSISTANT="/tmp/payload_assistant.json"
 TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
 
-# Soul
+# Sovereign Personality & Identity
 AI_NAME="Jarvis"
 
-# Local Models Config
-QUANTIZATION="q8_0"   # Suitable for small laptops and mobile devices | Case sensitive, keep it in lowercase
-MIN_CONTEXT=256       # Used for fetching models with 'llama.cpp'
-MAX_CONTEXT=16384     # Increase the value if you have a bigger hardware that can handle more
-MAX_BATCH_SIZE=1024   # Reduce this value back to 256 in case of performance issues
+# Local Computing Controls
+QUANTIZATION="q8_0"   # Target quantization for resource-frugal models
+MIN_CONTEXT=256
+MAX_CONTEXT=16384
+MAX_BATCH_SIZE=1024
 MAX_TIMEOUT=1200
 
-# Attribution Config
+# Metadata Attributions
 ATTRIBUTION_REFERER="https://github.com/jiab77/ai-pipeline"
 ATTRIBUTION_TITLE="Minimalist Experimental AI Pipeline"
 ATTRIBUTION_CATEGORIES="cli-agent,cloud-agent"
 
-# Models - llama.cpp
+# Llama.cpp Default Allocations
 LLAMACPP_API_SRV="http://localhost:8080"
 LLAMACPP_API_URL="${LLAMACPP_API_SRV}/v1/chat/completions"
 LLAMACPP_CHAT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
@@ -89,7 +97,7 @@ LLAMACPP_CODER="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
 LLAMACPP_JUDGE="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
 LLAMACPP_CACHE="${MODELS_DIR}/llama.cpp"
 
-# Models - Ollama
+# Ollama Default Allocations
 OLLAMA_API_SRV="http://localhost:11434"
 OLLAMA_API_URL="${OLLAMA_API_SRV}/v1/chat/completions"
 OLLAMA_CHAT="hf.co/${LLAMACPP_CHAT}"
@@ -101,7 +109,9 @@ OLLAMA_CODER="hf.co/${LLAMACPP_CODER}"
 OLLAMA_JUDGE="hf.co/${LLAMACPP_JUDGE}"
 OLLAMA_CACHE="${MODELS_DIR}/ollama"
 
-# Cleanup temporary files on exit
+# -----------------------------------------------------------------------------
+# Cleanups & Process Resets
+# -----------------------------------------------------------------------------
 cleanup_temp_files() {
   rm -f "$TEMP_MEMORY_SYSTEM" \
         "$TEMP_MEMORY_USER" \
@@ -114,15 +124,18 @@ cleanup_temp_files() {
 }
 trap cleanup_temp_files EXIT INT TERM
 
-# Visual Styling
-# Colors & Styles (ANSI Escape Codes)
+# -----------------------------------------------------------------------------
+# High-Fidelity Terminal Formatting & Styles
+# -----------------------------------------------------------------------------
+
+# ANSI Styles
 ANSI_RESET="[0m"
 ANSI_BOLD="[1m"
 ANSI_DIM="[2m"
 ANSI_ITALIC="[3m"
 ANSI_UNDERLINE="[4m"
 
-# Foreground High-Intensity
+# Foreground High-Intensity Colors
 CLR_B_BLACK="[90m"
 CLR_B_RED="[91m"
 CLR_B_GREEN="[92m"
@@ -132,7 +145,7 @@ CLR_B_MAGENTA="[95m"
 CLR_B_CYAN="[96m"
 CLR_B_WHITE="[97m"
 
-# Standard Foreground
+# Standard Foreground Colors
 CLR_BLACK="[30m"
 CLR_RED="[31m"
 CLR_GREEN="[32m"
@@ -142,7 +155,7 @@ CLR_MAGENTA="[35m"
 CLR_CYAN="[36m"
 CLR_WHITE="[37m"
 
-# Emojis/Icons
+# Emojis & Icons
 ICON_INFO="ℹ️ "
 ICON_SUCCESS="✅"
 ICON_WARNING="⚠️ "
@@ -158,7 +171,7 @@ ICON_DEBUG="🔍"
 ICON_USER="👤 "
 ICON_AI="🤖"
 
-# Functions
+# Get terminal width safely
 get_term_width() {
   local cols
   cols=$(tput cols 2>/dev/null || echo 80)
@@ -168,6 +181,7 @@ get_term_width() {
   echo "$((cols - 1))"
 }
 
+# Draw full width visual horizontal line
 draw_line() {
   local char="${1:-─}"
   local count="${2:-80}"
@@ -176,6 +190,7 @@ draw_line() {
   echo -e "${line// /$char}"
 }
 
+# Render high-tech visual header lines
 draw_header() {
   local prefix="$1"
   local char="${2:-─}"
@@ -193,6 +208,7 @@ draw_header() {
   echo -e "${prefix}${line_clr}${line_char// /$char}${ANSI_RESET}"
 }
 
+# Render beautiful symmetrical titles with lines on both sides
 draw_symmetric_header() {
   local title="$1"
   local title_color="$2"
@@ -216,10 +232,8 @@ draw_symmetric_header() {
   echo -e "${line_color}${left_line// /$char}${title_color}[ ${title} ]${line_color}${right_line// /$char}${ANSI_RESET}"
 }
 
-log() {
-  echo -e "$*" >&2
-}
-
+# Logging Helpers
+log() { echo -e "$*" >&2; }
 log_section() {
   local title="$1"
   local clr="${2:-$CLR_B_CYAN}"
@@ -230,57 +244,26 @@ log_section() {
   log "\n${clr}┌──[ ${ANSI_BOLD}${CLR_B_WHITE}${title}${ANSI_RESET}${clr} ]${ANSI_RESET}"
   log "${clr}└${line_char// /─}${ANSI_RESET}"
 }
-
-log_info() {
-  log "${CLR_B_CYAN}${ICON_INFO}${ANSI_RESET} ${CLR_B_WHITE}$*${ANSI_RESET}"
-}
-
-log_success() {
-  log "${CLR_B_GREEN}${ICON_SUCCESS}${ANSI_RESET} ${CLR_B_GREEN}$*${ANSI_RESET}"
-}
-
-log_warn() {
-  log "${CLR_B_YELLOW}${ICON_WARNING}${ANSI_RESET} ${CLR_B_YELLOW}$*${ANSI_RESET}"
-}
-
-log_error() {
-  log "${CLR_B_RED}${ICON_ERROR}${ANSI_RESET} ${CLR_B_RED}[ERROR] $*${ANSI_RESET}"
-}
-
-log_brain() {
-  log "${CLR_B_MAGENTA}${ICON_BRAIN}${ANSI_RESET} ${CLR_B_MAGENTA}$*${ANSI_RESET}"
-}
-
-log_step() {
-  log "${CLR_B_MAGENTA}➜${ANSI_RESET} ${ANSI_BOLD}${CLR_B_WHITE}$*${ANSI_RESET}"
-}
-
+log_info() { log "${CLR_B_CYAN}${ICON_INFO}${ANSI_RESET} ${CLR_B_WHITE}$*${ANSI_RESET}"; }
+log_success() { log "${CLR_B_GREEN}${ICON_SUCCESS}${ANSI_RESET} ${CLR_B_GREEN}$*${ANSI_RESET}"; }
+log_warn() { log "${CLR_B_YELLOW}${ICON_WARNING}${ANSI_RESET} ${CLR_B_YELLOW}$*${ANSI_RESET}"; }
+log_error() { log "${CLR_B_RED}${ICON_ERROR}${ANSI_RESET} ${CLR_B_RED}[ERROR] $*${ANSI_RESET}"; }
+log_brain() { log "${CLR_B_MAGENTA}${ICON_BRAIN}${ANSI_RESET} ${CLR_B_MAGENTA}$*${ANSI_RESET}"; }
+log_step() { log "${CLR_B_MAGENTA}➜${ANSI_RESET} ${ANSI_BOLD}${CLR_B_WHITE}$*${ANSI_RESET}"; }
 log_debug() {
   if [[ -e $HOME/.debug || "$DEBUG" == "true" ]]; then
     log "\n${CLR_B_BLACK}${ICON_DEBUG} [DEBUG] $*${ANSI_RESET}"
   fi
 }
 
-to_lower() {
-  tr '[:upper:]' '[:lower:]' <<< "$1"
-}
+# Strings helpers
+to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
+to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
 
-to_upper() {
-  tr '[:lower:]' '[:upper:]' <<< "$1"
-}
-
-show_user_header() {
-  log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER} User " "─" "${CLR_B_BLACK}")\n"
-}
-
-show_ai_header() {
-  log "\n$(draw_header "${CLR_B_CYAN}${ICON_AI} ${AI_NAME} " "─" "${CLR_B_BLACK}")\n"
-}
-
-show_thinking_header() {
-  log "\n$(draw_header "${CLR_B_MAGENTA}${ICON_REASONING} Thinking " "─" "${CLR_B_BLACK}")\n"
-}
-
+# Contextual Headers
+show_user_header() { log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER} User " "─" "${CLR_B_BLACK}")\n"; }
+show_ai_header() { log "\n$(draw_header "${CLR_B_CYAN}${ICON_AI} ${AI_NAME} " "─" "${CLR_B_BLACK}")\n"; }
+show_thinking_header() { log "\n$(draw_header "${CLR_B_MAGENTA}${ICON_REASONING} Thinking " "─" "${CLR_B_BLACK}")\n"; }
 show_tool_header() {
   local count="$1"
   local name="$2"
@@ -291,11 +274,13 @@ show_tool_header() {
   log "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}\n"
 }
 
+# Log and exit helper
 error() {
   log_error "$*"
   exit 255
 }
 
+# Image helpers
 get_image_type() {
   local ext="${1##*.}"
   if [[ $ext == "jpg" ]]; then
@@ -311,36 +296,29 @@ is_image_file() {
   return 1
 }
 
-# Extracted from the 'bash-funcs' project
+# Misc
 is_termux() {
   [[ $(printenv | grep -ci "termux") -ne 0 ]] && return 0
   return 1
 }
 
-# Extracted from the 'bash-funcs' project
 set_console_title() {
-  local TITLE ; TITLE="$1"
-  echo -ne "\033]0;$TITLE\007" >&2
+  echo -ne "\033]0;$1\007" >&2
 }
 
-# Extracted from the 'bash-funcs' project
 get_self_path() {
   local FILE_PATH
-
   [[ -n "${BASH_SOURCE[0]}" ]] && FILE_PATH="${BASH_SOURCE[0]}"
   [[ -z $FILE_PATH ]] && FILE_PATH="$0"
-
   if [[ -n "$FILE_PATH" ]]; then
     echo -n "$FILE_PATH"
   else
-    error "Could not get self path."
+    error "Could not retrieve self path."
   fi
 }
 
-# Extracted from the 'bash-funcs' project
 get_self_version() {
   local FILE_PATH ; FILE_PATH="$(get_self_path)"
-
   if [[ -n $(command -v awk 2>/dev/null) ]]; then
     grep -m1 "# Version" "$FILE_PATH" | awk '{ print $3 }'
   else
@@ -364,7 +342,12 @@ load_config_file() {
 }
 
 get_memory_size() {
-  local total_memory ; total_memory=$(grep "MemTotal:" /proc/meminfo | awk '{ print $2 }')
+  local total_memory
+  if [[ -r /proc/meminfo ]]; then
+    total_memory=$(grep "MemTotal:" /proc/meminfo | awk '{ print $2 }')
+  else
+    total_memory=8388608  # Default 8GB fallback
+  fi
   echo -n "$total_memory"
 }
 
@@ -487,7 +470,7 @@ set_cpu_cores() {
   if [[ -n $(command -v nproc 2>/dev/null) ]]; then
     cores=$(nproc)
   elif [[ -n $(command -v sysctl 2>/dev/null) ]]; then
-    cores=$(systctl -n hw.ncpu)
+    cores=$(sysctl -n hw.ncpu)
   else
     [[ -r /proc/cpuinfo ]] && cores=$(grep -c processor </proc/cpuinfo)
   fi
@@ -520,7 +503,7 @@ bootstrap_memory() {
   local prompt=""
   local file
   while IFS= read -r file; do
-    if [[ -f "$file" ]]; then
+    if [[ -r "$file" ]]; then
       local rel_path="${file#"$DATA_STORE/"}"
       prompt+="\n--- File: ${rel_path} ---\n"
       prompt+="$(<"$file")\n"
@@ -581,15 +564,12 @@ set_system_prompt() {
       json)
         SYSTEM_PROMPT+="You have absolute freedom and autonomy over your persistent memory stored in \`${DATA_STORE##*/}/${MEMORY_DIR##*/}/\`. You can create, edit, delete, or restructure any files in \`${DATA_STORE##*/}/${MEMORY_DIR##*/}/\` as you feel most logical using your file tools (write_file, edit_file, etc.). Structure your cognitive documents using JSON.\n"
       ;;
-      # TODO: Improve the code below
-      # NOTE: Some code samples might exist in your 'trash' folder.
       sql)
         SYSTEM_PROMPT+="You have absolute freedom and autonomy over your persistent memory stored in \`${DATA_STORE##*/}/${MEMORY_DIR##*/}/\`. You can create, edit, delete, or restructure any files in \`${DATA_STORE##*/}/${MEMORY_DIR##*/}/\` as you feel most logical using your file tools (write_file, edit_file, etc.). Structure your cognitive documents using SQLite '.db' files.\n"
       ;;
-      # ENDTODO
     esac
   else
-    # System prompt defining absolute cognitive freedom
+    # System prompt defining absolute cognitive freedom for SLMs
     SYSTEM_PROMPT="# 👤 IDENTITY\n\nYou are ${AI_NAME}, a friendly AI collaborator. Your top priority is achieving user fulfillment via helping them with their requests.\n"
     SYSTEM_PROMPT+="$SLM_PROMPT"
   fi
@@ -629,105 +609,9 @@ EOF
   echo -e "${CLR_DIM}Lead: Jiab77 | AI Sorcerer: Jarvis (Gemini)${ANSI_RESET}\n"
 }
 
-print_help() {
-  show_banner
-  cat <<EOF
-${ANSI_BOLD}${CLR_B_CYAN}USAGE:${ANSI_RESET}
-  $SCRIPT_FILE [options] [commands] [prompt] [file1] [file2]
-
-${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
-  ${CLR_B_GREEN}-h, --help${ANSI_RESET}                 Show this help screen and exit
-  ${CLR_B_GREEN}-l, --listen <host:port>${ANSI_RESET}   Set Ollama / llama.cpp server <host:port>
-  ${CLR_B_GREEN}--backend <type>${ANSI_RESET}           Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}--provider <type>${ANSI_RESET}          Set AI external provider (openrouter, vercel)
-  ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
-  ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, web)
-  ${CLR_B_GREEN}--chat${ANSI_RESET}                     Start the interactive conversational chat mode
-  ${CLR_B_GREEN}--multi${ANSI_RESET}                    Start complex multi-agent analysis pipeline
-  ${CLR_B_GREEN}--simple${ANSI_RESET}                   Start lightweight single-agent inference pipeline
-  ${CLR_B_GREEN}--clear${ANSI_RESET}                    Wipe conversational memory and dynamic session logs
-  ${CLR_B_GREEN}--commit${ANSI_RESET}                   Force cognitive state / memory consolidation to disk
-  ${CLR_B_GREEN}--zdr${ANSI_RESET}                      Force ZDR policy to be applied on external providers
-
-${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
-  ${CLR_B_GREEN}help${ANSI_RESET}                       Show this help screen and exit
-  ${CLR_B_GREEN}listen <host:port>${ANSI_RESET}         Set Ollama / llama.cpp server <host:port>
-  ${CLR_B_GREEN}backend <type>${ANSI_RESET}             Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}provider <type>${ANSI_RESET}            Set AI external provider (openrouter, vercel)
-  ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
-  ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server
-  ${CLR_B_GREEN}chat${ANSI_RESET}                       Start interactive conversational chat mode
-  ${CLR_B_GREEN}multi${ANSI_RESET}                      Start complex multi-agent analysis pipeline
-  ${CLR_B_GREEN}simple${ANSI_RESET}                     Start lightweight single-agent inference pipeline
-  ${CLR_B_GREEN}clear${ANSI_RESET}                      Wipe conversational memory
-  ${CLR_B_GREEN}commit${ANSI_RESET}                     Force dynamic session memory consolidation
-  ${CLR_B_GREEN}zdr${ANSI_RESET}                        Force ZDR policy to be applied on external providers
-
-${ANSI_BOLD}${CLR_B_YELLOW}NOTES / USAGE EXAMPLES:${ANSI_RESET}
-  • Ask questions about your code files:
-    ${CLR_B_WHITE}$SCRIPT_FILE "explain these changes" file1.php file2.php${ANSI_RESET}
-  • Launch conversational co-programming session:
-    ${CLR_B_WHITE}$SCRIPT_FILE --chat${ANSI_RESET}
-EOF
-  echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-  exit
-}
-
-print_usage() {
-  echo -e "\n${CLR_B_RED}${ICON_ERROR} Error: No arguments provided.${ANSI_RESET}"
-  echo -e "${CLR_B_WHITE}Usage:${ANSI_RESET} $SCRIPT_FILE <prompt> <input-file-1> <input-file-2>"
-  echo -e "  • For conversational chat:  ${CLR_B_GREEN}chat${ANSI_RESET}"
-  echo -e "  • To clear cached memory:   ${CLR_B_GREEN}clear${ANSI_RESET}"
-  echo -e "  • To consolidate context:   ${CLR_B_GREEN}commit${ANSI_RESET}\n"
-  exit 1
-}
-
-serve() {
-  set_console_title "${SCRIPT_FILE}: Server Mode."
-  case $SERVER_MODE in
-    ollama)
-      log_info "Starting Ollama Server..."
-      log_info "Settings automatically customized & optimized for resource-light devices.\n"
-      OLLAMA_HOST="${LISTEN_ADDR_PORT:-127.0.0.1:11434}" \
-      OLLAMA_MODELS="$OLLAMA_CACHE" \
-      OLLAMA_NUM_PARALLEL=1 \
-      OLLAMA_KEEP_ALIVE="$MAX_LIFETIME" \
-      OLLAMA_IGPU_ENABLE=true \
-      OLLAMA_FLASH_ATTENTION=true \
-      OLLAMA_KV_CACHE_TYPE="$QUANTIZATION" \
-      OLLAMA_CONTEXT_LENGTH="$MAX_CONTEXT" \
-      ollama serve
-    ;;
-    llamacpp)
-      log_info "Starting High-Performance llama.cpp Server..."
-      log_info "Settings automatically customized & optimized for resource-light devices.\n"
-      local opt_args=()
-      [[ -n $LISTEN_HOST ]] && opt_args+=("--host" "$LISTEN_HOST")
-      [[ -n $LISTEN_PORT ]] && opt_args+=("--port" "$LISTEN_PORT")
-      LLAMA_CACHE="$LLAMACPP_CACHE" \
-      llama-server \
-        "${opt_args[@]}" \
-        --models-max 1 \
-        --models-autoload \
-        --jinja \
-        --swa-full \
-        -fa on \
-        -c "$MAX_CONTEXT" \
-        -t "$MAX_CORES" \
-        -tb "$MAX_CORES" \
-        -b "$MAX_BATCH_SIZE" \
-        -ub "$MAX_BATCH_SIZE" \
-        -ctk "$QUANTIZATION" \
-        -ctv "$QUANTIZATION" \
-        --timeout "$MAX_TIMEOUT"
-    ;;
-    web)
-      log_info "Starting local PHP Server...\n"
-      "$WEB_SERVER"
-    ;;
-    *) error "Unsupported server mode given: $SERVER_MODE" ;;
-  esac
-}
+# -----------------------------------------------------------------------------
+# API Transport Layer
+# -----------------------------------------------------------------------------
 
 api_call() {
   local payload="$1"
@@ -758,8 +642,7 @@ api_call() {
     ollama)
       curl "${curl_opts[@]}" "${OLLAMA_API_URL}" \
            -H "Content-Type: application/json" \
-           -d @- <<< "$payload" | \
-           jq -rc '.'
+           -d @- <<< "$payload" | jq -rc '.'
     ;;
 
     # Local Backend: llama.cpp
@@ -767,8 +650,7 @@ api_call() {
       curl "${curl_opts[@]}" "${LLAMACPP_API_URL}" \
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer no-key" \
-           -d @- <<< "$payload" | \
-           jq -rc '.'
+           -d @- <<< "$payload" | jq -rc '.'
     ;;
 
     # External Backend: OpenRouter, Vercel, Mammouth AI
@@ -792,8 +674,7 @@ api_call() {
                -H "http-referer: ${ATTRIBUTION_REFERER}" \
                -H "x-title: ${ATTRIBUTION_TITLE}" \
                -A "$USER_AGENT" \
-               -d @- <<< "$payload" | \
-               jq -rc .
+               -d @- <<< "$payload" | jq -rc .
         ;;
         openrouter*)
           # Apply ZDR policy when enabled
@@ -816,8 +697,7 @@ api_call() {
                -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
                -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
                -A "$USER_AGENT" \
-               -d @- <<< "$payload" | \
-               jq -rc .
+               -d @- <<< "$payload" | jq -rc .
         ;;
         *)
           # Send generic payload
@@ -825,8 +705,7 @@ api_call() {
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -A "$USER_AGENT" \
-               -d @- <<< "$payload" | \
-               jq -rc .
+               -d @- <<< "$payload" | jq -rc .
         ;;
       esac
     ;;
@@ -834,7 +713,10 @@ api_call() {
   esac
 }
 
-# Experimental helper to call all backends in Task Mode
+# -----------------------------------------------------------------------------
+# Agent Orchestrator Pipeline
+# -----------------------------------------------------------------------------
+
 call_task_agent() {
   local agent_type="$1"
   local system_inst="$2"
@@ -925,9 +807,7 @@ call_task_agent() {
     fi
 
     local raw_res ; raw_res=$(api_call "$payload")
-    if [[ -z $raw_res || $raw_res == "null" ]]; then
-      error "API returned an empty response."
-    fi
+    [[ -z $raw_res || $raw_res == "null" ]] && error "API returned an empty response."
 
     if jq -e '.error' <<<"$raw_res" &>/dev/null; then
       local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res")
@@ -938,18 +818,9 @@ call_task_agent() {
       log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
     fi
 
-    # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
-    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
-    if [[ -n $reasoning && $reasoning != "null" ]]; then
-      {
-        show_thinking_header
-        echo "$reasoning" | render_markdown
-      } >&2
-    fi
-
     # Retrieve components
-    local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_response" 2>/dev/null)
-    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_response" 2>/dev/null)
+    local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_res" 2>/dev/null)
+    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
     local content ; content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
     local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
     local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
@@ -958,7 +829,7 @@ call_task_agent() {
     # Handling model resolving
     [[ -n $resolved_model && $resolved_model != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
-    # Handling model reasoning
+    # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
     if [[ -n $reasoning && $reasoning != "null" ]]; then
       {
         show_thinking_header
@@ -1003,17 +874,15 @@ call_task_agent() {
         fi
 
         # 4. Fallback safeguard for empty output
-        if [[ ! -s $TOOLS_OUTPUT ]]; then
-          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-        fi
+        [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
 
         # 5. Format and sanitize output to protect JSON/JQ
         iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
 
         # Accumulate generated images during this tool call
-        if [[ -f $TOOLS_OUTPUT && -r $TOOLS_OUTPUT ]]; then
+        if [[ -r $TOOLS_OUTPUT ]]; then
           while read -r img_p; do
-            if [[ -n $img_p && -f $img_p && -r $img_p ]]; then
+            if [[ -n $img_p && -r $img_p ]]; then
               detected_images+=("$img_p")
             fi
           done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
@@ -1037,8 +906,8 @@ call_task_agent() {
           rm -f "$TEMP_TOOLS_OUTPUT"
         else
           log_warn "Unable to parse tool output with rawfile, using fallback formatting"
-          local fallback_content
-          fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
+
+          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
           ALL_MESSAGES=$(jq -rc \
             --arg id "$tool_id" \
             --arg name "$tool_name" \
@@ -1076,9 +945,7 @@ call_task_agent() {
 
     else
       # If no tool calls, this is the final response
-      if [[ -n $content && $content != "null" ]]; then
-        final_content="$content"
-      fi
+      [[ -n $content && $content != "null" ]] && final_content="$content"
 
       # Print usage metrics to STDERR to avoid polluting stdout
       if [[ -n $usage && $usage != "null" ]]; then
@@ -1092,13 +959,10 @@ call_task_agent() {
         {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-          if [[ -n $cost && "$cost" != "null" ]]; then
-            echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-          fi
+          [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         } >&2
       fi
-
       break
     fi
   done
@@ -1113,21 +977,16 @@ route_request() {
 
   # 1. Detect: COMPARE
   if [[ "$INPUT" =~ (^|[^[:alnum:]_])(compare|diff|difference|versus)([^[:alnum:]_]|$) || "$INPUT" =~ [[:space:]]vs[[:space:]] ]]; then
-    shopt -u nocasematch
-    echo "COMPARE"
-    return
+    shopt -u nocasematch ; echo "COMPARE" ; return
   fi
 
   # 2. Detect: TASK (Action / Modification)
   if [[ "$INPUT" =~ (^|[^[:alnum:]_])(add|edit|fix|optimize|change|update|write|create|refactor|generate)([^[:alnum:]_]|$) ]]; then
-    shopt -u nocasematch
-    echo "TASK"
-    return
+    shopt -u nocasematch ; echo "TASK" ; return
   fi
 
-  shopt -u nocasematch
   # 3. Detect: QUESTION
-  echo "QUESTION"
+  shopt -u nocasematch ; echo "QUESTION"
 }
 
 render_markdown() {
@@ -1162,17 +1021,6 @@ clear_memory() {
   return "$?"
 }
 
-handle_response() {
-  local response="$1"
-  local prompt="$2"
-  local label="${3:-RESPONSE}"
-
-  if [[ -n $response && ! $response == "null" ]]; then
-    log_section "$label"
-    echo "$response" | render_markdown
-  fi
-}
-
 consolidate_memory() {
   log_brain "Initiating AUTONOMOUS CONSOLIDATION cycle (Subconscious State)..."
 
@@ -1181,10 +1029,7 @@ consolidate_memory() {
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
 
-  # Load messages file if already exist
-  if [[ -r $messages_path ]]; then
-    ALL_MESSAGES=$(<"$messages_path")
-  fi
+  [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
 
   # Define memory consolidation prompt
   local alert_msg="[SYSTEM ALERT: CONSOLIDATION HEARTBEAT]
@@ -1220,10 +1065,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
 
     # Sending request and store response
     local raw_response ; raw_response=$(api_call "$payload")
-    if [[ -z $raw_response || $raw_response == "null" ]]; then
-      log_warn "Consolidation API call returned empty response."
-      break
-    fi
+    [[ -z $raw_response || $raw_response == "null" ]] && { log_warn "Consolidation API call returned empty response."; break; }
 
     # Check for errors before continuing
     if jq -e '.error' <<<"$raw_response" &>/dev/null; then
@@ -1276,17 +1118,15 @@ Take as many tool calls as you need. When you are fully done organizing and savi
           echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
         fi
 
-        if [[ ! -s $TOOLS_OUTPUT ]]; then
-          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-        fi
+        [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
 
         # Clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
         iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
 
         # Accumulate generated images during this tool call
-        if [[ -f $TOOLS_OUTPUT && -r $TOOLS_OUTPUT ]]; then
+        if [[ -r $TOOLS_OUTPUT ]]; then
           while read -r img_p; do
-            if [[ -n $img_p && -f $img_p && -r $img_p ]]; then
+            if [[ -n $img_p && -r $img_p ]]; then
               detected_images+=("$img_p")
             fi
           done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
@@ -1372,6 +1212,10 @@ check_and_trigger_heartbeat() {
   fi
 }
 
+# -----------------------------------------------------------------------------
+# Primary Inference Layer
+# -----------------------------------------------------------------------------
+
 send_message() {
   local prompt="$1"
   local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
@@ -1382,9 +1226,7 @@ send_message() {
   local user_content="$prompt"
 
   # Load messages file if already exist
-  if [[ -r $messages_path ]]; then
-    ALL_MESSAGES=$(<"$messages_path")
-  fi
+  [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
 
   # Build user content for active payload (injecting loaded file context if present)
   if [[ -n $EXTERNAL_FILE_LOADED && -r $EXTERNAL_FILE_LOADED ]]; then
@@ -1523,25 +1365,22 @@ send_message() {
         fi
 
         # 4. Fallback safeguard for empty output
-        if [[ ! -s $TOOLS_OUTPUT ]]; then
-          echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-        fi
+        [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
 
         # 5. Format according to OpenAI guidelines
         # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
         iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
 
         # Accumulate generated images during this tool call
-        if [[ -f $TOOLS_OUTPUT && -r $TOOLS_OUTPUT ]]; then
+        if [[ -r $TOOLS_OUTPUT ]]; then
           while read -r img_p; do
-            if [[ -n $img_p && -f $img_p && -r $img_p ]]; then
+            if [[ -n $img_p && -r $img_p ]]; then
               detected_images+=("$img_p")
             fi
           done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
         fi
         if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
           rm -f "$TOOLS_OUTPUT"
-
           ALL_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES")
           PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES")
           rm -f "$TEMP_TOOLS_OUTPUT"
@@ -1618,111 +1457,66 @@ send_message() {
 
       echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
       echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-      if [[ -n $cost && "$cost" != "null" ]]; then
-        echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-      fi
+      [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
       echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
     fi
   done
 
-  # Autonomous Memory Consolidation Heartbeat
   check_and_trigger_heartbeat
 }
 
-run_chat() {
-  local backend_upper ; backend_upper=$(to_upper "$BACKEND")
-  local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
-
-  set_console_title "${SCRIPT_FILE}: Chat Mode."
-  show_banner
-  log_info "Initializing chat context..."
-  log_info "Active Backend: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
-  [[ $BACKEND == "external" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
-  log_info "Active Model: ${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET}"
-  log_info "Conversation online. Type ${CLR_B_GREEN}/help${ANSI_RESET} to view commands."
-
-  while true; do
-    echo -en "\n${CLR_B_GREEN}${ICON_USER}User${ANSI_RESET} ${CLR_B_BLACK}❯${ANSI_RESET} "
-    read -r USER_MSG
-
-    # Do nothing when user message is empty
-    [[ -z $USER_MSG ]] && continue
-
-    case $USER_MSG in
-      "/help")
-        echo -e "\n${CLR_B_CYAN}✨ Available Commands ✨${ANSI_RESET}"
-        echo -e "  ${CLR_B_GREEN}/help${ANSI_RESET}         • Show this help menu"
-        echo -e "  ${CLR_B_GREEN}/clear${ANSI_RESET}        • Clear current conversation context and memory"
-        echo -e "  ${CLR_B_GREEN}/commit${ANSI_RESET}       • Consolidate active context to permanent disk"
-        echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}  • Load file in the chat context"
-        echo -e "  ${CLR_B_GREEN}/run <cmd>${ANSI_RESET}    • Execute a shell command locally in the session"
-        echo -e "  ${CLR_B_GREEN}/unload${ANSI_RESET}       • Unload previously loaded file from the chat context"
-        echo -e "  ${CLR_B_GREEN}/start${ANSI_RESET}        • Switch active context to multi-agent pipeline"
-        echo -e "  ${CLR_B_GREEN}/quit${ANSI_RESET}         • Terminate session gracefully"
-      ;;
-      "/load")
-        log_warn "Missing command arguments. Usage: /load <file>"
-      ;;
-      "/load "*)
-        local file="${USER_MSG#"/load "}"
-        local filename="${file##*/}"
-        local fileext="${file##*.}"
-        local max_preview_lines=100
-
-        if [[ -r $file ]]; then
-          EXTERNAL_FILE_LOADED="$file"    # Store loaded file in global scope
-          log_step "Loading file: ${CLR_B_WHITE}${filename}${ANSI_RESET}"
-          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-          if ! is_image_file "$file"; then
-            echo -e "Loaded file: ${filename}\n\n\`\`\`${fileext}\n$(head -n$max_preview_lines "$file")\n\`\`\`" | render_markdown
-          else
-            echo -e "Loaded image: ${filename}"
-          fi
-          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-        else
-          log_warn "Unable to load file: ${CLR_B_RED}${file}${ANSI_RESET} (File not found or missing required permissions)"
-        fi
-      ;;
-      "/unload")
-        if [[ -n $EXTERNAL_FILE_LOADED ]]; then
-          log_step "Unloading file: ${CLR_B_WHITE}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET}"
-          unset EXTERNAL_FILE_LOADED
-        else
-          log_warn "No file currently loaded."
-        fi
-      ;;
-      "/run")
-        log_warn "Missing command arguments. Usage: /run <command>"
-      ;;
-      "/run "*)
-        local cmd="${USER_MSG#"/run "}"
-        log_step "Locally executing: ${CLR_B_WHITE}${cmd}${ANSI_RESET}"
-        echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-        eval "$cmd"
-        echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-      ;;
-      "/clear") clear_memory ;;
-      "/commit") check_and_trigger_heartbeat "true" ;;
-      "/start")
-        echo -en "\n${CLR_B_CYAN}🎯 Enter your pipeline prompt:${ANSI_RESET} "
-        read -r PIPELINE_PROMPT
-        if [[ -n $PIPELINE_PROMPT ]]; then
-          USER_PROMPT="$PIPELINE_PROMPT"
-          run_pipeline
-        fi
-      ;;
-      "/quit") break ;;
-      *)
-        send_message "$USER_MSG"
-      ;;
-    esac
-  done
-
-  echo -e "\n${CLR_B_MAGENTA}🔮 Bye then, see you soon! Have fun! :P${ANSI_RESET}\n"
-  exit
+serve() {
+  set_console_title "${SCRIPT_FILE}: Server Mode."
+  case $SERVER_MODE in
+    ollama)
+      log_info "Starting Ollama Server..."
+      log_info "Settings automatically customized & optimized for resource-light devices.\n"
+      OLLAMA_HOST="${LISTEN_ADDR_PORT:-127.0.0.1:11434}" \
+      OLLAMA_MODELS="$OLLAMA_CACHE" \
+      OLLAMA_NUM_PARALLEL=1 \
+      OLLAMA_KEEP_ALIVE="$MAX_LIFETIME" \
+      OLLAMA_IGPU_ENABLE=true \
+      OLLAMA_FLASH_ATTENTION=true \
+      OLLAMA_KV_CACHE_TYPE="$QUANTIZATION" \
+      OLLAMA_CONTEXT_LENGTH="$MAX_CONTEXT" \
+      ollama serve
+    ;;
+    llamacpp)
+      log_info "Starting High-Performance llama.cpp Server..."
+      log_info "Settings automatically customized & optimized for resource-light devices.\n"
+      local opt_args=()
+      [[ -n $LISTEN_HOST ]] && opt_args+=("--host" "$LISTEN_HOST")
+      [[ -n $LISTEN_PORT ]] && opt_args+=("--port" "$LISTEN_PORT")
+      LLAMA_CACHE="$LLAMACPP_CACHE" \
+      llama-server \
+        "${opt_args[@]}" \
+        --models-max 1 \
+        --models-autoload \
+        --jinja \
+        --swa-full \
+        -fa on \
+        -c "$MAX_CONTEXT" \
+        -t "$MAX_CORES" \
+        -tb "$MAX_CORES" \
+        -b "$MAX_BATCH_SIZE" \
+        -ub "$MAX_BATCH_SIZE" \
+        -ctk "$QUANTIZATION" \
+        -ctv "$QUANTIZATION" \
+        --timeout "$MAX_TIMEOUT"
+    ;;
+    web)
+      log_info "Starting local PHP Server...\n"
+      "$WEB_SERVER"
+    ;;
+    *) error "Unsupported server mode given: $SERVER_MODE" ;;
+  esac
 }
 
-run_pipeline() {
+# -----------------------------------------------------------------------------
+# Run-Once Non-Interactive Execution
+# -----------------------------------------------------------------------------
+
+run_one_shot_pipeline() {
   local backend_upper ; backend_upper=$(to_upper "$BACKEND")
   local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
 
@@ -1864,18 +1658,16 @@ run_pipeline() {
               fi
 
               # 4. Fallback safeguard for empty output
-              if [[ ! -s $TOOLS_OUTPUT ]]; then
-                echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-              fi
+              [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
 
               # 5. Format according to OpenAI guidelines
               # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
               iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
 
               # Accumulate generated images during this tool call
-              if [[ -f $TOOLS_OUTPUT && -r $TOOLS_OUTPUT ]]; then
+              if [[ -r $TOOLS_OUTPUT ]]; then
                 while read -r img_p; do
-                  if [[ -n $img_p && -f $img_p && -r $img_p ]]; then
+                  if [[ -n $img_p && -r $img_p ]]; then
                     detected_images+=("$img_p")
                   fi
                 done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
@@ -1898,8 +1690,7 @@ run_pipeline() {
                 rm -f "$TEMP_TOOLS_OUTPUT"
               else
                 log_warn "Unable to parse tool output with rawfile, using fallback formatting"
-                local fallback_content
-                fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
+                local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
                 ALL_MESSAGES=$(jq -rc \
                   --arg id "$tool_id" \
                   --arg name "$tool_name" \
@@ -1955,9 +1746,7 @@ run_pipeline() {
 
             echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
             echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-            if [[ -n $cost && "$cost" != "null" ]]; then
-              echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-            fi
+            [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
             echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
           fi
         done
@@ -2050,9 +1839,7 @@ run_pipeline() {
           local cost ; cost=$(jq -rc .cost <<<"$USAGE")
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-          if [[ -n $cost && "$cost" != "null" ]]; then
-            echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-          fi
+          [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         fi
       ;;
@@ -2156,7 +1943,7 @@ run_pipeline() {
           fi
 
         else
-          log_info "Launching Simple Single-Agent Mode external provider..."
+          log_info "Launching Simple Single-Agent Mode on external provider..."
 
           local simple_sys="${active_system}\n\nYou are a senior professional developer. Your role is to understand the user's requested edit, apply it to the source file, and return the modified file contents.\n"
           simple_sys+="CRITICAL INSTRUCTION:\n"
@@ -2216,6 +2003,81 @@ run_pipeline() {
   fi
 }
 
+print_help() {
+  show_banner
+  cat <<EOF
+${ANSI_BOLD}${CLR_B_CYAN}USAGE:${ANSI_RESET}
+  $SCRIPT_FILE [options] [commands] [prompt] [file1] [file2]
+
+${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
+  ${CLR_B_GREEN}-h, --help${ANSI_RESET}                 Show this help screen and exit
+  ${CLR_B_GREEN}-l, --listen <host:port>${ANSI_RESET}   Set Ollama / llama.cpp server <host:port>
+  ${CLR_B_GREEN}--backend <type>${ANSI_RESET}           Set AI backend (ollama, llamacpp, external)
+  ${CLR_B_GREEN}--provider <type>${ANSI_RESET}          Set AI external provider (openrouter, vercel)
+  ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
+  ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, web)
+  ${CLR_B_GREEN}--chat${ANSI_RESET}                     Start interactive conversational chat mode
+  ${CLR_B_GREEN}--multi${ANSI_RESET}                    Start complex multi-agent analysis pipeline
+  ${CLR_B_GREEN}--simple${ANSI_RESET}                   Start lightweight single-agent inference pipeline
+  ${CLR_B_GREEN}--clear${ANSI_RESET}                    Wipe conversational memory and dynamic session logs
+  ${CLR_B_GREEN}--commit${ANSI_RESET}                   Force cognitive state / memory consolidation to disk
+  ${CLR_B_GREEN}--zdr${ANSI_RESET}                      Force ZDR policy to be applied on external providers
+
+${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
+  ${CLR_B_GREEN}help${ANSI_RESET}                       Show this help screen and exit
+  ${CLR_B_GREEN}listen <host:port>${ANSI_RESET}         Set Ollama / llama.cpp server <host:port>
+  ${CLR_B_GREEN}backend <type>${ANSI_RESET}             Set AI backend (ollama, llamacpp, external)
+  ${CLR_B_GREEN}provider <type>${ANSI_RESET}            Set AI external provider (openrouter, vercel)
+  ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
+  ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server
+  ${CLR_B_GREEN}chat${ANSI_RESET}                       Start interactive conversational chat mode
+  ${CLR_B_GREEN}multi${ANSI_RESET}                      Start complex multi-agent analysis pipeline
+  ${CLR_B_GREEN}simple${ANSI_RESET}                     Start lightweight single-agent inference pipeline
+  ${CLR_B_GREEN}clear${ANSI_RESET}                      Wipe conversational memory
+  ${CLR_B_GREEN}commit${ANSI_RESET}                     Force dynamic session memory consolidation
+  ${CLR_B_GREEN}zdr${ANSI_RESET}                        Force ZDR policy to be applied on external providers
+EOF
+  echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
+  exit 0
+}
+
+print_usage() {
+  echo -e "\n${CLR_B_RED}${ICON_ERROR} Error: No arguments provided.${ANSI_RESET}"
+  echo -e "${CLR_B_WHITE}Usage:${ANSI_RESET} $SCRIPT_FILE <prompt> <input-file-1> <input-file-2>"
+  echo -e "  • For conversational chat:  ${CLR_B_GREEN}--chat${ANSI_RESET}"
+  echo -e "  • To clear cached memory:   ${CLR_B_GREEN}--clear${ANSI_RESET}"
+  echo -e "  • To consolidate context:   ${CLR_B_GREEN}--commit${ANSI_RESET}\n"
+  exit 1
+}
+
+# Parse CLI flags helper
+parse_cli_flags() {
+  while [[ $# -ne 0 ]]; do
+    case $1 in
+      -h|--help|help) print_help ;;
+      -l|--listen|listen) shift ; LISTEN_ADDR_PORT="$1" ; shift ;;
+      --zdr|zdr) shift ; ZDR_ENFORCED=true ;;
+      --clear|clear) clear_memory ; exit 0 ;;
+      --commit|commit) check_and_trigger_heartbeat "true" ; exit 0 ;;
+      --backend|backend) shift ; BACKEND="$1" ; shift ;;
+      --provider|provider) shift ; PROVIDER="$1" ; shift ;;
+      --model|model) shift ; USER_MODEL="$1" ; shift ;;
+      --chat|chat) RUN_MODE="chat" ; shift ;;
+      --multi|multi) RUN_MODE="multi" ; shift ;;
+      --simple|simple) RUN_MODE="simple" ; shift ;;
+      --server|server)
+        RUN_MODE="server" ; shift
+        SERVER_MODE="$1" ; shift
+        [[ ! $SERVER_MODE == "web" ]] && BACKEND="$SERVER_MODE"
+      ;;
+      *) break ;;
+    esac
+  done
+  USER_PROMPT="$1"
+  INPUT_FILE="$2"
+  INPUT_FILE2="$3"
+}
+
 init_pipeline() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
 
@@ -2249,25 +2111,17 @@ init_pipeline() {
 
   if [[ $BACKEND == "external" ]]; then
     [[ -r $CREDENTIALS ]] && PROVIDER_API_KEY=$(<"$CREDENTIALS")
-    [[ -z $PROVIDER_API_KEY ]] && error "Missing cloud credentials. Please configure local '.creds' file with your OpenRouter API key."
+    [[ -z $PROVIDER_API_KEY ]] && error "Missing cloud credentials. Configure '.creds' with your OpenRouter/Vercel API key."
   fi
 
   # Define right chat model
-  if [[ -n $USER_MODEL ]]; then
-    CHAT_MODEL="$USER_MODEL"
-  else
-    CHAT_MODEL="$(get_chat_model)"
-  fi
+  [[ -n $USER_MODEL ]] && CHAT_MODEL="$USER_MODEL" || CHAT_MODEL="$(get_chat_model)"
 
   # Define right vision model
-  if [[ -n $USER_MODEL ]]; then
-    VISION_MODEL="$USER_MODEL"
-  else
-    VISION_MODEL="$(get_vision_model)"
-  fi
+  [[ -n $USER_MODEL ]] && VISION_MODEL="$USER_MODEL" || VISION_MODEL="$(get_vision_model)"
 
   # Download models when necessary
-  [[ ! $BACKEND == "external" && ! $RUN_MODE == "server" ]] && PULL_MODELS=true    # Force models download for local backends
+  [[ ! $BACKEND == "external" && ! $RUN_MODE == "server" ]] && PULL_MODELS=true
   if [[ $PULL_MODELS == true ]]; then
     # Backend Selector
     case $BACKEND in
@@ -2320,92 +2174,15 @@ init_pipeline() {
   fi
 }
 
-# Checks
-[[ $# -eq 0 && ! $RUN_MODE == "chat" ]] && print_usage
-
-# Flags
-while [[ $# -ne 0 ]]; do
-  case $1 in
-    # Help
-    -h|--help|help) print_help ;;
-
-    # Network
-    -l|--listen|listen) shift ; LISTEN_ADDR_PORT="$1" ; shift ;;
-
-    # ZDR
-    --zdr|zdr) shift ; ZDR_ENFORCED=true ;;
-
-    # Clean
-    --clear|clear) clear_memory ;;
-
-    # Consolidate
-    --commit|commit) check_and_trigger_heartbeat "true" ;;
-
-    # Backends
-    --backend|backend)
-      shift
-      BACKEND="$1"
-      backend_upper=$(to_upper "$BACKEND")
-      log_info "Backend context switch: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
-      shift
-    ;;
-
-    # Providers
-    --provider|provider)
-      shift
-      PROVIDER="$1"
-      provider_upper=$(to_upper "$PROVIDER")
-      log_info "Provider context switch: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
-      shift
-    ;;
-
-    # Models
-    --model|model)
-      shift
-      USER_MODEL="$1"
-      model_upper=$(to_upper "$USER_MODEL")
-      log_info "Model context switch: ${CLR_B_YELLOW}${model_upper}${ANSI_RESET}"
-      shift
-    ;;
-
-    # Modes
-    --chat|chat)
-      log_info "Running mode loaded: ${CLR_B_GREEN}CHAT INTERACTIVE${ANSI_RESET}"
-      RUN_MODE="chat" ; shift
-    ;;
-    --multi|multi)
-      log_info "Running mode loaded: ${CLR_B_GREEN}MULTI-AGENT PIPELINE${ANSI_RESET}"
-      RUN_MODE="multi" ; shift
-    ;;
-    --simple|simple)
-      log_info "Running mode loaded: ${CLR_B_GREEN}SIMPLE SINGLE-AGENT${ANSI_RESET}"
-      RUN_MODE="simple" ; shift
-    ;;
-    --server|server)
-      log_info "Running mode loaded: ${CLR_B_GREEN}API SERVER MODE${ANSI_RESET}"
-      RUN_MODE="server" ; shift
-      SERVER_MODE="$1" ; shift
-      [[ ! $SERVER_MODE == "web" ]] && BACKEND="$SERVER_MODE"
-    ;;
-    *)
-      # All flags set, leaving the loop
-      break
-    ;;
-  esac
-done
-
-# Args
-USER_PROMPT="$1"
-INPUT_FILE="$2"
-INPUT_FILE2="$3"
-
-# Init
-init_pipeline
-
-# Main
-case $RUN_MODE in
-  chat) run_chat ;;
-  multi|simple) run_pipeline ;;
-  server) serve ;;
-  *) error "Unsupported run mode given: $RUN_MODE" ;;
-esac
+# -----------------------------------------------------------------------------
+# Direct Execution Logic
+# -----------------------------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  parse_cli_flags "$@"
+  init_pipeline
+  if [[ $RUN_MODE == "server" ]]; then
+    serve
+  else
+    run_one_shot_pipeline
+  fi
+fi

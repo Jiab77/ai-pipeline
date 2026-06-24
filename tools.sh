@@ -5,9 +5,10 @@
 # TOOLS SCRIPT FOR LOCAL AGENT (Strictly conforming to schema constraints)
 # ==============================================================================
 #
-# Made by Gemini 3.5 Flash Extended / Improved by Jiab77 & Jarvis
+# Lead developer & Architect: Jiab77
+# AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version 0.3.0 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
+# Version 0.3.1 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
@@ -184,10 +185,9 @@ exec_shell_command() {
     [[ -n $timeout_val && $timeout_val != null ]] && timeout=$timeout_val
     [[ -n $max_size_val && $max_size_val != null ]] && max_output_size=$max_size_val
   fi
-
-  # Avoid running the pipeline itself while it is running (Zero-Fork character-class substring matching!)
-  if [[ $command == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to run the pipeline itself, it's not made for that. Thank you."
+  # Avoid running core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
+  if [[ $command == *[cC][oO][rR][eE].[sS][hH]* || $command == *[cC][lL][iI].[sS][hH]* || $command == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $command == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+    error "Dear model, don't try to run core pipeline files, they are not made for that. Thank you."
   fi
 
   [[ $timeout -lt 1 || $timeout -gt 60 ]] && timeout=10
@@ -222,9 +222,9 @@ write_file() {
     [[ -n $content_val && $content_val != null ]] && content=$content_val
   fi
 
-  # Avoid writing to the pipeline itself while it is running (Zero-Fork character-class matching!)
-  if [[ $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to write to the pipeline itself, it's not made for that. Thank you."
+  # Avoid writing to core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
+  if [[ $path == *[cC][oO][rR][eE].[sS][hH]* || $path == *[cC][lL][iI].[sS][hH]* || $path == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+    error "Dear model, don't try to write to core pipeline files, they are not made for that. Thank you."
   fi
 
   mkdir -p "$(dirname "$path")"
@@ -255,9 +255,9 @@ edit_file() {
 
   [[ ! -f $path ]] && error "File not found at $path"
 
-  # Avoid editing the pipeline itself while it is running (Zero-Fork character-class matching!)
-  if [[ $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to edit the pipeline itself, it's not made for that. Thank you."
+  # Avoid editing core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
+  if [[ $path == *[cC][oO][rR][eE].[sS][hH]* || $path == *[cC][lL][iI].[sS][hH]* || $path == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+    error "Dear model, don't try to edit core pipeline files, they are not made for that. Thank you."
   fi
 
   if ! jq empty 2>/dev/null <<< "$changes"; then
@@ -312,9 +312,9 @@ edit_file() {
 apply_diff() {
   local diff_content
 
-  # Avoid patching the pipeline itself while it is running (Zero-Fork character-class substring matching!)
-  if [[ $FUNC_ARGS == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to patch the pipeline itself, it's not made for that. Thank you."
+  # Avoid patching core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
+  if [[ $FUNC_ARGS == *[cC][oO][rR][eE].[sS][hH]* || $FUNC_ARGS == *[cC][lL][iI].[sS][hH]* || $FUNC_ARGS == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $FUNC_ARGS == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+    error "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
   fi
 
   if [[ -n $FUNC_ARGS ]]; then

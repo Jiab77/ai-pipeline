@@ -9,7 +9,7 @@
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version: 0.9.1
+# Version: 1.0.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -57,18 +57,29 @@ run_chat() {
     case $USER_MSG in
       "/help")
         echo -e "\n${CLR_B_CYAN}✨ Available Commands ✨${ANSI_RESET}"
-        echo -e "  ${CLR_B_GREEN}/help${ANSI_RESET}         • Show this help menu"
-        echo -e "  ${CLR_B_GREEN}/clear${ANSI_RESET}        • Clear current conversation context and memory"
-        echo -e "  ${CLR_B_GREEN}/commit${ANSI_RESET}       • Consolidate active context to permanent disk"
-        echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}  • Load file in the chat context"
-        echo -e "  ${CLR_B_GREEN}/run <cmd>${ANSI_RESET}    • Execute a shell command locally in the session"
-        echo -e "  ${CLR_B_GREEN}/unload${ANSI_RESET}       • Unload previously loaded file from the chat context"
-        echo -e "  ${CLR_B_GREEN}/start${ANSI_RESET}        • Switch active context to multi-agent pipeline"
-        echo -e "  ${CLR_B_GREEN}/quit${ANSI_RESET}         • Terminate session gracefully"
+        echo -e "  ${CLR_B_GREEN}/help${ANSI_RESET}                     • Show this help menu"
+        echo -e "  ${CLR_B_GREEN}/clear${ANSI_RESET}                    • Clear current conversation context and memory"
+        echo -e "  ${CLR_B_GREEN}/commit${ANSI_RESET}                   • Consolidate active context to permanent disk"
+        echo -e "  ${CLR_B_GREEN}/draw [ratio] [prompt]${ANSI_RESET}    • Generate images"
+        echo -e "  ${CLR_B_GREEN}/keys${ANSI_RESET}                     • Manage your encrypted cloud provider API keys"
+        echo -e "  ${CLR_B_GREEN}/replay${ANSI_RESET}                   • Resend the last message"
+        echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}              • Load file in the chat context"
+        echo -e "  ${CLR_B_GREEN}/run <cmd>${ANSI_RESET}                • Execute a shell command locally in the session"
+        echo -e "  ${CLR_B_GREEN}/unload${ANSI_RESET}                   • Unload previously loaded file from the chat context"
+        echo -e "  ${CLR_B_GREEN}/start${ANSI_RESET}                    • Switch active context to multi-agent pipeline"
+        echo -e "  ${CLR_B_GREEN}/quit${ANSI_RESET}                     • Terminate session gracefully"
       ;;
-      "/load")
-        log_warn "Missing command arguments. Usage: /load <file>"
+      # TODO: Finish the code for the '/draw' command
+      "/draw") log_warn "Coming soon. Stay tuned!" ;;
+      "/replay")
+        if [[ -z $LAST_USER_MSG ]]; then
+          log_warn "No previous message to replay!"
+        else
+          log_step "Replaying last message: ${CLR_B_WHITE}${LAST_USER_MSG}${ANSI_RESET}"
+          send_message "$LAST_USER_MSG"
+        fi
       ;;
+      "/load") log_warn "Missing command arguments. Usage: /load <file>" ;;
       "/load "*)
         local file="${USER_MSG#"/load "}"
         local filename="${file##*/}"
@@ -97,9 +108,7 @@ run_chat() {
           log_warn "No file currently loaded."
         fi
       ;;
-      "/run")
-        log_warn "Missing command arguments. Usage: /run <command>"
-      ;;
+      "/run") log_warn "Missing command arguments. Usage: /run <command>" ;;
       "/run "*)
         local cmd="${USER_MSG#"/run "}"
         log_step "Locally executing: ${CLR_B_WHITE}${cmd}${ANSI_RESET}"
@@ -107,7 +116,7 @@ run_chat() {
         eval "$cmd"
         echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
       ;;
-      "/clear") clear_memory ;;
+      "/clear") unset LAST_USER_MSG ; clear_memory ;;
       "/commit") check_and_trigger_heartbeat "true" ;;
       "/start")
         echo -en "\n${CLR_B_CYAN}🎯 Enter your pipeline prompt:${ANSI_RESET} "
@@ -119,9 +128,10 @@ run_chat() {
           RUN_MODE="chat"  # Revert back to chat loop
         fi
       ;;
+      "/keys") manage_keys ;;
       "/quit"|"/exit"|"/bye") break ;;
       *)
-        send_message "$USER_MSG"
+        LAST_USER_MSG="$USER_MSG" ; send_message "$USER_MSG"
       ;;
     esac
   done

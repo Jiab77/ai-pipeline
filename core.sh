@@ -9,7 +9,7 @@
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version: 0.9.2
+# Version: 1.0.0
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -26,6 +26,7 @@ PROVIDER="${PROVIDER:-vercel}"
 PROVIDER_API_KEY=""
 MEMORY_TYPE="${MEMORY_TYPE:-markdown}"
 HEARTBEAT_THRESHOLD=10
+PBKDF_ITERATIONS=500000
 CREDENTIALS="${HOME}/.creds"
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 TOR_HOST="127.0.0.1"
@@ -60,6 +61,10 @@ PROVIDERS_CONFIG="${CONFIG_DIR}/providers.json"
 MESSAGES_FILE="messages.json"
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+
+# Keys
+KEYS_DIR="${SCRIPT_DIR}/keys"
+MASTER_KEY_FILE="${KEYS_DIR}/key.dat"
 
 # Temporary Files (Default to /tmp, adapts dynamically on Termux)
 TOOLS_OUTPUT="/tmp/tools_output.txt"
@@ -249,7 +254,7 @@ log_success() { log "${CLR_B_GREEN}${ICON_SUCCESS}${ANSI_RESET} ${CLR_B_GREEN}$*
 log_warn() { log "${CLR_B_YELLOW}${ICON_WARNING}${ANSI_RESET} ${CLR_B_YELLOW}$*${ANSI_RESET}"; }
 log_error() { log "${CLR_B_RED}${ICON_ERROR}${ANSI_RESET} ${CLR_B_RED}[ERROR] $*${ANSI_RESET}"; }
 log_brain() { log "${CLR_B_MAGENTA}${ICON_BRAIN}${ANSI_RESET} ${CLR_B_MAGENTA}$*${ANSI_RESET}"; }
-log_step() { log "${CLR_B_MAGENTA}➜${ANSI_RESET} ${ANSI_BOLD}${CLR_B_WHITE}$*${ANSI_RESET}"; }
+log_step() { log " ${CLR_B_MAGENTA}➜${ANSI_RESET} ${ANSI_BOLD}${CLR_B_WHITE}$*${ANSI_RESET}"; }
 log_debug() {
   if [[ -e $HOME/.debug || "$DEBUG" == "true" ]]; then
     log "\n${CLR_B_BLACK}${ICON_DEBUG} [DEBUG] $*${ANSI_RESET}"
@@ -259,6 +264,165 @@ log_debug() {
 # Strings helpers
 to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
 to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
+
+# -----------------------------------------------------------------------------
+# Cryptographic Key Chest (ChaCha20 + PBKDF2)
+# -----------------------------------------------------------------------------
+
+init_key_chest() {
+  if [[ ! -d $KEYS_DIR ]]; then
+    mkdir -p "$KEYS_DIR" && chmod 700 "$KEYS_DIR"
+  fi
+  if [[ ! -r $MASTER_KEY_FILE ]]; then
+    openssl rand -base64 32 > "$MASTER_KEY_FILE" && chmod 600 "$MASTER_KEY_FILE"
+  fi
+}
+
+has_provider_key() {
+  local provider="$1"
+  [[ -r $MASTER_KEY_FILE && -r "${KEYS_DIR}/${provider}.key" ]]
+}
+
+encrypt_provider_key() {
+  local provider="$1"
+  local raw_key="$2"
+  init_key_chest
+  echo -n "$raw_key" | openssl chacha20 -pbkdf2 -iter $PBKDF_ITERATIONS -e -pass "file:${MASTER_KEY_FILE}" -in - | base64 -w0 - > "${KEYS_DIR}/${provider}.key"
+  chmod 600 "${KEYS_DIR}/${provider}.key"
+}
+
+decrypt_provider_key() {
+  local provider="$1"
+  if has_provider_key "$provider"; then
+    cat "${KEYS_DIR}/${provider}.key" | base64 -d - | openssl chacha20 -pbkdf2 -iter $PBKDF_ITERATIONS -d -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null
+  fi
+}
+
+purge_all_keys() {
+  if [[ -d $KEYS_DIR ]]; then
+    rm -rf "$KEYS_DIR"
+    log_success "Cryptographic key chest has been completely purged."
+  else
+    log_warn "No key chest found to purge."
+  fi
+}
+
+interactive_key_setup() {
+  local provider="$1"
+  local url="your provider console"
+  case "$provider" in
+    groq) url="https://console.groq.com/keys" ;;
+    openrouter*) url="https://openrouter.ai/keys" ;;
+    vercel) url="https://vercel.com/docs/ai-gateway" ;;
+    openai) url="https://platform.openai.com/api-keys" ;;
+    mammouth) url="https://mammouth.ai/app/account/settings/api" ;;
+  esac
+
+  log ""
+  log "${CLR_B_CYAN}🔑 [$(to_upper "$AI_NAME") KEY WIZARD]${ANSI_RESET}"
+  log "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+  log " Your keys will be encrypted locally using ${CLR_B_WHITE}ChaCha20 + PBKDF2${ANSI_RESET}"
+  log " and safely stored inside ${CLR_B_WHITE}${KEYS_DIR##*/}/${provider}.key${ANSI_RESET}."
+  log "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+  log "🌐 Provider  : ${CLR_B_YELLOW}$(to_upper "$provider")${ANSI_RESET}"
+  log "👉 Obtain Key : ${CLR_B_CYAN}${url}${ANSI_RESET}"
+  log ""
+  
+  local raw_key
+  while [[ -z "$raw_key" ]]; do
+    echo -en "🔑 Enter your API Key (input will be masked) ❯ " >&2
+    read -rs raw_key
+    log "" # New line after masked input
+    if [[ -z "$raw_key" ]]; then
+      log_error "Key cannot be empty. Please try again."
+    fi
+  done
+
+  # Encrypt and save key
+  encrypt_provider_key "$provider" "$raw_key"
+  log_success "API key encrypted and sealed successfully inside '${KEYS_DIR##*/}/${provider}.key'."
+}
+
+manage_keys() {
+  init_key_chest
+  log ""
+  log "${CLR_B_CYAN}🔑 [$(to_upper "$AI_NAME") SOVEREIGN KEY CHEST]${ANSI_RESET}"
+  log "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────────${ANSI_RESET}"
+  log " Choose an action to manage your encrypted API keys:"
+  log ""
+  log "   ${CLR_B_GREEN}1)${ANSI_RESET} List configured keys (masked)"
+  log "   ${CLR_B_GREEN}2)${ANSI_RESET} Configure or update a key"
+  log "   ${CLR_B_GREEN}3)${ANSI_RESET} Purge entire key chest (security erase)"
+  log "   ${CLR_B_GREEN}4)${ANSI_RESET} Exit"
+  log ""
+  echo -en "👉 Select choice [1-4] ❯ " >&2
+  local choice
+  read -r choice
+  log ""
+
+  case "$choice" in
+    1)
+      log "${CLR_B_CYAN}🔐 Configured Providers:${ANSI_RESET}"
+      local p found=false
+      for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG"); do
+        if has_provider_key "$p"; then
+          log "  • $(to_upper "$p"): [ ${CLR_B_GREEN}CONFIGURED 🟢${ANSI_RESET} ]"
+          found=true
+        else
+          log "  • $(to_upper "$p"): [ ${CLR_B_RED}NOT CONFIGURED 🔴${ANSI_RESET} ]"
+        fi
+      done
+      if [[ $found == false ]]; then
+        log ""
+        log_info "No encrypted keys found in ${KEYS_DIR##*/}/."
+      fi
+      log ""
+    ;;
+    2)
+      log "Choose a provider to configure:"
+      log " 1) Groq"
+      log " 2) Mammount AI"
+      log " 3) OpenRouter"
+      log " 4) OpenAI"
+      log " 5) Vercel AI Gateway"
+      log " 6) Custom Provider"
+      log " 7) Exit"
+      log ""
+      echo -en "👉 Selection [1-7] ❯ " >&2
+      local prov_choice
+      read -r prov_choice
+      local target_provider=""
+      case "$prov_choice" in
+        1) target_provider="groq" ;;
+        2) target_provider="mammouth" ;;
+        3) target_provider="openrouter" ;;
+        4) target_provider="openai" ;;
+        5) target_provider="vercel" ;;
+        6)
+          echo -en "✍️ Enter custom provider name ❯ " >&2
+          read -r target_provider
+          target_provider=$(to_lower "$target_provider")
+        ;;
+        7) return ;;
+      esac
+      if [[ -n "$target_provider" ]]; then
+        interactive_key_setup "$target_provider"
+      fi
+    ;;
+    3)
+      echo -en "⚠️ ${CLR_B_RED}Are you absolutely sure you want to purge all keys?${ANSI_RESET} [y/N] ❯ " >&2
+      local confirm ; read -r confirm
+      if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        purge_all_keys
+      else
+        log_info "Purge cancelled."
+      fi
+    ;;
+    *)
+      log_info "Exiting Key Chest Manager."
+    ;;
+  esac
+}
 
 # Contextual Headers
 show_user_header() { log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER} User " "─" "${CLR_B_BLACK}")\n"; }
@@ -292,7 +456,7 @@ get_image_type() {
 
 is_image_file() {
   local ext="${1##*.}"
-  [[ "$ext" =~ ^(png|jpg|jpeg|webp|gif)$ ]] && return 0
+  [[ $ext =~ ^(png|jpg|jpeg|webp|gif)$ ]] && return 0
   return 1
 }
 
@@ -380,7 +544,14 @@ get_vision_model() {
   case $BACKEND in
     ollama) vision_model="${OLLAMA_VISION}:${quant_upper}" ;;
     llamacpp) vision_model="${LLAMACPP_VISION}:${quant_upper}" ;;
-    external) vision_model="$PROVIDER_API_MODEL" ;;
+    external)
+      case $PROVIDER in
+        groq)
+          vision_model="meta-llama/llama-4-scout-17b-16e-instruct"
+        ;;
+        *) vision_model="$PROVIDER_API_MODEL" ;;
+      esac
+    ;;
   esac
   echo -n "$vision_model"
 }
@@ -443,7 +614,13 @@ set_base_tools() {
         BASE_TOOLS="${TOOLS_DIR}/tools-light.json"
       fi
     ;;
-    external) BASE_TOOLS="${TOOLS_DIR}/tools.json" ;;
+    external)
+      if [[ $PROVIDER == "groq" ]]; then
+        BASE_TOOLS="${TOOLS_DIR}/tools-groq.json"
+      else
+        BASE_TOOLS="${TOOLS_DIR}/tools.json"
+      fi
+    ;;
   esac
 }
 
@@ -605,7 +782,7 @@ show_banner() {
 
 EOF
   fi
-  echo -e "${CLR_B_CYAN}🔮 Jarvis AI Pipeline | Version $(get_self_version) 🔮${ANSI_RESET}"
+  echo -e "${CLR_B_CYAN}🔮 ${AI_NAME} AI Pipeline | Version $(get_self_version) 🔮${ANSI_RESET}"
   echo -e "${CLR_DIM}Lead: Jiab77 | AI Sorcerer: Jarvis (Gemini)${ANSI_RESET}\n"
 }
 
@@ -655,7 +832,10 @@ api_call() {
 
     # External Backend: OpenRouter, Vercel, Mammouth AI
     external)
+      # Add required arguments when TOR is enabled
       [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
+
+      # Provider selector
       case $PROVIDER in
         vercel)
           # Apply ZDR policy when enabled
@@ -675,6 +855,82 @@ api_call() {
                -H "x-title: ${ATTRIBUTION_TITLE}" \
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
+        ;;
+        groq)
+          # Add minor delay to avoid triggering the rate limiter
+          sleep 1
+
+          # Disable reasoning for Groq (causes issues)
+          payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
+          [[ $DEBUG == true ]] && log ; log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
+
+          local response
+          local attempt=1
+          local max_attempts=5
+
+          while (( attempt <= max_attempts )); do
+            # Send custom payload and capture the output
+            response=$(curl "${curl_opts[@]}" "${PROVIDER_API_URL}"                  -H "Content-Type: application/json"                  -H "Authorization: Bearer ${PROVIDER_API_KEY}"                  -A "$USER_AGENT"                  -d @- <<< "$payload" 2>/dev/null)
+
+            # Parse potential errors from the response
+            local error_code
+            error_code=$(jq -r '.error.code' <<< "$response" 2>/dev/null)
+            local error_msg
+            error_msg=$(jq -r '.error.message' <<< "$response" 2>/dev/null)
+
+            # Check if we triggered a rate limit (TPM/RPM/TPD exceeded)
+            if [[ $error_code == "rate_limit_exceeded" || $error_msg == *"Rate limit reached"* ]]; then
+              local wait_time="5" # Safe default fallback
+
+              # Extract days (d), hours (h), minutes (m), and seconds (s) from the wait message
+              # Excludes trailing sentence period using character class boundary ([0-9a-z])
+              if [[ $error_msg =~ try[[:space:]]again[[:space:]]in[[:space:]]([0-9hms.]*[0-9a-z]) ]]; then
+                local duration_str="${BASH_REMATCH[1]}"
+                local d=0 h=0 m=0 s=0
+
+                # Extract days if present
+                if [[ $duration_str =~ ([0-9]+)d ]]; then
+                  d="${BASH_REMATCH[1]}"
+                fi
+
+                # Extract hours if present
+                if [[ $duration_str =~ ([0-9]+)h ]]; then
+                  h="${BASH_REMATCH[1]}"
+                fi
+
+                # Extract minutes if present
+                if [[ $duration_str =~ ([0-9]+)m ]]; then
+                  m="${BASH_REMATCH[1]}"
+                fi
+
+                # Extract seconds (integer part) if present
+                if [[ $duration_str =~ ([0-9]+)(.[0-9]+)?s ]]; then
+                  s="${BASH_REMATCH[1]}"
+                fi
+
+                # Convert duration to total seconds and add 1s security padding
+                wait_time=$(( (d * 86400) + (h * 3600) + (m * 60) + s + 1 ))
+              fi
+
+              # Convert wait_time to a human-readable display string
+              local wait_display=""
+              if (( d > 0 )); then wait_display+="${d}d "; fi
+              if (( h > 0 || d > 0 )); then wait_display+="${h}h "; fi
+              if (( m > 0 || h > 0 || d > 0 )); then wait_display+="${m}m "; fi
+              wait_display+="$(( s + 1 ))s"
+
+              log_warn "${CLR_B_YELLOW}[RATE LIMIT]${ANSI_RESET} Groq quota reached (Attempt $attempt/$max_attempts). Sleeping for ${CLR_B_WHITE}${wait_display}${ANSI_RESET} (total: ${wait_time}s) before retrying..."
+              sleep "$wait_time"
+              ((attempt++))
+            else
+              # Success or non-rate-limit error, return output and exit loop
+              jq -rc . <<<"$response"
+              return 0
+            fi
+          done
+
+          # If all retries failed, return last response
+          jq -rc . <<<"$response"
         ;;
         openai)
           # Apply ZDR policy when enabled
@@ -725,6 +981,25 @@ api_call() {
     ;;
     *) error "Unsupported backend given: $BACKEND" ;;
   esac
+}
+
+get_credit_balance() {
+  local curl_opts=("-sSL")
+
+  # Add required arguments when TOR is enabled
+  [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
+
+  # Provider selector
+  if [[ $BACKEND == "external" ]]; then
+    case $PROVIDER in
+      vercel)
+        curl "${curl_opts[@]}" "https://ai-gateway.vercel.sh/v1/credits" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -A "$USER_AGENT" | jq -rc .balance 2>/dev/null
+      ;;
+    esac
+  fi
 }
 
 # -----------------------------------------------------------------------------
@@ -839,9 +1114,10 @@ call_task_agent() {
     local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
     local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
     local usage ; usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
+    local balance ; balance=$(get_credit_balance)
 
     # Handling model resolving
-    [[ -n $resolved_model && $resolved_model != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
+    [[ -n $resolved_model && $resolved_model != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
     # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
     if [[ -n $reasoning && $reasoning != "null" ]]; then
@@ -938,7 +1214,7 @@ call_task_agent() {
           local mime_type ; mime_type=$(get_image_type "$img_path")
           local filename ; filename="${img_path##*/}"
           (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
-          log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected." >&2
+          log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
 
           # Inject encoded image directly into the active in-memory messages list
           ALL_MESSAGES=$(jq -rc \
@@ -974,6 +1250,7 @@ call_task_agent() {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
           [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+          [[ -n $balance && "$balance" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         } >&2
       fi
@@ -1095,6 +1372,8 @@ Take as many tool calls as you need. When you are fully done organizing and savi
     fi
 
     # Store relevant data
+    local usage ; usage=$(jq -rc '.usage' <<<"$raw_response" 2>/dev/null)
+    local balance ; balance=$(get_credit_balance)
     local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_response" 2>/dev/null)
     local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_response" 2>/dev/null)
     local response ; response=$(jq -rc '.choices[0].message.content' <<<"$raw_response" 2>/dev/null)
@@ -1102,7 +1381,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
     local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_response" 2>/dev/null)
 
     # Handling model resolving
-    [[ -n $resolved_model && $resolved_model != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
+    [[ -n $resolved_model && $resolved_model != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
     # Handling model reasoning
     if [[ -n $reasoning && $reasoning != "null" ]]; then
@@ -1202,6 +1481,22 @@ Take as many tool calls as you need. When you are fully done organizing and savi
       break
     fi
   done
+
+  # Handling model usage
+  if [[ -n $usage && $usage != "null" ]]; then
+    local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage")
+    local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage")
+    local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage")
+    local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage")
+    local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage")
+    local cost ; cost=$(jq -rc .cost <<<"$usage")
+
+    echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
+    echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+    [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+    [[ -n $balance && "$balance" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}"
+    echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
+  fi
 
   # Prune main context: Keep only the system prompt + last 2 turns of the original conversation
   if [[ $errors -eq 0 ]]; then
@@ -1344,9 +1639,10 @@ send_message() {
     REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
     TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
     USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+    BALANCE=$(get_credit_balance)
 
     # Handling model resolving
-    [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
+    [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
 
     # Handling model reasoning
     if [[ -n $REASONING && $REASONING != "null" ]]; then
@@ -1478,6 +1774,7 @@ send_message() {
       echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
       echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
       [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+      [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
       echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
     fi
   done
@@ -1638,9 +1935,10 @@ run_one_shot_pipeline() {
           REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
           TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
           USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+          BALANCE=$(get_credit_balance)
 
           # Handling model resolving
-          [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
+          [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
 
           # Handling model reasoning
           if [[ -n $REASONING && ! $REASONING == "null" ]]; then
@@ -1767,6 +2065,7 @@ run_one_shot_pipeline() {
             echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
             echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
             [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+            [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
             echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
           fi
         done
@@ -1827,9 +2126,10 @@ run_one_shot_pipeline() {
         RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
         REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
         USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
+        BALANCE=$(get_credit_balance)
 
         # Handling model resolving
-        [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
+        [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
 
         # Handling model reasoning
         if [[ -n $REASONING && ! $REASONING == "null" ]]; then
@@ -1860,6 +2160,7 @@ run_one_shot_pipeline() {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
           [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+          [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         fi
       ;;
@@ -2042,6 +2343,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}--clear${ANSI_RESET}                    Wipe conversational memory and dynamic session logs
   ${CLR_B_GREEN}--commit${ANSI_RESET}                   Force cognitive state / memory consolidation to disk
   ${CLR_B_GREEN}--zdr${ANSI_RESET}                      Force ZDR policy to be applied on external providers
+  ${CLR_B_GREEN}--keys, --init${ANSI_RESET}            Configure and manage encrypted cloud provider API keys
 
 ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}help${ANSI_RESET}                       Show this help screen and exit
@@ -2056,6 +2358,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}clear${ANSI_RESET}                      Wipe conversational memory
   ${CLR_B_GREEN}commit${ANSI_RESET}                     Force dynamic session memory consolidation
   ${CLR_B_GREEN}zdr${ANSI_RESET}                        Force ZDR policy to be applied on external providers
+  ${CLR_B_GREEN}keys, init${ANSI_RESET}                 Configure and manage encrypted API keys
 EOF
   echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
   exit 0
@@ -2075,6 +2378,11 @@ parse_cli_flags() {
   while [[ $# -ne 0 ]]; do
     case $1 in
       -h|--help|help) print_help ;;
+      --keys|keys|--init|init)
+        init_key_chest
+        manage_keys
+        exit 0
+      ;;
       -l|--listen|listen) shift ; LISTEN_ADDR_PORT="$1" ; shift ;;
       --zdr|zdr) shift ; ZDR_ENFORCED=true ;;
       --clear|clear) clear_memory ; exit 0 ;;
@@ -2106,6 +2414,11 @@ init_core() {
     ICON_INFO="ℹ️  "
   fi
 
+  # Fix Iterations for Termux
+  if is_termux; then
+    PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
+  fi
+
   set_console_title "${SCRIPT_FILE}: Initializing..."
   load_config_file
   set_listen_interface
@@ -2120,7 +2433,12 @@ init_core() {
 
   [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
 
-  if [[ $USE_TOR == true && $BACKEND == "external" ]]; then
+  if [[ $BACKEND == "external" && $PROVIDER == "groq" ]]; then
+    USE_TOR=false
+    log_warn "Tor privacy tunnel disabled for Groq."
+  fi
+
+  if [[ $BACKEND == "external" && $USE_TOR == true ]]; then
     log_info "Checking Tor Network proxy interface..."
     if ! timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
       error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is Tor running?"
@@ -2130,8 +2448,31 @@ init_core() {
   fi
 
   if [[ $BACKEND == "external" ]]; then
-    [[ -r $CREDENTIALS ]] && PROVIDER_API_KEY=$(<"$CREDENTIALS")
-    [[ -z $PROVIDER_API_KEY ]] && error "Missing cloud credentials. Configure '.creds' with your OpenRouter/Vercel API key."
+    # Try loading from the encrypted key chest first
+    if has_provider_key "$PROVIDER"; then
+      PROVIDER_API_KEY=$(decrypt_provider_key "$PROVIDER" 2>/dev/null)
+    elif [[ -r $CREDENTIALS ]]; then
+      # Fallback to legacy credentials file
+      PROVIDER_API_KEY=$(<"$CREDENTIALS")
+    fi
+
+    # Pre-flight check: if no key is configured, prompt user or fail
+    if [[ -z $PROVIDER_API_KEY ]]; then
+      if [[ -t 0 && $RUN_MODE == "chat" ]]; then
+        # Running interactively in Chat mode, prompt user to configure keys
+        log_warn "Missing cloud credentials for provider: ${CLR_B_YELLOW}${PROVIDER}${ANSI_RESET}."
+        interactive_key_setup "$PROVIDER"
+        # Reload key after interactive setup
+        if has_provider_key "$PROVIDER"; then
+          PROVIDER_API_KEY=$(decrypt_provider_key "$PROVIDER" 2>/dev/null)
+        fi
+      fi
+    fi
+
+    # If still empty, trigger error
+    if [[ -z $PROVIDER_API_KEY ]]; then
+      error "Missing cloud credentials. Configure keys using './cli.sh --keys' or set up legacy '$CREDENTIALS' file."
+    fi
   fi
 
   # Define right chat model

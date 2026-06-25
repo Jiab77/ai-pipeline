@@ -2,7 +2,7 @@
 FROM debian:stable-slim
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt update && apt install -y --no-install-recommends \
     bash \
     curl \
     jq \
@@ -11,16 +11,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     figlet \
     ca-certificates \
-    iconv \
     sed \
+    openssl \
     ncurses-bin \
-    &> /dev/null || apt-get install -y \
-    bash curl jq tor php-cli git figlet ca-certificates sed ncurses-bin
+    && rm -rf /var/lib/apt/lists/*
 
-# Install glow (Markdown renderer in terminal) if possible, or fallback
-RUN curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg \
+# Install glow (Markdown renderer in terminal)
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list \
-    && apt-get update && apt-get install -y glow || echo "Glow not available, falling back to cat"
+    && apt-get update && apt-get install -y glow \
+    && rm -rf /var/lib/apt/lists/* || echo "Glow not available, falling back to cat"
+
+# Install htmlq (download precompiled binary to keep image slim)
+RUN curl -L -s https://github.com/mgdm/htmlq/releases/download/v0.4.0/htmlq-x86_64-linux.tar.gz | tar -xzf - -C /usr/local/bin \
+    && chmod +x /usr/local/bin/htmlq
 
 # Set up work directory
 WORKDIR /app
@@ -29,7 +34,7 @@ WORKDIR /app
 COPY . .
 
 # Ensure production scripts are executable
-RUN chmod +x pipeline.sh run-tools.sh web_fetch.sh 2>/dev/null || true
+RUN chmod +x core.sh cli.sh tools.sh tools/web-fetch.sh tools/web-browse/web-browse.js 2>/dev/null || true
 
 # Configure Tor to run in the background
 RUN echo "Log notice stdout" >> /etc/tor/torrc && \
@@ -40,5 +45,4 @@ RUN echo "Log notice stdout" >> /etc/tor/torrc && \
 EXPOSE 8080 9050 9080
 
 # Default entrypoint starts Tor in the background and launches interactive or pipeline mode
-ENTRYPOINT ["/bin/bash", "-c", "tor & sleep 2 && ./pipeline.sh \"$@\""]
-CMD ["--chat"]
+ENTRYPOINT ["/bin/bash", "-c", "tor & sleep 2 && ./cli.sh \"$@\""]

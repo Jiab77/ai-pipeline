@@ -8,7 +8,7 @@
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version 0.3.1 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
+# Version 0.3.2 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
 
 # Options
 # [[ -e $HOME/.debug ]] && set -x
@@ -185,8 +185,8 @@ exec_shell_command() {
     [[ -n $timeout_val && $timeout_val != null ]] && timeout=$timeout_val
     [[ -n $max_size_val && $max_size_val != null ]] && max_output_size=$max_size_val
   fi
-  # Avoid running core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
-  if [[ $command == *[cC][oO][rR][eE].[sS][hH]* || $command == *[cC][lL][iI].[sS][hH]* || $command == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $command == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  # Avoid running core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
+  if [[ $command == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to run core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -222,8 +222,8 @@ write_file() {
     [[ -n $content_val && $content_val != null ]] && content=$content_val
   fi
 
-  # Avoid writing to core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
-  if [[ $path == *[cC][oO][rR][eE].[sS][hH]* || $path == *[cC][lL][iI].[sS][hH]* || $path == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  # Avoid writing to core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
+  if [[ $path == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to write to core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -255,8 +255,8 @@ edit_file() {
 
   [[ ! -f $path ]] && error "File not found at $path"
 
-  # Avoid editing core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
-  if [[ $path == *[cC][oO][rR][eE].[sS][hH]* || $path == *[cC][lL][iI].[sS][hH]* || $path == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $path == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  # Avoid editing core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
+  if [[ $path == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to edit core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -312,8 +312,8 @@ edit_file() {
 apply_diff() {
   local diff_content
 
-  # Avoid patching core pipeline files (core.sh, cli.sh, run-tools.sh) while running (Zero-Fork matching!)
-  if [[ $FUNC_ARGS == *[cC][oO][rR][eE].[sS][hH]* || $FUNC_ARGS == *[cC][lL][iI].[sS][hH]* || $FUNC_ARGS == *[rR][uU][nN]-[tT][oO][oO][lL][sS].[sS][hH]* || $FUNC_ARGS == *[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  # Avoid patching core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
+  if [[ $FUNC_ARGS == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $FUNC_ARGS == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $FUNC_ARGS == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $FUNC_ARGS == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
   fi
 

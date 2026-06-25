@@ -2,8 +2,9 @@
 node_modules
 
 # Files that must never be published
-data/
+data*/
 models/
+keys/
 tools/web-browse/tests/
 core.conf
 tools.log

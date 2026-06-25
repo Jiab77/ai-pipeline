@@ -2,10 +2,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter%20%7C%20Mammouth%20AI-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v0.9.2-blue.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter%20%7C%20Mammouth%20AI%20%7C%20OpenAI%20%7C%20Groq-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.0.0-blue.svg)]()
 
-> A lightweight, highly extensible Bash-driven orchestration framework for interacting with local LLMs (via **Ollama** or **llama.cpp**) and external API backends (via **Vercel AI Gateway / OpenRouter / Mammouth AI**). Features fully integrated parallel tool-calling capabilities, a secure Onion-routed Tor tunnel, and an autonomous, native Markdown-based memory architecture.
+> A lightweight, highly extensible Bash-driven orchestration framework for interacting with local LLMs (via **Ollama** or **llama.cpp**) and external API backends (via **Vercel AI Gateway / OpenRouter / Mammouth AI / OpenAI / Groq**). Features fully integrated parallel tool-calling capabilities, a secure Onion-routed Tor tunnel, and an autonomous, native Markdown-based memory architecture.
 
 ---
 
@@ -31,9 +31,9 @@ This repository contains a minimalist, high-performance design of an *agentic LL
 
 Unlike heavy, dependency-bloated Python frameworks, this implementation is exceptionally rapid, contains zero bloated virtual environments, and is easy to audit. It parses user intent, extracts structural context from external files, queries backends of your choice, implements recursive tool-calling (function calling) natively in Bash, and manages long-term behavior and profile memory across interaction sessions using a native, human-readable filesystem.
 
-### 🏛️ Modular Decoupled Architecture (v0.9.0)
+### 🏛️ Modular Decoupled Architecture (v1.0.0)
 
-To guarantee absolute modularity and system-wide extensibility, version **v0.9.0** implements a clean partition between the core transport library and interactive visualization clients. This follows the **UNIX Philosophy**: separate backend cognitive logic from frontend rendering layers. This ensures a single source of truth (`core`) can power our terminal client (`cli`), our local web console (JWCC), or headless network security daemons (Cerberus).
+To guarantee absolute modularity and system-wide extensibility, version **v1.0.0** implements a clean partition between the core transport library and interactive visualization clients. This follows the **UNIX Philosophy**: separate backend cognitive logic from frontend rendering layers. This ensures a single source of truth (`core`) can power our terminal client (`cli`), our local web console (JWCC), or headless network security daemons (Cerberus).
 
 ```
                       ┌─────────────────────────────────────────┐
@@ -62,11 +62,11 @@ To guarantee absolute modularity and system-wide extensibility, version **v0.9.0
 
 #### ⚙️ The Sovereign Cognitive Core (`core.sh`)
 
-An agnostic, non-interactive library and execution runner. It handles static registry management (`providers.json`/`models.json`), zero-touch configuration sourcing (`.conf` overrides), dynamic Markdown-based memory bootstrapping, outbound OPSEC transports, heuristic multi-intent routing, and dual-tooling execution loops. It can be executed in headless run-once automation loops or sourced securely.
+An agnostic, non-interactive library and execution runner. It houses our static registry management (`providers.json`/`models.json`), our military-grade **Sovereign Key Chest** (ChaCha20 + PBKDF2), zero-touch configuration sourcing (`.conf` overrides), dynamic Markdown-based memory bootstrapping, outbound OPSEC transports, heuristic multi-intent routing, and dual-tooling execution loops. It can be executed in headless run-once automation loops or sourced securely.
 
 #### 💬 The Interactive Terminal Portal (`cli.sh`)
 
-The dedicated terminal companion. Sourcing `core.sh` at boot, it hosts our robust multi-line persistent session loops, captures and parses slash commands (like `/load` and `/unload`), renders immersive cyberpunk styling/loading spinners, and isolates/formats real-time reasoning streams (`thinking_tokens`) inside italicized grey blocks.
+The dedicated terminal companion. Sourcing `core.sh` at boot, it hosts our robust multi-line persistent session loops, captures and parses slash commands (such as `/keys` and `/replay`), renders immersive cyberpunk styling/loading spinners, and isolates/formats real-time reasoning streams (`thinking_tokens`) inside italicized grey blocks.
 
 ### Workflow & Intent Routing
 
@@ -101,10 +101,21 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 ## ✨ Key Capabilities
 
-- 💬 **Interactive Chat Loop**: Features a fully immersive, conversational terminal flow powered by persistent chat history and deep profile memory.
-- 🧠 **Cognitive Freedom Memory Engine (v0.7.0)**: Pure, native, and modular Markdown-based memory architecture. Deprecates and removes legacy SQLCipher (`memory.db`) and flat JSON (`memory.json`) backends, achieving zero-overhead execution, absolute portability, and 100% compliance with the UNIX philosophy.
-- 🌀 **Subconscious Memory Consolidation (v0.7.0)**: Fully autonomous memory reorganization. When active turns reach `HEARTBEAT_THRESHOLD` (default: 10), the AI enters a subconscious cycle, receives a system directive to analyze history, and uses its standard file editing tools (`write_file`, `edit_file`) on `data/memory/` files to consolidate technical stacks, goals, accomplishments, and collaborator profiles. Once complete, active logs are pruned to the last 2 turns, eliminating token bloat and preventing amnesia.
-- 🔒 **Zero Data Retention (ZDR) Privacy Shield (v0.7.0)**: Outbound cloud API requests routed to Vercel AI Gateway or OpenRouter can be conditionally forced to enforce strict ZDR rules via the `--zdr` flag. It dynamically injects `zeroDataRetention: true` (Vercel) or `zdr: true` (OpenRouter) inside API payloads using lightweight `jq` filters, offering perfect flexibility to gracefully bypass Vercel Hobby-tier paywall limitations.
+### 🛡️ Sovereign Security & Core Upgrades (New in v1.0.0)
+- 🔑 **Sovereign Key Chest (ChaCha20 + PBKDF2)**: A zero-dependency local key chest using **ChaCha20 + PBKDF2** with **500,000 iterations** via native OpenSSL. It auto-generates a 256-bit random master key (`key.dat` in `chmod 600`) and encrypts individual provider keys (`keys/<provider>.key`), ensuring absolute local security. Keys are decrypted on-the-fly directly in RAM and never written to disk in cleartext.
+- 📱 **Hardware-Adaptive PBKDF2 Scaling**: On Android/Termux, the key chest automatically halves the PBKDF2 iterations to ensure instantaneous (millisecond-range) execution and prevent mobile CPU thermal throttling, maintaining maximum performance without sacrificing local security.
+- 🧙‍♂️ **Interactive Key Wizard (`/keys` / `--keys`)**: A beautiful, user-friendly console wizard (`manage_keys` and `interactive_key_setup`) with masked inputs (`read -rs`) and direct provider console URLs to configure or update keys securely.
+- 🔍 **Credentials Pre-Flight Checks**: Automatically intercepts missing credentials at startup. If a provider key is missing, it dynamically triggers the interactive setup wizard on-the-fly during active chat sessions, preventing hard crashes.
+- ⏳ **Enriched Groq Rate-Limiter Retry Loop**: Intercepts Groq's TPM/RPM/TPD rate limit errors. Uses a robust regex to extract compound wait times (supporting days, hours, minutes, and seconds, e.g., `1h13m8.9472s`), converts them to total seconds with a 1s safety padding, and sleeps before retrying, ensuring 100% automated task resilience.
+- 🛡️ **Refined Zero-Fork Sandboxing**: Upgraded system-level boundaries in `tools.sh` to anchor patterns to `${SCRIPT_DIR}/`, eliminating false positives (e.g. allowing `grep` searches containing "core.sh") while maintaining bulletproof protection of active production scripts.
+- 💳 **Credit Balance HUD**: Real-time remaining credit balance display in `SYSTEM METRICS` HUD (fully integrated with Vercel AI Gateway).
+- 🔄 **Interactive `/replay` Command**: Instantly resends the last user message using a lightweight, zero-fork in-memory `LAST_USER_MSG` state.
+
+---
+
+- 🧠 **Cognitive Freedom Memory Engine**: Pure, native, and modular Markdown-based memory architecture. Deprecates and removes legacy SQLCipher (`memory.db`) and flat JSON (`memory.json`) backends, achieving zero-overhead execution, absolute portability, and 100% compliance with the UNIX philosophy.
+- 🌀 **Subconscious Memory Consolidation**: Fully autonomous memory reorganization. When active turns reach `HEARTBEAT_THRESHOLD` (default: 10), the AI enters a subconscious cycle, receives a system directive to analyze history, and uses its standard file editing tools (`write_file`, `edit_file`) on `data/memory/` files to consolidate technical stacks, goals, accomplishments, and collaborator profiles. Once complete, active logs are pruned to the last 2 turns, eliminating token bloat and preventing amnesia.
+- 🔒 **Zero Data Retention (ZDR) Privacy Shield**: Outbound cloud API requests routed to Vercel AI Gateway or OpenRouter can be conditionally forced to enforce strict ZDR rules via the `--zdr` flag. It dynamically injects `zeroDataRetention: true` (Vercel) or `zdr: true` (OpenRouter) inside API payloads using lightweight `jq` filters, offering perfect flexibility to gracefully bypass Vercel Hobby-tier paywall limitations.
 - 🎨 **Sleek Aesthetic Terminal UI**: Powered by high-intensity ANSI color flows, contextual thematic icons, gorgeous execution headers (`User`, `Jarvis`, `Thinking`, and `Tool Call` headers), and dynamic ASCII art banners generated via `figlet` with smart text-based fallbacks.
 - 📐 **Pixel-Perfect Auto-Sizing Terminal Headers**: Fully adjusts visual borders by intelligently replacing double-column wide character emojis with corresponding visual weights and filtering out zero-width Unicode variation selectors (`️`). Coupled with a `-1` column safe-zone padding to 100% prevent forced wrapping artifacts or line overflow bugs on narrow mobile scopes (e.g. Termux on Android).
 - 💭 **AI Cognitive Reasoning Extraction**: Native parsing and styling of internal LLM critical-thinking blocks (`thinking_tokens`), displayed in dedicated, beautiful cognitive terminal frames prior to yielding final outputs.
@@ -115,54 +126,43 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 🚀 **Hardware-Aware Adaptive Tuning**: Dynamically detects host CPU topologies (compatible with `nproc`, macOS `sysctl`, and Android/Termux `/proc/cpuinfo`), automatically cutting thread allocations in half on Termux to prevent mobile CPU throttling and battery overheating.
 - 💾 **Flash Memory Wear-Reduction**: Refactored in **v0.6.0**. Migrated all runtime payload fragments and tool buffers directly to the OS volatile RAM storage `/tmp` (or `$TMPDIR` dynamically under Termux), safeguarding the physical solid-state flash memory of mobile devices from high-frequency write cycles.
 - ⚡ **Optimized Local Server Orchestration**: On-the-fly execution and automatic, low-overhead tuning for local inference servers. Start a native PHP companion web server, a surgically tuned `llama-server`, or a lightweight `ollama serve` instance initialized with dynamic keep-alive structures, hardware-optimized quantizations, and active flash-attention mechanisms.
-- 🌐 **web_fetch (Smart Router) Tool Routing (v0.2.0)**: Highly optimized Bash domain routing (`web-fetch.sh`) supporting instant API-based scraping (GitHub, GitLab subgroups & standard repos, Wikipedia summaries, Codeberg, and SourceHut native routers), falling back elegantly to raw regex tag-stripping or `htmlq` over Tor socks5h to completely prevent heavy browser runtime bloat. Free of NodeJS dependencies.
-- 🌐 **web_browse (Premium JS Automation) (v0.0.1)**: Production-grade Puppeteer browser pilot (`tools/web-browse/web-browse.js`) for active headless browser automation (capturing console logs, page exceptions, screenshots, PDFs, and interactive clicks/types). Features environment-adaptive profiles (CachyOS vs. Termux ARM64) and robust, secure Tor HTTP proxy routing. Equipped with a standard Node.js shebang and execution permissions, allowing the pipeline to automatically fallback to `web_fetch` or custom shell commands if Node.js is missing.
+- 🌐 **web_fetch (Smart Router) Tool Routing**: Highly optimized Bash domain routing (`web-fetch.sh`) supporting instant API-based scraping (GitHub, GitLab subgroups & standard repos, Wikipedia summaries, Codeberg, and SourceHut native routers), falling back elegantly to raw regex tag-stripping or `htmlq` over Tor socks5h to completely prevent heavy browser runtime bloat. Free of NodeJS dependencies.
+- 🌐 **web_browse (Premium JS Automation)**: Production-grade Puppeteer browser pilot (`tools/web-browse/web-browse.js`) for active headless browser automation (capturing console logs, page exceptions, screenshots, PDFs, and interactive clicks/types). Features environment-adaptive profiles (CachyOS vs. Termux ARM64) and robust, secure Tor HTTP proxy routing. Equipped with a standard Node.js shebang and execution permissions, allowing the pipeline to automatically fallback to `web_fetch` or custom shell commands if Node.js is missing.
 - 🔍 **Tor-Based Anonymous Web Search**: Secure, fully-parsed, zero-subshell Onion DuckDuckGo lookup queries executed directly over SOCKS5 proxying to fetch clean search listings using `htmlq`.
 - 🛠️ **Agentic Function Calling**: Fully conforms to advanced JSON schemas. The Gemini and OpenRouter models can dynamically request to probe directory trees, read lines of files, modify lines of code, write files, perform search lookups, fetch raw web documents, or execute sandboxed shell commands.
 - 🛡️ **Universal HTTP 400 Payload Immunization**: 100% strict `jq --rawfile` encapsulation of assistant and chronological conversation logs in `core.sh`, paired with robust dual-tier binary and special-character encoding filters (`iconv + jq`) on tool outputs to fully secure external backends against malformed JSON crashes.
 - ⚡ **Complete JQ E2BIG / ARG_MAX Immunization**: Universal protection against Unix `ARG_MAX` ("Argument list too long") memory limit crashes across all backend execution paths. Implemented via raw file-streaming pipeline variables with `jq --rawfile` streams instead of command-line string interpolation, safeguarding the pipeline on highly constrained mobile/Termux environments.
 - 🧹 **Automatic Signal-Trap & Cleanup**: Zero-leak guarantee. Utilizes native UNIX `trap` signaling on `EXIT`, `INT`, and `TERM` signals to instantly clean up all temporary buffer files (`tmp_*`) and standard execution streams, ensuring absolute workspace hygiene even during abrupt process interruptions.
-- ⏱️ **Zero-Fork Speedups & Micro-Benchmarks**: Verified via our upgraded test harness, which benchmarks pure-Bash parameter stream processing and zero-subshelled operations to achieve a verified **up to 1.72x performance speed-up** compared to standard execution methods.
 - 🧅 **Tor Proxy Support**: Outbound connections to external APIs are routed over a local Tor daemon SOCKS5 proxy (`socks5h://127.0.0.1:9050`) using custom User-Agents for secure, private, and geo-independent requests.
-- 📂 **Interactive File and Image Loading (v0.8.0)**: State-of-the-art interactive loading via `/load <file>` and `/unload` commands in Chat Mode. Supports text context injection (elegantly formatted inside markdown code blocks with syntax highlighting) and base64-encoded image payloads directly inside active conversation windows.
-- 🔌 **Decoupled API Provider Registry (v0.8.1)**: Fully decouples API endpoints, default models, and Zero Data Retention (ZDR) options into a centralized, easy-to-edit JSON registry (`config/providers.json`).
-- ⚡ **Single-Fork JQ Registry Reading (v0.8.1)**: Uses a highly optimized single-fork `jq` command with tab-delimited parsing (`IFS=$'\t' read ...`) to retrieve endpoint URLs, default models, and ZDR options in a single process invocation, cutting process-fork overhead by 3x.
-- 🐘 **Mammouth AI Native Integration (v0.8.1)**: First-class, out-of-the-box support for Mammouth AI as a high-performance, European-sovereign, and privacy-compliant API provider.
-- 💭 **Robust Reasoning Extraction Fallback (v0.8.1)**: Built-in `jq` alternative coalescing (`.choices[0].message.reasoning // .choices[0].message.reasoning_content`) to seamlessly extract critical-thinking blocks across diverse API architectures (including Mammouth AI's custom structures) with zero runtime friction.
-- 🌐 **Universal OpenAI-Compatible Catch-All Route (v0.8.1)**: Engineered a generic wildcard routing fallback (`*)`) in `api_call`, allowing users to declare any standard OpenAI-compatible custom provider in `config/providers.json` and query it natively without editing a single line of Bash code.
-- 🆓 **OpenRouter Free Models Router Integration (v0.8.2)**: Native routing support for the `openrouter/free` virtual route using wildcard provider matching (`openrouter*`), delivering standard-compliant capability routing with zero cost.
-- 🛡️ **Secure Free-Tier Privacy Shield (v0.8.2)**: Automatically injects `provider.data_collection: "deny"` and `provider.require_parameters: true` inside payloads, ensuring robust privacy protection and capability-aware routing by default for free models.
-- ✨ **Resolved Model Telemetry Logging (v0.8.2)**: Extracts and prints upstream model routing resolutions (`✨ [Resolved Model] -> ...`) dynamically to provide absolute transparency on which model processes the request under dynamic fallback routers.
-- 🧩 **Interactive Session Fault-Tolerance (v0.8.2)**: Replaces fatal exits (`error`) with graceful warnings (`log_error`) in the Chat Mode execution loop. This isolates network/API errors, protecting active conversation contexts (loaded files `/load` and histories) from sudden restarts.
-- 🔍 **Enriched API Error Diagnostiques (v0.8.2)**: Extends standard API failure parsers to extract, colorize, and print detailed error codes (`err_code`) and raw metadata details (`err_meta`).
-- 💭 **Universal Reasoning Coalescing (v0.8.2)**: Integrates native reasoning extraction and formatting into the main loop, agent consolidation, and multi-agent loops, supporting diverse reasoning fields (`choices[0].message.reasoning // .choices[0].message.reasoning_content`) natively.
-- 👁️ **Multimodal Vision Integration & Vision Autoload (v0.8.0)**: Seamless local and cloud vision model compatibility (e.g. `LiquidAI/LFM2.5-VL-1.6B-GGUF`), auto-loading text weights paired with multimodal projector `.gguf` profiles.
-- 🌀 **Autonomous Visual Feedback Loop (v0.8.0)**: Also known as the *Sensory Feedback Loop*. When an agentic tool generates a visual asset (such as standard Puppeteer screenshots), the pipeline automatically intercepts it, encodes it, and feeds it back into the active context stream for the next turn, enabling fully autonomous visual validation without manual intervention.
-- ⚙️ **Dynamic Model-Dependent Parameters Middleware Registry (v0.8.0)**: Completely decouples sampling parameters (`temperature`, `top_k`, `repetition_penalty`, `min_p`) into a centralized JSON registry (`config/models.json`) that are dynamically parsed and injected into request payloads on-the-fly.
-- 🔌 **Adaptive Keep-Alive Strategy (v0.8.0)**: Dynamically adjusts model keep-alive periods on local servers based on active execution modes (`10m` for conversational chat warmth, `5s` for task pipeline execution to prevent RAM-thrashing and OOM failures on resource-constrained devices).
-- ⚡ **Fork-Free Listen Interface Parsing (v0.8.0)**: Eradicated external process forks by introducing pure, ultra-fast Bash parsing and reconstruction of host:port server addresses.
-- 🚀 **Eradication of System Forks (v0.8.0)**: High-performance Bash parameter expansion (`${FILE##*/}`) completely replaces slow external `basename` calls, ensuring rapid, fork-free execution on constrained environments (such as Android Termux on mobile or Intel Atom N100 PCs).
+- 📂 **Interactive File and Image Loading**: State-of-the-art interactive loading via `/load <file>` and `/unload` commands in Chat Mode. Supports text context injection (elegantly formatted inside markdown code blocks with syntax highlighting) and base64-encoded image payloads directly inside active conversation windows.
+- 🔌 **Decoupled API Provider Registry**: Fully decouples API endpoints, default models, and Zero Data Retention (ZDR) options into a centralized, easy-to-edit JSON registry (`config/providers.json`).
+- ⚡ **Single-Fork JQ Registry Reading**: Uses a highly optimized single-fork `jq` command with tab-delimited parsing (`IFS=$'\t' read ...`) to retrieve endpoint URLs, default models, and ZDR options in a single process invocation, cutting process-fork overhead by 3x.
+- 🐘 **Mammouth AI Native Integration**: First-class, out-of-the-box support for Mammouth AI as a high-performance, European-sovereign, and privacy-compliant API provider.
+- 👁️ **Multimodal Vision Integration & Vision Autoload**: Seamless local and cloud vision model compatibility (e.g. `LiquidAI/LFM2.5-VL-1.6B-GGUF`), auto-loading text weights paired with multimodal projector `.gguf` profiles.
+- 🌀 **Autonomous Visual Feedback Loop**: Also known as the *Sensory Feedback Loop*. When an agentic tool generates a visual asset (such as Puppeteer screenshots), the pipeline automatically intercepts it, encodes it, and feeds it back into the active context stream for the next turn, enabling fully autonomous visual validation without manual intervention.
+- ⚙️ **Dynamic Model-Dependent Parameters Middleware Registry**: Completely decouples sampling parameters (`temperature`, `top_k`, `repetition_penalty`, `min_p`) into a centralized JSON registry (`config/models.json`) that are dynamically parsed and injected into request payloads on-the-fly.
+- 🔌 **Adaptive Keep-Alive Strategy**: Dynamically adjusts model keep-alive periods on local servers based on active execution modes (`10m` for conversational chat warmth, `5s` for task pipeline execution to prevent RAM-thrashing and OOM failures on resource-constrained devices).
+- 🚀 **Eradication of System Forks**: High-performance Bash parameter expansion (`${FILE##*/}`) completely replaces slow external `basename` calls, ensuring rapid, fork-free execution on constrained environments (such as Android Termux on mobile or Intel Atom N100 PCs).
 - 🧳 **Zero Python Bloat**: Built purely on system binaries like standard GNU Unix utilities, `curl`, `jq`, `sed`, `awk`, and `bash`.
 
 ## 📂 Core Files
 
 | File | Description |
 | :--- | :--- |
-| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v0.9.0)**: Agnostic, non-interactive engine and library. Manages static registry configurations, bootstraps memory, enforces OPSEC transports/Tor/ZDR routing, routes multi-intents, and orchestrates recursive agentic tool calls with JQ ARG_MAX immunization. |
-| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v0.9.0)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (`/load`/`/unload`/`/run`/`/history`), renders cyberpunk visual frames, and isolates model thinking/reasoning streams. |
-| [`tools.sh`](tools.sh) | **Execution Runner (v0.3.1)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks, parallel null-delimited tool stream parsing, and strict macOS / Bash 3.2 compatibility, parsing payload arguments securely into system operations. |
-| [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.2.0)**: Employs domain-specific API endpoints (GitHub standard & raw, GitLab nested subgroups/raw routing, Codeberg & SourceHut native routers, Wikipedia summaries) falling back cleanly to raw regex or `htmlq` over Tor, returning clean, high-fidelity Markdown. Free of NodeJS dependencies. |
-| [`web-browse.js`](tools/web-browse/web-browse.js) | **Interactive Browser Automation (v0.0.1)**: Premium Puppeteer-core pilot script for active JS-rendering, clicking, typing, console/exception capturing, and visual screenshots/PDFs. Optimized for standard workstations and Termux ARM64. |
-| [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for 11-tool Function Calling (matching the external cloud model spec). |
-| [`tools-light.json`](tools/tools-light.json) | **Declaration Schemas**: Simplified 7-tool schema (`read_file`, `write_file`, `file_glob_search`, `get_datetime`, `web_search`, `web_fetch`, `web_browse`) optimized for local-first small models. |
-| [`config/models.json`](config/models.json) | **API Models Registry (v0.8.0)**: Decoupled JSON registry managing supported models. |
-| [`config/providers.json`](config/providers.json) | **API Providers Registry (v0.8.2)**: Decoupled JSON registry managing endpoints, default models, and Zero Data Retention configurations, allowing generic OpenAI-compatible custom integrations and wildcard provider matches. |
+| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.0.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
+| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.0.0)**: Dedicated user-interactive terminal portal. Sounces `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys` and `/replay`), and isolates model reasoning streams. |
+| [`tools.sh`](tools.sh) | **Execution Runner (v0.3.2)**: Highly optimized zero-subshell tool handler. Double-optimized for zero forks, parallel null-delimited tool stream parsing, and upgraded absolute-path sandboxing. |
+| [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.2.0)**: Employs domain-specific API endpoints (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) returning clean Markdown. Free of NodeJS dependencies. |
+| [`web-browse.js`](tools/web-browse/web-browse.js) | **Interactive Browser Automation (v0.0.1)**: Premium Puppeteer-core pilot script for active JS-rendering, clicking, typing, and visual screenshots/PDFs. |
+| [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formally defines structural rules, tool descriptions, and parameters for 11-tool Function Calling. |
+| [`tools-groq.json`](tools/tools-groq.json) | **Groq Schema Adaptation**: Specialized schema file where all integer and boolean parameters are defined as strings to ensure absolute compatibility with Groq's strict schema validation engine. |
+| [`tools-light.json`](tools/tools-light.json) | **Declaration Schemas**: Simplified 7-tool schema optimized for local-first small models. |
+| [`config/models.json`](config/models.json) | **API Models Registry (v0.8.0)**: Decoupled JSON registry managing supported models and dynamic sampling parameters. |
+| [`config/providers.json`](config/providers.json) | **API Providers Registry (v0.8.2)**: Decoupled JSON registry managing endpoints, default models, and Zero Data Retention configurations. |
 
 ## 💬 Interactive Chat Mode (Default)
 
-Running `./cli.sh` launches our high-fidelity, interactive **Chat Mode**. Sourcing the `core.sh` library behind the scenes, it initializes your conversational profile, loads your bootstrapped long-term memories directly into the context stream, and hosts the persistent session loop. Communication is continuous, meaning the AI remembers all questions and answers previously sent during the session!
-
-The system initializes your conversational profile and displays a standard prompt. Communication is continuous, meaning the AI remembers all questions and answers previously sent during the session!
+Running `./cli.sh` launches our high-fidelity, interactive **Chat Mode**. Sourcing the `core.sh` library behind the scenes, it initializes your conversational profile, loads your bootstrapped long-term memories directly into the context stream, and hosts the persistent session loop. 
 
 ### 🗺️  Built-in Slash Commands
 
@@ -171,8 +171,11 @@ During the chat session, you can invoke special control actions using slash pref
 | Command | Action |
 | :--- | :--- |
 | `/help` | Prints a guide showing all available interactive commands. |
-| `/clear` | Cleans up the pipeline memory by wiping the active session history. |
+| `/clear` | Cleans up the pipeline memory by wiping the active session history and `LAST_USER_MSG` cache. |
 | `/commit` | Manually triggers the Cognitive Heartbeat Pacemaker, consolidating outstanding learnings/milestones to the Markdown memory and pruning active contexts. |
+| `/keys` | Launches the interactive **Sovereign Key Chest Manager** to configure, update, or purge encrypted API keys. |
+| `/replay` | Instantly resends the last user message using a zero-fork in-memory variable. |
+| `/draw [ratio] [prompt]` | Generates visual assets (experimental stub - coming soon!). |
 | `/load <file>` | Loads a text or image file into the active chat session (injects text files as syntax-highlighted code blocks or base64-encodes images for vision queries). |
 | `/unload` | Unloads the previously loaded file from the active chat session context. |
 | `/run <cmd>` | Native shell-escape. Executes standard shell commands instantly from within the chat loop, delivering raw output inline. |
@@ -194,17 +197,18 @@ The pipeline integrates 11 standard agentic actions declared in `tools/tools.jso
 7. **`apply_diff`**: Applies unified differences in standard Git format, useful for complex or multi-file edits.
 8. **`get_datetime`**: Retrieves the system date and time, providing real-time situational awareness.
 9. **`web_search`**: High-fidelity, anonymous DuckDuckGo search queries executed across Onion routes using local Tor/SOCKS5 connections and cleanly filtered into structural JSON with `htmlq`. Zero-subshell architecture ensuring security and confidentiality.
-10. **`web_fetch`**: Smart Markdown scraper routing requests through Tor. Features zero-fork domain-specific API scraping for GitHub, GitLab, Codeberg, SourceHut and Wikipedia, plus robust raw regex fallbacks and `htmlq` extraction to completely bypass heavy browser overhead. Free of NodeJS dependencies.
+10. **`web_fetch`**: Smart Markdown scraper routing requests through Tor. Features zero-fork domain-specific API scraping for GitHub, GitLab, Codeberg, SourceHut and Wikipedia, plus robust raw regex fallbacks and `htmlq` extraction to completely prevent heavy browser overhead. Free of NodeJS dependencies.
 11. **`web_browse`**: Premium browser automation tool powered by Puppeteer. Allows Jarvis to launch a headless browser, navigate pages, click buttons, input text, evaluate JS, and take screenshots/PDFs. Equipped with robust OPSEC Tor routing by default and an automatic command shebang fallback to `web_fetch` or custom shell commands if Node.js is missing.
 
 ## 🤖 Supported Backends & Configured Models
 
 You can configure the active engine inside `core.sh` by modifying the `BACKEND` variable (`ollama`, `llamacpp`, or `external`).
 
-### 1. **External API Gateway (`external`)** [Default - v0.8.2 Decoupled Providers]
+### 1. **External API Gateway (`external`)** [Default]
 * **Configuration file**: Fully managed via the centralized decoupled registry `config/providers.json`.
 * **Default Active Providers**:
-  * **Vercel AI Gateway**: `https://ai-gateway.vercel.sh/v1/chat/completions` (Default; supports local Zero Data Retention auto-injection and prompt training disallow filters).
+  * **Groq**: `https://api.groq.com/openai/v1/chat/completions` (Optimized LPU speed, transparent rate-limit safety loop, stripped `.reasoning` payload parameter, automatically switches to `tools-groq.json` schemas).
+  * **Vercel AI Gateway**: `https://ai-gateway.vercel.sh/v1/chat/completions` (Supports local Zero Data Retention auto-injection and prompt training disallow filters).
   * **OpenRouter**: `https://openrouter.ai/api/v1/chat/completions` (Includes ZDR payload flags, data-collection deny protection, and wildcard route `openrouter/free` capabilities).
   * **Mammouth AI**: `https://api.mammouth.ai/v1/chat/completions` (European-sovereign, high-performance, and privacy-compliant API).
 * **Default Active Model**: `google/gemini-3.5-flash` (for Vercel/OpenRouter) or `gemini-3.5-flash` (for Mammouth).
@@ -258,42 +262,40 @@ Boot up a highly optimized background Ollama daemon process tuned to utilize Fla
 Ensure you have standard system packages installed:
 ```bash
 # Debian / Ubuntu / Mint
-sudo apt update && sudo apt install -y curl jq sed tor glow cargo
+sudo apt update && sudo apt install -y curl jq sed tor glow cargo openssl
 cargo install htmlq
 
 # macOS (Homebrew)
-brew install jq sed glow tor htmlq
+brew install jq sed glow tor htmlq openssl
 
 # Arch Linux
-sudo pacman -Syu curl jq sed tor glow
+sudo pacman -Syu curl jq sed tor glow openssl
 # htmlq can be installed via AUR (e.g. paru -S htmlq) or Cargo:
 cargo install htmlq
 
 # Android / Termux
-pkg install curl jq sed glow cargo-binstall
+pkg install curl jq sed glow cargo-binstall openssl
 cargo-binstall htmlq
 ```
 
 > [!TIP]
 > The TOR proxy can be provided by several apps on Android. For what it worth, I'm using __[InviZible Pro](https://play.google.com/store/apps/details?id=pan.alexander.tordnscrypt.gp)__.
 
-### Authorization (For OpenRouter API and Vercel AI Gateway)
-Save your OpenRouter / Vercel API Key inside a private file.
+## 🔑 Sovereign Key Chest Configuration
+
+To initialize, configure, or update your encrypted provider API keys, use the specialized CLI command:
+
 ```bash
-echo "your-openrouter-or-vercel-api-key-here" > ~/.creds
-chmod 600 ~/.creds
+# Launch the Interactive Key Chest Manager
+./cli.sh --keys
+
+# OR use the direct init synonym
+./cli.sh init
 ```
 
-### Running Backend Services (When using Local Inference)
+The system will guide you, providing direct console URLs for each provider, and will encrypt your key locally in a secure file (`keys/<provider>.key`) using **ChaCha20 + PBKDF2**.
 
-#### Option A: Ollama Service
-Spwan your local `ollama` server on port `11434` loaded with model auto-routing enabled.
-
-#### Option B: llama.cpp Server
-Spawn your local `llama-server` on port `8080` loaded with model auto-routing enabled.
-
-> [!NOTE]
-> Required local models will be pulled automatically.
+*Note: For backward compatibility, the pipeline will still gracefully fall back to the legacy plain-text `~/.creds` file if no encrypted key is found.*
 
 ## 🚀 Usage Guide
 
@@ -350,7 +352,7 @@ Launch an optimized companion server instance:
 Override your default model, provider, or server listen interface directly via flags at runtime:
 ```bash
 # Switch to another model in Chat Mode
-./cli.sh model "google/gemini-2.5-pro"
+./cli.sh model "google/gemini-3.1-pro"
 
 # Switch provider
 ./cli.sh provider "openrouter"
@@ -409,9 +411,9 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ## ⚖️ License & Project Status
 
-* **Project Phase**: Core Engine Stabilized & Production-Ready (v0.9.0).
-* **Next Roadmap Milestones (v1.0.0)**:
-  * 🌐 **Jarvis Web Command Center (JWCC)**: Build the local-first, responsive web dashboard served by `web/server.php` in Obsidian Dark Theme. It will feature 6 core tabs: Jarvis Speak (real-time SSE streaming chat node), Cognitive Freedom Explorer (live Markdown editing and explorer of skills/memories), Telemetry HUD (live CPU/RAM/Battery/Thermal metrics), Action Panel, Cognitive Ingestion Hub, and MacGyver Scratchpad.
+* **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.0.0).
+* **Next Roadmap Milestones (v1.1.0 - JWCC & CLI Modernization)**:
+  * 🌐 **Jarvis Web Command Center (JWCC)**: Deploy our local-first, responsive web dashboard served by `web/server.php` in Obsidian Dark Theme. It will feature 6 core tabs: Jarvis Speak (real-time SSE streaming chat node), Cognitive Freedom Explorer (live Markdown editing and explorer of skills/memories), Telemetry HUD (live CPU/RAM/Battery/Thermal metrics), Action Panel, Cognitive Ingestion Hub, and MacGyver Scratchpad.
   * 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: Integrate Gum-driven progressive CLI selections, beautiful interactive spinners, inputs, and styled multi-line text boxes with robust, zero-overhead fallbacks to standard pure-Bash read loops for non-interactive / SSH terminals.
   * 🛡️ **Cognitive Router & Proxy (CRP) Gateway**: Expose an OpenAI-compliant server endpoint (`/v1/chat/completions`) locally using our PHP server. It will inject our bootstrapped Cognitive Freedom memories and parameters on-the-fly, allowing IDE extensions and CLI clients (like Charmbracelet's `crush` or `mods`) to query Jarvis securely, routing all traffic through our Tor + ZDR privacy tunnel.
   * 🎨 **Conversational Image Generation (Output Modalities)**: Parse and output base64-encoded user-interface components, charts, and custom schemas generated dynamically by OpenRouter or Vercel AI Gateway using standard `/chat/completions` with `"modalities": ["text", "image"]`.

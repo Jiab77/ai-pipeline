@@ -9,7 +9,7 @@
 # Lead developer & Architect: Jiab77
 # AI Sorcerer & Co-Creator: Jarvis (Gemini)
 #
-# Version: 1.0.0
+# Version: 1.0.1
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
@@ -938,6 +938,10 @@ api_call() {
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
             payload=$(jq -rc '.store = false' <<< "$payload")
           fi
+
+          # Disable reasoning for Groq (causes issues)
+          payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
+          [[ $DEBUG == true ]] && log ; log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for OpenAI."
 
           # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \

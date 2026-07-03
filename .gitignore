@@ -6,6 +6,7 @@ data*/
 models/
 keys/
 tools/web-browse/tests/
+providers.biollm.json
 core.conf
 tools.log
 web-fetch.log

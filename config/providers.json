@@ -1,5 +1,14 @@
 {
+  "cyberneurova": {
+    "name": "CyberNeurova",
+    "url": "https://api.cyberneurova.ai/v1/chat/completions",
+    "default": {
+      "model": "cyberneurova-qwen",
+      "zdr": false
+    }
+  },
   "groq": {
+    "name": "Groq",
     "url": "https://api.groq.com/openai/v1/chat/completions",
     "default": {
       "model": "openai/gpt-oss-120b",
@@ -7,6 +16,7 @@
     }
   },
   "mammouth": {
+    "name": "Mammouth AI",
     "url": "https://api.mammouth.ai/v1/chat/completions",
     "default": {
       "model": "gemini-3.5-flash",
@@ -14,6 +24,7 @@
     }
   },
   "openai": {
+    "name": "OpenAI",
     "url": "https://api.openai.com/v1/chat/completions",
     "default": {
       "model": "gpt-5.4",
@@ -21,13 +32,15 @@
     }
   },
   "openrouter": {
+    "name": "OpenRouter",
     "url": "https://openrouter.ai/api/v1/chat/completions",
     "default": {
       "model": "google/gemini-3.5-flash",
       "zdr": false
     }
   },
-  "openrouter-free": {
+  "openrouter_free": {
+    "name": "OpenRouter (Free)",
     "url": "https://openrouter.ai/api/v1/chat/completions",
     "default": {
       "model": "openrouter/free",
@@ -35,6 +48,7 @@
     }
   },
   "vercel": {
+    "name": "Vercel AI Gateway",
     "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
     "default": {
       "model": "google/gemini-3.5-flash",

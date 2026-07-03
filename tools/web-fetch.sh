@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
+#
 # ==============================================================================
-# SMART WEB_FETCH ENGINE (Pure Bash + API Integration + Robust Fallback)
+# web-fetch.sh — Smart Web Crawler & Static Parser Engine
 # ==============================================================================
+# Domain-specific web crawler targeting public APIs (GitHub, GitLab, Codeberg,
+# Wikipedia) for 100% fidelity, with fallback to HTML parsing. Zero-Node.
 #
-# A smart, ultra-optimized web content fetcher that targets specific public
-# APIs (GitHub, GitLab, CodeBerg, SourceHut, Wikipedia) for 100% fidelity,
-# and falls back to a clean HTML parser using curl & htmlq, or JS headless
-# browser proxy.
+# Lead Developer & Architect : Jiab77
+# AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Created by Jarvis & Jiab77
-#
-# Version: 0.2.0
+# Version: 0.2.1
 # ==============================================================================
 
 # Options
+[[ "${DEBUG:-}" == "true" ]] && set -x
+[[ -e $HOME/.debug ]] && set -x
 set -o pipefail
 
 # Config
@@ -107,11 +108,11 @@ handle_github() {
     local file_path="${BASH_REMATCH[5]}"
 
     log "GitHub Blob: owner=$owner repo=$repo branch=$branch file=$file_path"
-    
+
     # Try fetching raw content directly
     local raw_url="https://raw.githubusercontent.com/$owner/$repo/$branch/$file_path"
     local raw_content
-    
+
     if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
       # Detect code extension for markdown formatting
       local ext="${file_path##*.}"
@@ -146,14 +147,14 @@ handle_github() {
       echo ""
       echo "| Name | Type | Size | Download Link |"
       echo "| --- | --- | --- | --- |"
-      
+
       while read -r row; do
         local name type size download_url
         name=$(jq -rc '.name' <<< "$row")
         type=$(jq -rc '.type' <<< "$row")
         size=$(jq -rc '.size' <<< "$row")
         download_url=$(jq -rc '.download_url' <<< "$row")
-        
+
         # Human readable size
         local size_str="${size} B"
         if [[ $size -gt 1048576 ]]; then
@@ -161,7 +162,7 @@ handle_github() {
         elif [[ $size -gt 1024 ]]; then
           size_str="$(echo "scale=2; $size / 1024" | bc) KB"
         fi
-        
+
         if [[ $type == dir ]]; then
           echo "| 📁 $name | \`$type\` | - | - |"
         else
@@ -280,7 +281,7 @@ handle_gitlab() {
     local raw_project_path="${BASH_REMATCH[1]}"
     local branch="${BASH_REMATCH[2]}"
     local file_path="${BASH_REMATCH[3]}"
-    
+
     local project_path="${raw_project_path#*://*/}"
     local owner="${project_path%/*}"
     local repo="${project_path##*/}"
@@ -307,7 +308,7 @@ handle_gitlab() {
     local raw_project_path="${BASH_REMATCH[1]}"
     local branch="${BASH_REMATCH[2]}"
     local file_path="${BASH_REMATCH[3]}"
-    
+
     local project_path="${raw_project_path#*://*/}"
     local owner="${project_path%/*}"
     local repo="${project_path##*/}"
@@ -336,7 +337,7 @@ handle_gitlab() {
     local raw_project_path="${BASH_REMATCH[1]}"
     local branch="${BASH_REMATCH[2]}"
     local dir_path="${BASH_REMATCH[4]}"
-    
+
     local project_path="${raw_project_path#*://*/}"
     local owner="${project_path%/*}"
     local repo="${project_path##*/}"
@@ -381,7 +382,7 @@ handle_gitlab() {
     log "GitLab Repo Home: owner=$owner repo=$repo"
 
     local api_url="https://gitlab.com/api/v4/projects/$encoded_project"
-    
+
     local meta_json
     if ! meta_json=$(curl "${CURL_OPTS[@]}" "$api_url"); then
       echo "Error: Could not retrieve GitLab project metadata from $api_url" >&2
@@ -441,7 +442,7 @@ handle_codeberg() {
     local file_path="${BASH_REMATCH[6]}"
 
     log "Codeberg Raw: owner=$owner repo=$repo ref_type=$ref_type ref=$ref file=$file_path"
-    
+
     local raw_content
     if raw_content=$(curl "${CURL_OPTS[@]}" "$url"); then
       local ext="${file_path##*.}"
@@ -793,7 +794,7 @@ handle_sourcehut() {
       title=$(htmlq "title" --text <<< "$html_data" | xargs)
       def_branch=$(htmlq 'meta[name="vcs:default-branch"]' --attribute content <<< "$html_data" 2>/dev/null | head -n 1)
       [[ -z $def_branch ]] && def_branch="master"
-      
+
       clone_url=$(htmlq 'meta[name="vcs:clone"]' --attribute content <<< "$html_data" 2>/dev/null | head -n 1)
 
       echo "# 🌌 SourceHut: $title"
@@ -874,7 +875,7 @@ handle_wikipedia() {
   if [[ $url =~ ^https?://([a-z0-9-]+)\.wikipedia\.org/wiki/([^?#]+) ]]; then
     local lang="${BASH_REMATCH[1]}"
     local title_encoded="${BASH_REMATCH[2]}"
-    
+
     log "Wikipedia: lang=$lang title_encoded=$title_encoded"
 
     # Query Wikipedia REST API / api.php

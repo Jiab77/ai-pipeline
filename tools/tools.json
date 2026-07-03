@@ -265,8 +265,8 @@
           },
           "proxy": {
             "type": "string",
-            "description": "Optional proxy URL (e.g. '127.0.0.1:9080' for Tor HTTP, or 'socks5://127.0.0.1:9050'). Set to null or false to connect directly.",
-            "default": "127.0.0.1:9080"
+            "description": "Optional proxy URL (e.g. 'socks5://127.0.0.1:9050'). Set to null or false to connect directly.",
+            "default": "socks5://127.0.0.1:9050"
           },
           "headless": {
             "type": "boolean",

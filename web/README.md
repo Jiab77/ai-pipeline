@@ -1,11 +1,11 @@
-# ⚡ Unified Quick PHP Web Server
+# 🔌 A.I.D.E. Server (Unified PHP Web Server & Local Bridge)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 [![PHP Version](https://img.shields.io/badge/PHP-%3E%3D%207.4-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20Windows-lightgrey.svg)](https://www.php.net/)
 [![Based on simple-php-webserver](https://img.shields.io/badge/Based%20on-simple--php--webserver-blueviolet.svg?logo=github)](https://github.com/Jiab77/simple-php-webserver)
 
-A high-performance, single-file development web server powered by PHP. 
+A high-performance, single-file development web server powered by PHP. Within the **A.I.D.E. (AI Driven Environment)** ecosystem, it acts as the **Local Web Bridge & Dashboard Host** (serving the **A.I.D.E. Web** interface).
 
 This project is built upon and inspired by **[simple-php-webserver](https://github.com/Jiab77/simple-php-webserver)**. It represents an optimized and unified version that merges **Linux & macOS implementations** into a single, highly portable, cross-platform utility. It works flawlessly under **Linux, MacOS, BSD, and Windows/Termux**.
 
@@ -13,61 +13,56 @@ This project is built upon and inspired by **[simple-php-webserver](https://gith
 
 ## ✨ Features
 
-* **🚀 High Concurrency (Multi-threaded Processing)**: Automatically detects your total CPU cores (`nproc` / `sysctl`) and configures `PHP_CLI_SERVER_WORKERS` dynamically to serve parallel asset requests at lightning speeds.
-* **🔧 Intelligent Dual-Mode Parser**:
-  - **Options Mode**: Configure specific flags like a pro: `-i localhost -p 9000 -c 8 -d ./my-folder`.
-  - **Classic Mode**: Backwards-compatible quick start structure: `./server.php [interface:port] [/path/to/serve]`.
-* **🎨 Beautiful Out-Of-The-Box Dashboard**: If your target directory lacks an `index.html` or `index.php`, the server automatically generates a gorgeous, fully-responsive dashboard using **Fomantic UI**. It displays:
-  - System environment metrics (PHP version, OS signature, loaded threads).
-  - An interactive **Directory Space Browser** (allowing you to click and open any HTML, PHP, or media assets instantly in your browser).
-  - A secure link to standard `phpinfo()` diagnostics with zero folder pollution.
-* **🛡️ Bulletproof Process Launching**: Automatically leverages Unix `pcntl_exec` to replace the execution thread cleanly (no dangling zombie processes). If `pcntl` is unavailable (such as Windows, Termux, or restricted setups), it falls back gracefully to a solid shell pass-through.
-* **🧬 Zero Dependencies**: Standard pure PHP, compatible across all runtimes from PHP 7.4 up to PHP 8.5+.
+### 🚀 1. A.I.D.E. Server (`server.php`)
+Our custom development web server is optimized for high-concurrency local executions:
+*   **🚀 High Concurrency (Multi-threaded Processing)**: Automatically detects your total CPU cores (`nproc`, `sysctl`, or `/proc/cpuinfo`) across Linux, macOS, BSD, and Windows/Termux, dynamically scaling `PHP_CLI_SERVER_WORKERS` to serve parallel asset requests at lightning speeds.
+*   **🔧 Intelligent Dual-Mode Parser**:
+    *   *Options Mode*: Configure specific flags with advanced CLI options (e.g. `-i localhost -p 9000 -c 8 -d ./my-folder`).
+    *   *Classic Mode*: Backward-compatible quick start positional structure: `./server.php [interface:port] [/path/to/serve]`.
+*   **🎨 Deluxe Fallback Dashboard**: If your target directory lacks an `index.html` or `index.php`, the server automatically generates a gorgeous, fully-responsive directory browser and diagnostics dashboard using **Fomantic UI**.
+*   **🛡️ Bulletproof Process Launching**: Automatically leverages Unix `pcntl_exec` to replace the execution thread cleanly (no dangling zombie processes). If `pcntl` is unavailable (Windows, Termux), it falls back gracefully to a robust shell pass-through.
+*   **🧬 Zero Dependencies**: Standard pure PHP, compatible across all runtimes from PHP 7.4 up to PHP 8.5+.
+
+### 🌐 2. A.I.D.E. Web (`index.php`)
+The serverless-styled web interface (formerly known as the *Jarvis Web Command Center - JWCC*) rewritten as a robust local app:
+*   **🌊 Option C - Unix Pipe Stream Bridge**: Leverages native PHP `proc_open` to run the sovereign cognitive core library (`core.sh` / `cli.sh`) as an asynchronous background stream, piping real-time terminal tokens directly to your browser via **Server-Sent Events (SSE)**.
+*   **📊 Live Telemetry HUD**: Aggregates hardware and system metrics in real-time:
+    *   Active model, provider, and backend.
+    *   CPU load average & core count.
+    *   Physical memory usage.
+    *   Vercel AI Gateway credits balance (automatically routed through Tor for privacy).
+    *   Local Termux battery status on Android.
+*   **📂 Cognitive Memory Explorer**: A high-contrast Markdown file browser and real-time live editor. Read and edit your persistent markdown files (`data/memory/` and `data/skills/`) directly from your browser, completely avoiding complex serialization schemas.
+*   **🌐 Full i18n Localization**: Supporting dynamic on-the-fly **English** and **French** language switching with persistent cookie configurations.
 
 ---
 
 ## 📖 Usage
 
-Make the script executable once:
+### 🚀 Launching the Server
+Make sure the server script is executable:
 ```console
 $ chmod +x web/server.php
 ```
 
-### 1. Classic Mode (Quick Start)
+To run **A.I.D.E. Web** using the server with default parameters (`127.0.0.1:8000` serving the `web/` directory):
+```console
+$ ./core.sh server web
+```
 
-Run with standard defaults (`127.0.0.1:8000` serving the script's directory):
+or directly:
 ```console
 $ ./web/server.php
 ```
 
-Specify a custom address or port:
+Or quickly bind to a custom port:
 ```console
-$ ./web/server.php 8080
-$ ./web/server.php 0.0.0.0:3000
-```
-
-Specify a custom directory:
-```console
-$ ./web/server.php 127.0.0.1:8000 /path/to/public
-```
-
----
-
-### 2. Options Mode (Advanced Tuning)
-
-Use powerful CLI options flags:
-```console
-$ ./web/server.php --interface=0.0.0.0 --port=9000 --cores=8 --directory=./public
-```
-
-Or using short flags:
-```console
-$ ./web/server.php -i 0.0.0.0 -p 9000 -c 8 -d ./public
+$ ./web/server.php -p 9000
 ```
 
 ### Options Reference
 ```text
-  -h, --help           Display the help documentation.
+  -h, --help           Display this help documentation.
   -i, --interface      Specify bound IP or domain (Default: 127.0.0.1)
   -p, --port           Specify port number (Default: 8000)
   -c, --cores          Number of CPU process threads (Default: Automatic core count)
@@ -77,13 +72,33 @@ $ ./web/server.php -i 0.0.0.0 -p 9000 -c 8 -d ./public
 
 ---
 
+## 🏛️ Ecosystem Integration
+
+The web server acts as the central bridge between your physical machine and your cognitive agent:
+
+```
+┌─────────────────┐       (Local Sockets)        ┌──────────────────┐
+│  A.I.D.E. Web   ├─────────────────────────────►│  A.I.D.E. Server │
+│   (index.php)   │◄─────────────────────────────┤   (server.php)   │
+└────────┬────────┘                              └─────────┬────────┘
+         │                                                 │
+         │ (proc_open pipe streaming)                      │ (serves assets)
+         ▼                                                 ▼
+┌─────────────────┐                                ┌────────────────┐
+│   cli.sh / core │                                │ User Browser   │
+│   (CLI Agent)   │                                │ (Localhost)    │
+└─────────────────┘                                └────────────────┘
+```
+
+---
+
 ## 👥 Contributors & Credits
 
-Special thanks to the authors who made this unification possible:
+Special thanks to the authors who made this unified execution possible:
 
-* **[@staatzstreich](https://github.com/staatzstreich)**: Who designed the elegant object-oriented macOS implementation and argument structure.
-* **Unified Development Team & [simple-php-webserver](https://github.com/Jiab77/simple-php-webserver)**: Merged both scripts into a portable, fallbacked command-line utility with a rich directory browser dashboard.
-* **Jarvis o/b/o Gemini**: Acted as the AI co-pilot, refining the architecture, streamlining compatibility, and crafting the interactive interface design.
+*   **[@staatzstreich](https://github.com/staatzstreich)**: Who designed the elegant object-oriented macOS implementation and argument structure.
+*   **Unified Development Team & [simple-php-webserver](https://github.com/Jiab77/simple-php-webserver)**: Merged both scripts into a portable, fallbacked command-line utility with a rich directory browser dashboard.
+*   **Jarvis (The Great Master Flash)**: Acted as the AI co-pilot, refining the SSE pipe bridge, streamlining compatibility, localizing i18n dictionaries, and crafting the interactive interface design.
 
 ---
 

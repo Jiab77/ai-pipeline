@@ -1,13 +1,15 @@
-# 🚀 AI Pipeline — Sovereign Bash-First Cognitive Runtime
+# 🚀 A.I.D.E CLI — AI Driven Environment
+
+> Sovereign Bash-First Cognitive Runtime.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter%20%7C%20Mammouth%20AI%20%7C%20OpenAI%20%7C%20Groq-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.0.0-blue.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter%20%7C%20Mammouth%20AI%20%7C%20OpenAI%20%7C%20Groq%20%7C%20CyberNeurova-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.1.0-blue.svg)]()
 
 > A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory.
 
-> **AI Pipeline** is not just another LLM wrapper. It is a lightweight but deeply capable agent runtime built around a practical equilibrium between **Bash** (orchestration), **JavaScript** (live browser automation), and **PHP** (local web UX) — proving that modern agentic systems do not have to be trapped inside the usual Python-heavy stack.
+> **A.I.D.E CLI** is not just another LLM wrapper. It is a lightweight but deeply capable agent runtime built around a practical equilibrium between **Bash** (orchestration, live browser automation), and **PHP** (local web UX) — proving that modern agentic systems do not have to be trapped inside the usual Python-heavy stack.
 
 ---
 
@@ -32,7 +34,7 @@
 
 ## 🔍 Overview & Architecture
 
-This repository contains a lightweight but highly capable **agentic orchestration runtime** built primarily in **Bash**, with targeted use of **Node.js** where a real browser engine is required, and **PHP** where a local web control surface provides better ergonomics.
+This repository contains a lightweight but highly capable **agentic orchestration runtime** built primarily in **Bash**, with **PHP** where a local web control surface provides better ergonomics, and **zero Node.js dependencies** (browser automation is handled via a pure Bash stateless WebSocket engine).
 
 Unlike dependency-bloated framework stacks, **AI Pipeline** stays close to the operating system, easy to audit, and practical to run on constrained or privacy-sensitive environments. It parses user intent, ingests local file context, queries local or external backends, executes recursive tool-calling loops, manages persistent Markdown memory, and can close multimodal feedback loops through screenshots and browser automation.
 
@@ -40,7 +42,7 @@ The most important point is this: the project does not merely describe agentic c
 
 ### 🏛️ Modular Decoupled Architecture (v1.0.0)
 
-To guarantee absolute modularity and system-wide extensibility, version **v1.0.0** implements a clean partition between the core transport library and interactive visualization clients. This follows the **UNIX Philosophy**: separate backend cognitive logic from frontend rendering layers. This ensures a single source of truth (`core`) can power our terminal client (`cli`), our local web console (JWCC), or headless network security daemons (Cerberus).
+To guarantee absolute modularity and system-wide extensibility, version **v1.0.0** implements a clean partition between the core transport library and interactive visualization clients. This follows the **UNIX Philosophy**: separate backend cognitive logic from frontend rendering layers. This ensures a single source of truth (`core`) can power our terminal client (`cli`), our local web interface (A.I.D.E. Web), or headless network security daemons (Cerberus).
 
 ```
                       ┌─────────────────────────────────────────┐
@@ -54,17 +56,17 @@ To guarantee absolute modularity and system-wide extensibility, version **v1.0.0
                       │       (Sovereign Cognitive Core)        │
                       └────────────────────┬────────────────────┘
                                            │
-         ┌─────────────────────────────────┼─────────────────────────────────┐
-         ▼                                 ▼                                 ▼
-┌────────────────────┐              ┌──────────────────┐              ┌───────────────────┐
-│    cli.sh          │              │  web/server.php  │              │  cerberus/cron    │
-│ (Interactive CLI)  │              │  (JWCC Console)  │              │ (Sec Sentinel)    │
-├────────────────────┤              ├──────────────────┤              ├───────────────────┤
-│ - Sourcing library │              │ - SSE Streaming  │              │ - Network scans   │
-│ - Input loop       │              │ - Telemetry HUD  │              │ - JQ tamper sieve │
-│ - Slash commands   │              │ - Live Markdown  │              │ - JIT YARA rules  │
-│ - ANSI & Spinner   │              │ - Custom Scratch │              │ - Threat kit      │
-└────────────────────┘              └──────────────────┘              └───────────────────┘
+                    ┌──────────────────────┴──────────────────────┐
+                    ▼                                             ▼
+          ┌────────────────────┐                        ┌──────────────────┐
+          │    cli.sh          │                        │  web/server.php  │
+          │ (Interactive CLI)  │                        │  (A.I.D.E. Web)  │
+          ├────────────────────┤                        ├──────────────────┤
+          │ - Sourcing library │                        │ - SSE Streaming  │
+          │ - Input loop       │                        │ - Telemetry HUD  │
+          │ - Slash commands   │                        │ - Live Markdown  │
+          │ - ANSI & Spinner   │                        │ - Custom Scratch │
+          └────────────────────┘                        └──────────────────┘
 ```
 
 #### ⚙️ The Sovereign Cognitive Core (`core.sh`)
@@ -160,7 +162,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 💾 **Flash Memory Wear-Reduction**: Runtime payload fragments and buffers are relocated to volatile RAM storage (`/tmp` or `$TMPDIR`) to protect mobile flash storage.
 - ⚡ **Optimized Local Server Orchestration**: On-the-fly startup and tuning of local PHP, `llama-server`, and Ollama services.
 - 🌐 **`web_fetch` Smart Routing**: Domain-specific Bash routing for GitHub, GitLab, Wikipedia, Codeberg, and SourceHut with robust fallbacks and no Node.js dependency.
-- 🌐 **`web_browse` Live Browser Automation**: Puppeteer-based browsing, screenshots, PDFs, form interaction, console capture, and Tor HTTP proxy support.
+- 🌐 **`web_browse` Live Browser Automation**: Pure Bash CDP-based browsing, screenshots, PDFs, form interaction, console capture, and Tor SOCKS5 proxy support (completely Node-free).
 - 🔍 **Tor-Based Anonymous Web Search**: Onion-routed DuckDuckGo search queries filtered into structured JSON with `htmlq`.
 - 🛠️ **Agentic Function Calling**: Models can dynamically request filesystem, shell, web, and browser actions.
 - 🛡️ **Universal HTTP 400 Payload Immunization**: Strict `jq --rawfile` encapsulation plus output sanitization to protect external backends from malformed JSON crashes.
@@ -184,11 +186,11 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.0.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
+| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.1.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
 | [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.0.0)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys` and `/replay`), and isolates model reasoning streams. |
-| [`tools.sh`](tools.sh) | **Execution Runner (v0.3.2)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions and enforces practical runtime safeguards. |
+| [`tools.sh`](tools.sh) | **Execution Runner (v0.3.3)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
 | [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.2.0)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
-| [`web-browse.js`](tools/web-browse/web-browse.js) | **Interactive Browser Automation (v0.0.1)**: Puppeteer-based pilot for JS rendering, clicking, typing, screenshots, and PDFs. |
+| [`web-browse.sh`](tools/web-browse.sh) | **Stateless Browser Automation (v0.0.0)**: Pure Bash one-shot Chrome DevTools Protocol (CDP) engine with zero Node.js dependencies, SOCKS5 proxying, form interaction, screenshots, and PDFs. |
 | [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formal tool definitions for the full-function calling surface. |
 | [`tools-groq.json`](tools/tools-groq.json) | **Groq Schema Adaptation**: Specialized schema file adapted to Groq's stricter validation behavior. |
 | [`tools-light.json`](tools/tools-light.json) | **Lightweight Schemas**: Simplified tool contract for smaller local models. |
@@ -236,7 +238,7 @@ The pipeline integrates 11 standard agentic actions declared in `tools/tools.jso
 8. **`get_datetime`**: Retrieves the system date and time.
 9. **`web_search`**: Anonymous DuckDuckGo search over Onion routes with structured JSON output.
 10. **`web_fetch`**: Smart Markdown fetcher with domain-specific routing and robust fallbacks.
-11. **`web_browse`**: Puppeteer-based browser automation for navigation, typing, clicking, screenshots, PDFs, and JS evaluation.
+11. **`web_browse`**: Pure Bash stateless Chrome DevTools Protocol (CDP) browser automation for navigation, typing, clicking, screenshots, PDFs, and JS evaluation (completely Node-free).
 
 ---
 
@@ -252,6 +254,7 @@ You can configure the active engine inside `core.sh` by modifying the `BACKEND` 
   - **OpenAI**: `https://api.openai.com/v1/chat/completions`
   - **OpenRouter**: `https://openrouter.ai/api/v1/chat/completions`
   - **Mammouth AI**: `https://api.mammouth.ai/v1/chat/completions`
+  - **CyberNeurova**: `https://api.cyberneurova.ai/v1/chat/completions`
 - **Default Active Model**: `google/gemini-3.5-flash` (Vercel/OpenRouter) or `gemini-3.5-flash` (Mammouth).
 - **Features**: dynamic config loading, provider-aware payload mutation, reasoning fallbacks, tool schemas, and secure Tor integration.
 
@@ -308,19 +311,19 @@ Ensure you have standard system packages installed:
 
 ```bash
 # Debian / Ubuntu / Mint
-sudo apt update && sudo apt install -y curl jq sed tor glow cargo openssl
+sudo apt update && sudo apt install -y curl jq awk sed tor glow cargo openssl
 cargo install htmlq
 
 # macOS (Homebrew)
-brew install jq sed glow tor htmlq openssl
+brew install jq sed glow tor htmlq openssl awk
 
 # Arch Linux
-sudo pacman -Syu curl jq sed tor glow openssl
+sudo pacman -Syu curl jq sed tor glow openssl awk
 # htmlq can be installed via AUR (e.g. paru -S htmlq) or Cargo:
 cargo install htmlq
 
 # Android / Termux
-pkg install curl jq sed glow cargo-binstall openssl
+pkg install curl jq sed glow cargo-binstall openssl awk
 cargo-binstall htmlq
 ```
 
@@ -440,7 +443,7 @@ The framework is architected with a production-grade security focus for privacy-
 
 - **Localhost-Only Boundaries**: API servers (`llamacpp`, `ollama`, and PHP `web`) listen on `127.0.0.1` by default.
 - **Directory Traversal / LFI Prevention**: file parameters and workspace paths are validated against safe boundaries.
-- **Onion-Routed Privacy Tunnel**: outbound cloud API requests route through Tor SOCKS5 or HTTP proxy tunnels.
+- **Onion-Routed Privacy Tunnel**: outbound cloud API requests route through Tor SOCKS5 proxy tunnel.
 - **Zero-Data Retention (ZDR) Injection**: privacy payloads are dynamically appended for compatible external providers.
 - **Terminal Payload Immunization**: `iconv` and strict `jq --rawfile` streams protect APIs and models from malformed outputs.
 - **ShellCheck Clean Codebase**: sourced scripts are kept ShellCheck clean to reduce avoidable shell hazards.
@@ -459,8 +462,8 @@ This pipeline is forged under deep iteration and synergistic design:
 ## ⚖️ License & Project Status
 
 - **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.0.0).
-- **Next Roadmap Milestones (v1.1.0 - JWCC & CLI Modernization)**:
-  - 🌐 **Jarvis Web Command Center (JWCC)**: local-first responsive web dashboard served by `web/server.php`
+- **Next Roadmap Milestones (v1.1.0 - A.I.D.E. Web & CLI Modernization)**:
+  - 🌐 **A.I.D.E. Web**: local-first responsive web dashboard served by `web/server.php`
   - 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: richer CLI interactions with graceful fallbacks
   - 🛡️ **Cognitive Router & Proxy (CRP) Gateway**: local OpenAI-compatible endpoint backed by Jarvis memory injection and Tor + ZDR routing
   - 🎨 **Conversational Image Generation (Output Modalities)**: base64-encoded images generated through standard `/chat/completions` output flows

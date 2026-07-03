@@ -3,14 +3,14 @@
 
 /**
  * Unified High-Performance PHP Quick Web Server
- * 
+ *
  * Fuses Linux & MacOS optimization:
  * - Smart cross-platform CPU core detection
  * - High-concurrency worker threading (PHP_CLI_SERVER_WORKERS)
  * - Intelligent dual-mode argument parsing (Options flags & Classic positional args)
  * - Safe process launching (PCNTL with Passthru graceful fallback)
  * - Deluxe responsive directory listing & diagnostics dashboard
- * 
+ *
  * Version: 1.0.1
  */
 
@@ -112,7 +112,7 @@ if ($isHelp) {
     echo " ======================================================================" . PHP_EOL;
     echo "  " . format_color("Usage (Options Mode):   ", "33") . " php " . basename(__FILE__) . " [options]" . PHP_EOL;
     echo "  " . format_color("Usage (Classic Mode):   ", "33") . " php " . basename(__FILE__) . " [interface:port] [/path/to/serve]" . PHP_EOL . PHP_EOL;
-    
+
     echo "  " . format_color("Options:", "32") . PHP_EOL;
     echo "    -h, --help           Display this help documentation." . PHP_EOL;
     echo "    -i, --interface      Specify bound IP or domain (default: 127.0.0.1)" . PHP_EOL;
@@ -153,7 +153,7 @@ if (isset($options['c']) || isset($options['cores'])) {
 // Fallback to classic positional arguments
 if (!empty($positionalArgs)) {
     $arg1 = $positionalArgs[0];
-    
+
     // Check if the argument is host:port
     if (strpos($arg1, ':') !== false) {
         $parts = explode(':', $arg1);
@@ -229,24 +229,24 @@ $files = array_filter(scandir($dir), function($item) {
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>⚡ Local PHP Server Dashboard</title>
-    
+
     <!-- Fomantic UI CSS v2.9.4 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/fomantic-ui/2.9.4/semantic.min.css" integrity="sha512-ySrYzxj+EI1e9xj/kRYqeDL5l1wW0IWY8pzHNTIZ+vc1D3Z14UDNPbwup4yOUmlRemYjgUXsUZ/xvCQU2ThEAw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    
+
     <style>
-        body { 
-            background-color: #0c0e17; 
-            color: #e1e7f0; 
+        body {
+            background-color: #0c0e17;
+            color: #e1e7f0;
             font-family: 'Lato', 'Helvetica Neue', Arial, Helvetica, sans-serif;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
         }
-        
-        .main-container { 
-            margin-top: 4rem; 
-            margin-bottom: 4rem; 
+
+        .main-container {
+            margin-top: 4rem;
+            margin-bottom: 4rem;
         }
 
         /* Ambient Glow & Segment Styling */
@@ -307,8 +307,8 @@ $files = array_filter(scandir($dir), function($item) {
             transition: all 0.2s ease-in-out !important;
         }
 
-        .file-item:hover { 
-            background: rgba(33, 133, 208, 0.12) !important; 
+        .file-item:hover {
+            background: rgba(33, 133, 208, 0.12) !important;
             border-color: rgba(33, 133, 208, 0.3) !important;
             transform: translateX(4px);
         }
@@ -362,7 +362,7 @@ $files = array_filter(scandir($dir), function($item) {
     <div class="ui container main-container">
         <!-- Main Premium Dashboard Card -->
         <div class="ui inverted segment padded premium-card">
-            
+
             <!-- Header Section -->
             <div class="ui grid stackable middle aligned">
                 <div class="eleven wide column">
@@ -390,17 +390,17 @@ $files = array_filter(scandir($dir), function($item) {
             </div>
 
             <div class="neon-divider"></div>
-            
+
             <!-- Main Grid Layout -->
             <div class="ui grid stackable">
                 <div class="row">
-                    
+
                     <!-- Left Panel: Engine profile -->
                     <div class="six wide column" style="border-right: 1px solid rgba(255, 255, 255, 0.08);">
                         <h4 class="ui dividing header inverted teal">
                             <i class="microchip icon"></i> Engine Profile
                         </h4>
-                        
+
                         <table class="ui inverted basic table celled unstackable" style="background: transparent;">
                             <tbody>
                                 <tr>
@@ -433,7 +433,7 @@ $files = array_filter(scandir($dir), function($item) {
                                 </tr>
                             </tbody>
                         </table>
-                        
+
                         <div style="margin-top: 2rem;">
                             <a href="?action=phpinfo" target="_blank" class="ui button fluid inverted blue basic small">
                                 <i class="info circle icon"></i> Inspect Complete phpinfo()
@@ -474,14 +474,14 @@ $files = array_filter(scandir($dir), function($item) {
                         <?php else: ?>
                             <div class="file-list-container">
                                 <div class="ui selection list inverted relaxed middle aligned">
-                                    <?php foreach ($files as $file): 
+                                    <?php foreach ($files as $file):
                                         $isDir = is_dir($dir . '/' . $file);
                                         $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-                                        
+
                                         // Precise mapping for nice premium folder/file colors
                                         $icon = "file outline icon";
                                         $colorClass = "grey";
-                                        
+
                                         if ($isDir) {
                                             $icon = "folder open yellow icon";
                                         } else {
@@ -608,7 +608,7 @@ create_beautiful_index($config->currentPath);
 
 // Console output display
 echo PHP_EOL;
-echo format_color(" ⚡ Self PHP Web Server • v1.0.0 (Unified Edition)", "36;1") . PHP_EOL;
+echo format_color(" ⚡ Self PHP Web Server • v1.0.1 (Unified Edition)", "36;1") . PHP_EOL;
 echo " ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" . PHP_EOL;
 
 if ($config->debug) {

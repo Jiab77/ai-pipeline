@@ -4,6 +4,7 @@ FROM debian:stable-slim
 # Install system dependencies
 RUN apt update && apt install -y --no-install-recommends \
     bash \
+    awk \
     curl \
     jq \
     tor \
@@ -38,11 +39,10 @@ RUN chmod +x core.sh cli.sh tools.sh tools/web-fetch.sh tools/web-browse/web-bro
 
 # Configure Tor to run in the background
 RUN echo "Log notice stdout" >> /etc/tor/torrc && \
-    echo "SocksPort 0.0.0.0:9050" >> /etc/tor/torrc && \
-    echo "HTTPTunnelPort 9080" >> /etc/tor/torrc
+    echo "SocksPort 0.0.0.0:9050" >> /etc/tor/torrc
 
 # Expose PHP server port and Tor ports
-EXPOSE 8080 9050 9080
+EXPOSE 8080 9050
 
 # Default entrypoint starts Tor in the background and launches interactive or pipeline mode
 ENTRYPOINT ["/bin/bash", "-c", "tor & sleep 2 && ./cli.sh \"$@\""]

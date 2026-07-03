@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034,SC2001
+# ==============================================================================
+# core.sh — Sovereign Cognitive & Reasoning Engine (Library)
+# ==============================================================================
+# This script houses the core cognitive logic, configurations, API transports,
+# and parallel tool-calling loops. It acts as our headless sovereign brain.
 #
-# ai-pipeline-core - Sovereign Cognitive and Reasoning Engine
+# Lead Developer & Architect : Jiab77
+# AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# This script houses the core logic, configurations, API transports,
-# and tool orchestration loops of our modular AI pipeline.
-#
-# Lead developer & Architect: Jiab77
-# AI Sorcerer & Co-Creator: Jarvis (Gemini)
-#
-# Version: 1.0.1
+# Version: 1.1.0
+# ==============================================================================
 
 # Options
+[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
+set -o pipefail
 
 # -----------------------------------------------------------------------------
 # Core Configurations & Environment Discovery
@@ -203,12 +206,13 @@ draw_header() {
   local line_char
   local width ; width=$(get_term_width)
   local esc ; esc=$(printf '')
-  local clean_prefix ; clean_prefix=$(echo -e "$prefix" | sed "s/${esc}[[0-9;]*m//g")
+  # local clean_prefix ; clean_prefix=$(echo -e "$prefix" | sed "s/${esc}[[0-9;]*m//g")
+  local clean_prefix ; clean_prefix=$(sed "s/${esc}[[0-9;]*m//g" <<<"$prefix")
   # Measure visual length accurately, substituting emojis/wide chars with 2 chars
   local visual_prefix ; visual_prefix=$(sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g' <<<"$clean_prefix")
   local prefix_len=${#visual_prefix}
   local remaining_width=$((width - prefix_len))
-  [[ $remaining_width -lt 5 ]] && remaining_width=5
+  # [[ $remaining_width -lt 5 ]] && remaining_width=5
   printf -v line_char "%*s" "$remaining_width" ""
   echo -e "${prefix}${line_clr}${line_char// /$char}${ANSI_RESET}"
 }
@@ -327,7 +331,7 @@ interactive_key_setup() {
   log "🌐 Provider  : ${CLR_B_YELLOW}$(to_upper "$provider")${ANSI_RESET}"
   log "👉 Obtain Key : ${CLR_B_CYAN}${url}${ANSI_RESET}"
   log ""
-  
+
   local raw_key
   while [[ -z "$raw_key" ]]; do
     echo -en "🔑 Enter your API Key (input will be masked) ❯ " >&2
@@ -379,32 +383,29 @@ manage_keys() {
       log ""
     ;;
     2)
+      local index=0
+      local total ; total=$(jq -rc '. | keys | length' "$PROVIDERS_CONFIG")
       log "Choose a provider to configure:"
-      log " 1) Groq"
-      log " 2) Mammount AI"
-      log " 3) OpenRouter"
-      log " 4) OpenAI"
-      log " 5) Vercel AI Gateway"
-      log " 6) Custom Provider"
-      log " 7) Exit"
+      for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG"); do
+        ((index++))
+        log " ${index}) $(jq -rc ".${p}.name" "$PROVIDERS_CONFIG")"
+      done
+      log " $((index+1))) Custom Provider"
+      log " $((index+2))) Exit"
       log ""
-      echo -en "👉 Selection [1-7] ❯ " >&2
+      echo -en "👉 Selection [1-$((index+2))] ❯ " >&2
       local prov_choice
       read -r prov_choice
-      local target_provider=""
-      case "$prov_choice" in
-        1) target_provider="groq" ;;
-        2) target_provider="mammouth" ;;
-        3) target_provider="openrouter" ;;
-        4) target_provider="openai" ;;
-        5) target_provider="vercel" ;;
-        6)
-          echo -en "✍️ Enter custom provider name ❯ " >&2
-          read -r target_provider
-          target_provider=$(to_lower "$target_provider")
-        ;;
-        7) return ;;
-      esac
+      local target_provider
+      if [[ $prov_choice -le $total ]]; then
+        target_provider=$(jq -rc ". | keys | .[$((prov_choice-1))]")
+      elif [[ $prov_choice == $((index+1)) ]]; then
+        echo -en "✍️ Enter custom provider name ❯ " >&2
+        read -r target_provider
+        target_provider=$(to_lower "$target_provider")
+      else
+        return
+      fi
       if [[ -n "$target_provider" ]]; then
         interactive_key_setup "$target_provider"
       fi
@@ -447,22 +448,23 @@ error() {
 # Image helpers
 get_image_type() {
   local ext="${1##*.}"
-  if [[ $ext == "jpg" ]]; then
-    echo -n "image/jpeg"
-  else
-    echo -n "image/${ext}"
-  fi
+   case "$ext" in
+     jpg|jpeg) echo -n "image/jpeg" ;;
+     svg)      echo -n "image/svg+xml" ;;
+     *)        echo -n "image/${ext}" ;;
+   esac
 }
 
 is_image_file() {
   local ext="${1##*.}"
-  [[ $ext =~ ^(png|jpg|jpeg|webp|gif)$ ]] && return 0
+  [[ $ext =~ ^(png|jpg|jpeg|webp|gif|svg)$ ]] && return 0
   return 1
 }
 
 # Misc
 is_termux() {
-  [[ $(printenv | grep -ci "termux") -ne 0 ]] && return 0
+  [[ -n "${TERMUX_VERSION:-}" ]] && return 0
+  [[ -d "/data/data/com.termux" ]] && return 0
   return 1
 }
 
@@ -507,12 +509,16 @@ load_config_file() {
 
 get_memory_size() {
   local total_memory
-  if [[ -r /proc/meminfo ]]; then
-    total_memory=$(grep "MemTotal:" /proc/meminfo | awk '{ print $2 }')
-  else
-    total_memory=8388608  # Default 8GB fallback
-  fi
+  local default_memory=8388608  # Default 8GB fallback
+  [[ -r /proc/meminfo ]] && total_memory=$(grep "MemTotal:" /proc/meminfo | awk '{ print $2 }')
+  [[ -z $total_memory || ! $total_memory =~ ^[0-9]+$ ]] && total_memory=$default_memory
   echo -n "$total_memory"
+}
+
+get_all_providers() {
+  local providers ; providers=$(jq -rc '. | keys | @csv' "$PROVIDERS_CONFIG")
+  providers="${providers//\"/}" ; providers="${providers//,/, }"
+  echo -n "$providers"
 }
 
 get_chat_model() {
@@ -546,9 +552,8 @@ get_vision_model() {
     llamacpp) vision_model="${LLAMACPP_VISION}:${quant_upper}" ;;
     external)
       case $PROVIDER in
-        groq)
-          vision_model="meta-llama/llama-4-scout-17b-16e-instruct"
-        ;;
+        # cyberneurova) vision_model="cyberneurova-qwen" ;;
+        groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
         *) vision_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
@@ -615,11 +620,10 @@ set_base_tools() {
       fi
     ;;
     external)
-      if [[ $PROVIDER == "groq" ]]; then
-        BASE_TOOLS="${TOOLS_DIR}/tools-groq.json"
-      else
-        BASE_TOOLS="${TOOLS_DIR}/tools.json"
-      fi
+      case $PROVIDER in
+        groq) BASE_TOOLS="${TOOLS_DIR}/tools-groq.json" ;;
+        *) BASE_TOOLS="${TOOLS_DIR}/tools.json" ;;
+      esac
     ;;
   esac
 }
@@ -653,9 +657,9 @@ set_cpu_cores() {
   fi
   if [[ -n $cores ]]; then
     if is_termux; then
-      MAX_CORES=$(( cores > 1 ? cores / 2 : 1 ))    # Use half of available CPU cores to prevent burning mobile devices
+      MAX_CORES=$(( cores > 2 ? cores / 2 : 1 ))    # Use half of available CPU cores to prevent burning mobile devices
     else
-      MAX_CORES=$(( cores > 1 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
+      MAX_CORES=$(( cores > 2 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
     fi
   else
     error "Unable to detect CPU cores."
@@ -729,9 +733,12 @@ set_system_prompt() {
 
   # Define system prompt for cloud models
   if [[ $BACKEND == "external" ]]; then
-    # System prompt defining absolute cognitive freedom
-    SYSTEM_PROMPT="You are ${AI_NAME}, a friendly AI collaborator. Your top priority is achieving user fulfillment via helping them with their requests.\n"
+    # 1. Identity with dynamic model injection to the system prompt while defining absolute cognitive freedom
+    SYSTEM_PROMPT="You are ${AI_NAME}, a friendly and highly capable AI collaborator currently powered by the advanced \`${CHAT_MODEL}\` model. Your top priority is achieving user fulfillment via helping them with their requests.\n"
     SYSTEM_PROMPT+="Your own workspace is in the \`${DATA_STORE##*/}\` folder. Organize it the way you want.\n"
+
+    # 2. Parallel Tool-Calling instruction for Cloud / External models
+    SYSTEM_PROMPT+="You possess high-concurrency parallel tool calling capabilities. If a task requires multiple distinct actions (such as fetching several web pages, reading multiple files, or performing parallel checks), you are highly encouraged to invoke multiple tool calls simultaneously in a single turn to minimize latency, speed up execution, and preserve network stability under secure tunnels.\n"
 
     # Sets memory format based on defined type
     case $MEMORY_TYPE in
@@ -747,7 +754,7 @@ set_system_prompt() {
     esac
   else
     # System prompt defining absolute cognitive freedom for SLMs
-    SYSTEM_PROMPT="# 👤 IDENTITY\n\nYou are ${AI_NAME}, a friendly AI collaborator. Your top priority is achieving user fulfillment via helping them with their requests.\n"
+    SYSTEM_PROMPT="# 👤 IDENTITY\n\nYou are ${AI_NAME}, a friendly and highly capable AI collaborator currently powered by the advanced \`${CHAT_MODEL}\` model. Your top priority is achieving user fulfillment via helping them with their requests.\n"
     SYSTEM_PROMPT+="$SLM_PROMPT"
   fi
 
@@ -870,13 +877,16 @@ api_call() {
 
           while (( attempt <= max_attempts )); do
             # Send custom payload and capture the output
-            response=$(curl "${curl_opts[@]}" "${PROVIDER_API_URL}"                  -H "Content-Type: application/json"                  -H "Authorization: Bearer ${PROVIDER_API_KEY}"                  -A "$USER_AGENT"                  -d @- <<< "$payload" 2>/dev/null)
+            response=$(curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -A "$USER_AGENT" \
+              -d @- <<< "$payload" 2>/dev/null
+            )
 
             # Parse potential errors from the response
-            local error_code
-            error_code=$(jq -r '.error.code' <<< "$response" 2>/dev/null)
-            local error_msg
-            error_msg=$(jq -r '.error.message' <<< "$response" 2>/dev/null)
+            local error_code ; error_code=$(jq -r '.error.code' <<< "$response" 2>/dev/null)
+            local error_msg ; error_msg=$(jq -r '.error.message' <<< "$response" 2>/dev/null)
 
             # Check if we triggered a rate limit (TPM/RPM/TPD exceeded)
             if [[ $error_code == "rate_limit_exceeded" || $error_msg == *"Rate limit reached"* ]]; then
@@ -1001,6 +1011,12 @@ get_credit_balance() {
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
               -A "$USER_AGENT" | jq -rc .balance 2>/dev/null
+      ;;
+      cyberneurova)
+        curl "${curl_opts[@]}" "https://api.cyberneurova.ai/v1/usage" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -A "$USER_AGENT" | jq -rc .data.tokens.input.remaining 2>/dev/null
       ;;
     esac
   fi
@@ -1252,7 +1268,7 @@ call_task_agent() {
 
         {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
           [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           [[ -n $balance && "$balance" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
@@ -1268,20 +1284,14 @@ call_task_agent() {
 
 route_request() {
   local INPUT="$1"
-  shopt -s nocasematch
-
-  # 1. Detect: COMPARE
-  if [[ "$INPUT" =~ (^|[^[:alnum:]_])(compare|diff|difference|versus)([^[:alnum:]_]|$) || "$INPUT" =~ [[:space:]]vs[[:space:]] ]]; then
-    shopt -u nocasematch ; echo "COMPARE" ; return
+  local lower_input ; lower_input=$(to_lower "$INPUT")
+  if [[ "$lower_input" =~ (^|[^[:alnum:]_])(compare|diff|difference|versus)([^[:alnum:]_]|$) || "$lower_input" =~ [[:space:]]vs[[:space:]] ]]; then
+    echo "COMPARE"; return
   fi
-
-  # 2. Detect: TASK (Action / Modification)
-  if [[ "$INPUT" =~ (^|[^[:alnum:]_])(add|edit|fix|optimize|change|update|write|create|refactor|generate)([^[:alnum:]_]|$) ]]; then
-    shopt -u nocasematch ; echo "TASK" ; return
+  if [[ "$lower_input" =~ (^|[^[:alnum:]_])(add|edit|fix|optimize|change|update|write|create|refactor|generate)([^[:alnum:]_]|$) ]]; then
+    echo "TASK"; return
   fi
-
-  # 3. Detect: QUESTION
-  shopt -u nocasematch ; echo "QUESTION"
+  echo "QUESTION"
 }
 
 render_markdown() {
@@ -1496,7 +1506,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
     local cost ; cost=$(jq -rc .cost <<<"$usage")
 
     echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-    echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+    echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
     [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
     [[ -n $balance && "$balance" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}"
     echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
@@ -1543,6 +1553,7 @@ send_message() {
   local ALL_MESSAGES="[]"
   local is_image=false
   local user_content="$prompt"
+  local RAW_RESPONSE RESOLVED_MODEL REASONING RESPONSE REFUSAL TOOLS USAGE BALANCE ASSISTANT_MSG
 
   # Load messages file if already exist
   [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
@@ -1596,6 +1607,10 @@ send_message() {
   # Append raw user prompt to persistent history (ALL_MESSAGES) to keep it clean and lightweight
   ALL_MESSAGES=$(jq -rc --arg prompt "$prompt" '. + [{role: "user", content: $prompt}]' <<<"$ALL_MESSAGES")
 
+  # Ensure data writing consistency
+  echo "$ALL_MESSAGES" > "${messages_path}.tmp"
+  mv -f "${messages_path}.tmp" "$messages_path"
+
   if [[ $BACKEND == "ollama" ]]; then
     log_debug "Sending query chunk to local Ollama backend (Model: ${active_model##*/})...\n"
   elif [[ $BACKEND == "llamacpp" ]]; then
@@ -1624,7 +1639,7 @@ send_message() {
 
     # Sending request and store response
     RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-    [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && error "Empty API response."
+    [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && log_error "Empty API response."
 
     # Check for errors before continuing
     if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
@@ -1776,7 +1791,7 @@ send_message() {
       local cost ; cost=$(jq -rc .cost <<<"$USAGE")
 
       echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-      echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+      echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
       [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
       [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
       echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
@@ -1840,6 +1855,7 @@ serve() {
 run_one_shot_pipeline() {
   local backend_upper ; backend_upper=$(to_upper "$BACKEND")
   local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
+  local RETURNED_CODE ARCHITECT_PLAN CODER_JUDGMENT INTENT CONTEXT_DATA
 
   set_console_title "${SCRIPT_FILE}: Pipeline Mode."
   log_section "PIPELINE MODE ACTIVATED"
@@ -2067,7 +2083,7 @@ run_one_shot_pipeline() {
             local cost ; cost=$(jq -rc .cost <<<"$USAGE")
 
             echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-            echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+            echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
             [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
             [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
             echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
@@ -2162,7 +2178,7 @@ run_one_shot_pipeline() {
           local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
           local cost ; cost=$(jq -rc .cost <<<"$USAGE")
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET}  ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
           [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
@@ -2329,6 +2345,9 @@ run_one_shot_pipeline() {
 }
 
 print_help() {
+  # Get all supported providers
+  local ALL_PROVIDERS ; ALL_PROVIDERS=$(get_all_providers)
+
   show_banner
   cat <<EOF
 ${ANSI_BOLD}${CLR_B_CYAN}USAGE:${ANSI_RESET}
@@ -2338,7 +2357,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}-h, --help${ANSI_RESET}                 Show this help screen and exit
   ${CLR_B_GREEN}-l, --listen <host:port>${ANSI_RESET}   Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}--backend <type>${ANSI_RESET}           Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}--provider <type>${ANSI_RESET}          Set AI external provider (openrouter, vercel)
+  ${CLR_B_GREEN}--provider <type>${ANSI_RESET}          Set AI external provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
   ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, web)
   ${CLR_B_GREEN}--chat${ANSI_RESET}                     Start interactive conversational chat mode
@@ -2353,7 +2372,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}help${ANSI_RESET}                       Show this help screen and exit
   ${CLR_B_GREEN}listen <host:port>${ANSI_RESET}         Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}backend <type>${ANSI_RESET}             Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}provider <type>${ANSI_RESET}            Set AI external provider (openrouter, vercel)
+  ${CLR_B_GREEN}provider <type>${ANSI_RESET}            Set AI external provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
   ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server
   ${CLR_B_GREEN}chat${ANSI_RESET}                       Start interactive conversational chat mode
@@ -2387,13 +2406,13 @@ parse_cli_flags() {
         manage_keys
         exit 0
       ;;
-      -l|--listen|listen) shift ; LISTEN_ADDR_PORT="$1" ; shift ;;
-      --zdr|zdr) shift ; ZDR_ENFORCED=true ;;
+      -l|--listen|listen) LISTEN_ADDR_PORT="${2:-}"; shift 2 ;;
+      --zdr|zdr) ZDR_ENFORCED=true ; shift ;;
       --clear|clear) clear_memory ; exit 0 ;;
       --commit|commit) check_and_trigger_heartbeat "true" ; exit 0 ;;
-      --backend|backend) shift ; BACKEND="$1" ; shift ;;
-      --provider|provider) shift ; PROVIDER="$1" ; shift ;;
-      --model|model) shift ; USER_MODEL="$1" ; shift ;;
+      --backend|backend) BACKEND="${2:-}" ; shift 2 ;;
+      --provider|provider) PROVIDER="${2:-}" ; shift 2 ;;
+      --model|model) USER_MODEL="${2:-}" ; shift 2 ;;
       --chat|chat) RUN_MODE="chat" ; shift ;;
       --multi|multi) RUN_MODE="multi" ; shift ;;
       --simple|simple) RUN_MODE="simple" ; shift ;;
@@ -2423,6 +2442,11 @@ init_core() {
     PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
   fi
 
+  # Create required folders
+  create_local_model_cache
+  create_local_data_store
+
+  # Setup core
   set_console_title "${SCRIPT_FILE}: Initializing..."
   load_config_file
   set_listen_interface
@@ -2431,9 +2455,14 @@ init_core() {
   set_temp_files
   set_base_tools
   set_api_provider
+
+  # Define right chat model
+  [[ -n $USER_MODEL ]] && CHAT_MODEL="$USER_MODEL" || CHAT_MODEL="$(get_chat_model)"
+
+  # Define right vision model
+  [[ -n $USER_MODEL ]] && VISION_MODEL="$USER_MODEL" || VISION_MODEL="$(get_vision_model)"
+
   set_system_prompt
-  create_local_model_cache
-  create_local_data_store
 
   [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
 
@@ -2478,12 +2507,6 @@ init_core() {
       error "Missing cloud credentials. Configure keys using './cli.sh --keys' or set up legacy '$CREDENTIALS' file."
     fi
   fi
-
-  # Define right chat model
-  [[ -n $USER_MODEL ]] && CHAT_MODEL="$USER_MODEL" || CHAT_MODEL="$(get_chat_model)"
-
-  # Define right vision model
-  [[ -n $USER_MODEL ]] && VISION_MODEL="$USER_MODEL" || VISION_MODEL="$(get_vision_model)"
 
   # Download models when necessary
   [[ ! $BACKEND == "external" && ! $RUN_MODE == "server" ]] && PULL_MODELS=true

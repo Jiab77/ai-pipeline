@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034,SC2001
+# ==============================================================================
+# cli.sh — High-Fidelity Interactive Terminal Client
+# ==============================================================================
+# The user-interactive chat loop portal. Sources core.sh, handles persistent
+# history, slash commands (/keys, /replay, /load), and reasoning HUD streams.
 #
-# ai-pipeline-cli - High-Fidelity Interactive Terminal Client
+# Lead Developer & Architect : Jiab77
+# AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# This script handles the user-interactive chat loop, terminal visual HUDs,
-# slash command execution, and historical session logs.
-#
-# Lead developer & Architect: Jiab77
-# AI Sorcerer & Co-Creator: Jarvis (Gemini)
-#
-# Version: 1.0.0
+# Version: 1.0.1
+# ==============================================================================
 
 # Options
+[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
 
 # -----------------------------------------------------------------------------

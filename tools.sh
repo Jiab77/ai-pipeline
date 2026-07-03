@@ -1,25 +1,27 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2086
 #
 # ==============================================================================
-# TOOLS SCRIPT FOR LOCAL AGENT (Strictly conforming to schema constraints)
+# tools.sh — Master Local Agent Tools Dispatcher
 # ==============================================================================
+# Bridges model-declared JSON schemas to real host actions. Enforces strict
+# path-bound checks, zero-fork parsing, and local execution safety limits.
 #
-# Lead developer & Architect: Jiab77
-# AI Sorcerer & Co-Creator: Jarvis (Gemini)
+# Lead Developer & Architect : Jiab77
+# AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version 0.3.2 (Dual-Optimized for zero forks & strict macOS/Bash 3.2 compatibility)
+# Version: 0.3.3
+# ==============================================================================
 
 # Options
-# [[ -e $HOME/.debug ]] && set -x
+[[ "${DEBUG:-}" == "true" ]] && set -x
+[[ -e $HOME/.debug ]] && set -x
 
 # Config
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
-HTTP_PORT=9080
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
-HTTP_PROXY="${TOR_HOST}:${HTTP_PORT}"
+SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
@@ -27,7 +29,7 @@ SCRIPT_DIR="$(realpath "${0%/*}")"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
-WEB_BROWSE="${TOOLS_DIR}/web-browse/web-browse.js"
+WEB_BROWSE="${TOOLS_DIR}/web-browse.sh"
 WEB_FETCH="${TOOLS_DIR}/web-fetch.sh"
 LOG_FILE="${SCRIPT_NAME}.log"
 
@@ -45,11 +47,6 @@ error() {
   exit 255
 }
 
-parse_args() {
-  local key="$1"
-  jq -rc ".${key}" <<<$FUNC_ARGS
-}
-
 # Pure Bash URL Decoder (Bash 3.2+ Compatible, 0 Subshells!)
 urldecode() {
   local encoded="${1//+/ }"
@@ -63,7 +60,6 @@ read_file() {
   local start_line=1
   local end_line
   local append_loc=false
-  local total_lines
   local path_val start_val end_val append_val
 
   if [[ -n $FUNC_ARGS ]]; then
@@ -82,16 +78,15 @@ read_file() {
 
   [[ ! -f $path ]] && error "File not found at $path"
 
-  total_lines=$(wc -l < "$path")
-  [[ -z $end_line ]] && end_line=$total_lines
-
+  local end_val_awk="${end_line:-0}"
   if [[ $append_loc == true ]]; then
-    awk -v start="$start_line" -v end="$end_line" '
-        NR >= start && NR <= end { printf "%d→ %s\n", NR, $0 }
+    awk -v start="$start_line" -v end="$end_val_awk" '
+        NR >= start && (end == 0 || NR <= end) { printf "%d→ %s\n", NR, $0
+}
     ' "$path"
   else
-    awk -v start="$start_line" -v end="$end_line" '
-        NR >= start && NR <= end { print $0 }
+    awk -v start="$start_line" -v end="$end_val_awk" '
+        NR >= start && (end == 0 || NR <= end) { print $0 }
     ' "$path"
   fi
 }
@@ -125,6 +120,7 @@ file_glob_search() {
 }
 
 # 3. Search for a regex pattern in files (grep)
+# shellcheck disable=SC2086
 grep_search() {
   local path="."
   local pattern
@@ -186,7 +182,7 @@ exec_shell_command() {
     [[ -n $max_size_val && $max_size_val != null ]] && max_output_size=$max_size_val
   fi
   # Avoid running core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $command == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  if [[ $command == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $command == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $command == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $command == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to run core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -223,7 +219,7 @@ write_file() {
   fi
 
   # Avoid writing to core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $path == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  if [[ $path == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to write to core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -240,7 +236,6 @@ edit_file() {
   local line_start
   local line_end
   local content
-  local total_lines
   local path_val changes_val
 
   if [[ -n $FUNC_ARGS ]]; then
@@ -256,7 +251,7 @@ edit_file() {
   [[ ! -f $path ]] && error "File not found at $path"
 
   # Avoid editing core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $path == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  if [[ $path == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to edit core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -272,7 +267,6 @@ edit_file() {
   # Extract and stream sorted changes with null delimiters to execute exactly ONE jq process instead of (1 + 4*N) processes!
   while IFS= read -r -d '' mode && IFS= read -r -d '' line_start && IFS= read -r -d '' line_end && IFS= read -r -d '' content; do
     [[ -z $mode ]] && continue
-    total_lines=$(wc -l < "$tmp_file")
 
     # Handle write at end of file (line_start = -1)
     if [[ $line_start -eq -1 ]]; then
@@ -313,7 +307,7 @@ apply_diff() {
   local diff_content
 
   # Avoid patching core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $FUNC_ARGS == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $FUNC_ARGS == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $FUNC_ARGS == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $FUNC_ARGS == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  if [[ $FUNC_ARGS == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $FUNC_ARGS == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $FUNC_ARGS == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $FUNC_ARGS == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -434,7 +428,7 @@ web_fetch() {
 
 # 11. Interact with and audit dynamic web pages using Puppeteer
 web_browse() {
-  local proxy="$HTTP_PROXY"
+  local proxy="$SOCKS_PROXY"
   local proxy_val
   local updated_args
 

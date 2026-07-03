@@ -2,6 +2,7 @@
   "cyberneurova": {
     "name": "CyberNeurova",
     "url": "https://api.cyberneurova.ai/v1/chat/completions",
+    "keys": "https://platform.cyberneurova.com/keys",
     "default": {
       "model": "cyberneurova-qwen",
       "zdr": false
@@ -10,6 +11,7 @@
   "groq": {
     "name": "Groq",
     "url": "https://api.groq.com/openai/v1/chat/completions",
+    "keys": "https://console.groq.com/keys",
     "default": {
       "model": "openai/gpt-oss-120b",
       "zdr": false
@@ -18,6 +20,7 @@
   "mammouth": {
     "name": "Mammouth AI",
     "url": "https://api.mammouth.ai/v1/chat/completions",
+    "keys": "https://mammouth.ai/app/account/settings/api",
     "default": {
       "model": "gemini-3.5-flash",
       "zdr": false
@@ -26,6 +29,7 @@
   "openai": {
     "name": "OpenAI",
     "url": "https://api.openai.com/v1/chat/completions",
+    "keys": "https://platform.openai.com/api-keys",
     "default": {
       "model": "gpt-5.4",
       "zdr": false
@@ -34,6 +38,7 @@
   "openrouter": {
     "name": "OpenRouter",
     "url": "https://openrouter.ai/api/v1/chat/completions",
+    "keys": "https://openrouter.ai/keys",
     "default": {
       "model": "google/gemini-3.5-flash",
       "zdr": false
@@ -42,6 +47,7 @@
   "openrouter_free": {
     "name": "OpenRouter (Free)",
     "url": "https://openrouter.ai/api/v1/chat/completions",
+    "keys": "https://openrouter.ai/keys",
     "default": {
       "model": "openrouter/free",
       "zdr": false
@@ -50,6 +56,7 @@
   "vercel": {
     "name": "Vercel AI Gateway",
     "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    "keys": "https://vercel.com/docs/ai-gateway",
     "default": {
       "model": "google/gemini-3.5-flash",
       "zdr": false

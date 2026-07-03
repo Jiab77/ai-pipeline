@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.1.0
+# Version: 1.1.1
 # ==============================================================================
 
 # Options
@@ -313,14 +313,7 @@ purge_all_keys() {
 
 interactive_key_setup() {
   local provider="$1"
-  local url="your provider console"
-  case "$provider" in
-    groq) url="https://console.groq.com/keys" ;;
-    openrouter*) url="https://openrouter.ai/keys" ;;
-    vercel) url="https://vercel.com/docs/ai-gateway" ;;
-    openai) url="https://platform.openai.com/api-keys" ;;
-    mammouth) url="https://mammouth.ai/app/account/settings/api" ;;
-  esac
+  local url ; url=$(jq -rc ".${provider}.keys // \"your provider console\"" "$PROVIDERS_CONFIG" 2>/dev/null)
 
   log ""
   log "${CLR_B_CYAN}🔑 [$(to_upper "$AI_NAME") KEY WIZARD]${ANSI_RESET}"
@@ -368,7 +361,7 @@ manage_keys() {
     1)
       log "${CLR_B_CYAN}🔐 Configured Providers:${ANSI_RESET}"
       local p found=false
-      for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG"); do
+      for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG" 2>/dev/null); do
         if has_provider_key "$p"; then
           log "  • $(to_upper "$p"): [ ${CLR_B_GREEN}CONFIGURED 🟢${ANSI_RESET} ]"
           found=true
@@ -384,11 +377,11 @@ manage_keys() {
     ;;
     2)
       local index=0
-      local total ; total=$(jq -rc '. | keys | length' "$PROVIDERS_CONFIG")
+      local total ; total=$(jq -rc '. | keys | length' "$PROVIDERS_CONFIG" 2>/dev/null)
       log "Choose a provider to configure:"
-      for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG"); do
+      for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG" 2>/dev/null); do
         ((index++))
-        log " ${index}) $(jq -rc ".${p}.name" "$PROVIDERS_CONFIG")"
+        log " ${index}) $(jq -rc ".${p}.name" "$PROVIDERS_CONFIG" 2>/dev/null)"
       done
       log " $((index+1))) Custom Provider"
       log " $((index+2))) Exit"
@@ -398,7 +391,7 @@ manage_keys() {
       read -r prov_choice
       local target_provider
       if [[ $prov_choice -le $total ]]; then
-        target_provider=$(jq -rc ". | keys | .[$((prov_choice-1))]")
+        target_provider=$(jq -rc ". | keys | .[$((prov_choice-1))]" "$PROVIDERS_CONFIG" 2>/dev/null)
       elif [[ $prov_choice == $((index+1)) ]]; then
         echo -en "✍️ Enter custom provider name ❯ " >&2
         read -r target_provider
@@ -516,9 +509,13 @@ get_memory_size() {
 }
 
 get_all_providers() {
-  local providers ; providers=$(jq -rc '. | keys | @csv' "$PROVIDERS_CONFIG")
-  providers="${providers//\"/}" ; providers="${providers//,/, }"
-  echo -n "$providers"
+  local providers ; providers=$(jq -rc '. | keys | @csv' "$PROVIDERS_CONFIG" 2>/dev/null)
+  if [[ -n $providers ]]; then
+    providers="${providers//\"/}" ; providers="${providers//,/, }"
+    echo -n "$providers"
+  else
+    error "Could not read providers config file."
+  fi
 }
 
 get_chat_model() {
@@ -722,10 +719,10 @@ set_model_settings() {
   base_name=$(sed -E 's|:.*$||' <<<"$base_name")
 
   # Load parameters from the models registry in global scope
-  MODEL_TEMP=$(jq -r --arg model "$base_name" '.[$model].temperature // .default.temperature' "$models_registry")
-  MODEL_TOP_K=$(jq -r --arg model "$base_name" '.[$model].top_k // .default.top_k' "$models_registry")
-  MODEL_MIN_P=$(jq -r --arg model "$base_name" '.[$model].min_p // empty' "$models_registry")
-  MODEL_REP_PENALTY=$(jq -r --arg model "$base_name" '.[$model].repetition_penalty // .default.repetition_penalty' "$models_registry")
+  MODEL_TEMP=$(jq -r --arg model "$base_name" '.[$model].temperature // .default.temperature' "$models_registry" 2>/dev/null)
+  MODEL_TOP_K=$(jq -r --arg model "$base_name" '.[$model].top_k // .default.top_k' "$models_registry" 2>/dev/null)
+  MODEL_MIN_P=$(jq -r --arg model "$base_name" '.[$model].min_p // empty' "$models_registry" 2>/dev/null)
+  MODEL_REP_PENALTY=$(jq -r --arg model "$base_name" '.[$model].repetition_penalty // .default.repetition_penalty' "$models_registry" 2>/dev/null)
 }
 
 set_system_prompt() {
@@ -810,15 +807,15 @@ api_call() {
     set_model_settings "$active_model"
 
     # Apply model settings on-the-fly
-    payload=$(jq -rc ".temperature = $MODEL_TEMP" <<<"$payload")
-    payload=$(jq -rc ".top_k = $MODEL_TOP_K" <<<"$payload")
-    payload=$(jq -rc ".min_p = $MODEL_MIN_P" <<<"$payload")
-    payload=$(jq -rc ".repetition_penalty = $MODEL_REP_PENALTY" <<<"$payload")
+    payload=$(jq -rc ".temperature = $MODEL_TEMP" <<<"$payload" 2>/dev/null)
+    payload=$(jq -rc ".top_k = $MODEL_TOP_K" <<<"$payload" 2>/dev/null)
+    payload=$(jq -rc ".min_p = $MODEL_MIN_P" <<<"$payload" 2>/dev/null)
+    payload=$(jq -rc ".repetition_penalty = $MODEL_REP_PENALTY" <<<"$payload" 2>/dev/null)
   fi
 
   # Force non-streaming calls for all models / providers
   # Note: Can be made conditional in the future if necessary
-  payload=$(jq -rc '.stream = false' <<<"$payload")
+  payload=$(jq -rc '.stream = false' <<<"$payload" 2>/dev/null)
 
   # Backend Selector
   case $BACKEND in
@@ -848,11 +845,11 @@ api_call() {
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for Vercel AI Gateway."
-            payload=$(jq -rc '.providerOptions.gateway.zeroDataRetention = true' <<< "$payload")
+            payload=$(jq -rc '.providerOptions.gateway.zeroDataRetention = true' <<< "$payload" 2>/dev/null)
           fi
 
           # Disallow prompt training by default
-          payload=$(jq -rc '.providerOptions.gateway.disallowPromptTraining = true' <<< "$payload")
+          payload=$(jq -rc '.providerOptions.gateway.disallowPromptTraining = true' <<< "$payload" 2>/dev/null)
 
           # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
@@ -946,11 +943,11 @@ api_call() {
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
-            payload=$(jq -rc '.store = false' <<< "$payload")
+            payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
           fi
 
           # Disable reasoning for Groq (causes issues)
-          payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
+          payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
           [[ $DEBUG == true ]] && log ; log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for OpenAI."
 
           # Send custom payload
@@ -964,14 +961,14 @@ api_call() {
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
-            payload=$(jq -rc '.provider.zdr = true' <<< "$payload")
+            payload=$(jq -rc '.provider.zdr = true' <<< "$payload" 2>/dev/null)
           fi
 
           # Force OpenRouter to route the request to the right provider / model for given parameters
-          payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload")
+          payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
 
           # Disallow prompt training by default
-          payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload")
+          payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
 
           # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
@@ -1068,7 +1065,7 @@ call_task_agent() {
     tools_payload=$(<"$BASE_TOOLS")
   elif [[ "$tools_option" == "readonly" ]]; then
     # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
-    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS")
+    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS" 2>/dev/null)
   fi
 
   # Initialize local MESSAGES array in-memory for this specific agent's execution loop
@@ -1119,10 +1116,10 @@ call_task_agent() {
     [[ -z $raw_res || $raw_res == "null" ]] && error "API returned an empty response."
 
     if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res")
-      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res")
-      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_res")
-      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
+      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
+      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_res" 2>/dev/null)
+      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
       [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
       log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
     fi
@@ -1164,9 +1161,9 @@ call_task_agent() {
       fi
 
       # 1. Grab assistant command message and push to local history
-      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res")
+      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res" 2>/dev/null)
       printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
-      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
+      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES" 2>/dev/null)
 
       # 2. Extract and iterate over all requested parallel tools
       local tool_count=0
@@ -1259,12 +1256,12 @@ call_task_agent() {
 
       # Print usage metrics to STDERR to avoid polluting stdout
       if [[ -n $usage && $usage != "null" ]]; then
-        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage")
-        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage")
-        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage")
-        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage")
-        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage")
-        local cost ; cost=$(jq -rc .cost <<<"$usage")
+        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage" 2>/dev/null)
+        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage" 2>/dev/null)
+        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage" 2>/dev/null)
+        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage" 2>/dev/null)
+        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage" 2>/dev/null)
+        local cost ; cost=$(jq -rc .cost <<<"$usage" 2>/dev/null)
 
         {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
@@ -1346,11 +1343,11 @@ You have absolute freedom over how you organize your memory folder. Use Markdown
 Take as many tool calls as you need. When you are fully done organizing and saving your cognitive state to your memory folder, respond with EXACTLY this keyword: [CONSOLIDATION_COMPLETE]"
 
   # Append the consolidation request as a user role
-  ALL_MESSAGES=$(jq -rc --arg alert "$alert_msg" '. + [{role: "user", content: $alert}]' <<<"$ALL_MESSAGES")
+  ALL_MESSAGES=$(jq -rc --arg alert "$alert_msg" '. + [{role: "user", content: $alert}]' <<<"$ALL_MESSAGES" 2>/dev/null)
 
   # Prepend the system instruction with bootstrapped memory
   dynamic_system=$(get_system_prompt 2>/dev/null)
-  PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES")
+  PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES" 2>/dev/null)
 
   # The Magic Loop
   while true; do
@@ -1375,10 +1372,10 @@ Take as many tool calls as you need. When you are fully done organizing and savi
 
     # Check for errors before continuing
     if jq -e '.error' <<<"$raw_response" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response")
-      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_response")
-      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_response")
-      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response" 2>/dev/null)
+      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_response" 2>/dev/null)
+      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_response" 2>/dev/null)
+      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
       [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
       log_error "Consolidation API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
       ((errors++))    # Increment errors counter
@@ -1411,9 +1408,9 @@ Take as many tool calls as you need. When you are fully done organizing and savi
 
     # Handling model requested tools (Multi-Parallel Support)
     if [[ -n $tools && $tools != "null" ]]; then
-      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_response")
+      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_response" 2>/dev/null)
       printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
-      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES")
+      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
 
       local tool_count=0
       local -a detected_images=()
@@ -1442,7 +1439,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
         fi
         if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
           rm -f "$TOOLS_OUTPUT"
-          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES")
+          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
           rm -f "$TEMP_TOOLS_OUTPUT"
         else
           local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool)")
@@ -1484,7 +1481,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
       if [[ -n $response && $response != "null" ]]; then
         show_ai_header
         echo "$response" | render_markdown
-        PAYLOAD_MESSAGES=$(jq -rc --arg ast "$response" '. + [{role: "assistant", content: $ast}]' <<<"$PAYLOAD_MESSAGES")
+        PAYLOAD_MESSAGES=$(jq -rc --arg ast "$response" '. + [{role: "assistant", content: $ast}]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
 
         if [[ "$response" == *"[CONSOLIDATION_COMPLETE]"* ]]; then
           log_success "Autonomous memory consolidation complete!"
@@ -1498,12 +1495,12 @@ Take as many tool calls as you need. When you are fully done organizing and savi
 
   # Handling model usage
   if [[ -n $usage && $usage != "null" ]]; then
-    local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage")
-    local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage")
-    local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage")
-    local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage")
-    local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage")
-    local cost ; cost=$(jq -rc .cost <<<"$usage")
+    local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage" 2>/dev/null)
+    local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage" 2>/dev/null)
+    local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage" 2>/dev/null)
+    local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage" 2>/dev/null)
+    local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage" 2>/dev/null)
+    local cost ; cost=$(jq -rc .cost <<<"$usage" 2>/dev/null)
 
     echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
     echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
@@ -1600,12 +1597,12 @@ send_message() {
     )
     rm -f "$TEMP_BASE64_OUTPUT"
   else
-    PAYLOAD_MESSAGES=$(jq -rc --arg user "$user_content" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES")
+    PAYLOAD_MESSAGES=$(jq -rc --arg user "$user_content" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES" 2>/dev/null)
   fi
-  PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$PAYLOAD_MESSAGES")
+  PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
 
   # Append raw user prompt to persistent history (ALL_MESSAGES) to keep it clean and lightweight
-  ALL_MESSAGES=$(jq -rc --arg prompt "$prompt" '. + [{role: "user", content: $prompt}]' <<<"$ALL_MESSAGES")
+  ALL_MESSAGES=$(jq -rc --arg prompt "$prompt" '. + [{role: "user", content: $prompt}]' <<<"$ALL_MESSAGES" 2>/dev/null)
 
   # Ensure data writing consistency
   echo "$ALL_MESSAGES" > "${messages_path}.tmp"
@@ -1643,10 +1640,10 @@ send_message() {
 
     # Check for errors before continuing
     if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
-      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE")
-      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE")
-      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE" 2>/dev/null)
+      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
       [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
       log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
     fi
@@ -1678,11 +1675,11 @@ send_message() {
     # Handling model requested tools (Multi-Parallel Support)
     if [[ -n $TOOLS && $TOOLS != "null" ]]; then
       # 1. Grab assistant command message and push to history
-      ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
+      ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE" 2>/dev/null)
       # Write payload variables to temporary files inside the loop to capture any updates
       printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
-      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
-      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES")
+      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES" 2>/dev/null)
+      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
 
       # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
       local tool_count=0
@@ -1716,8 +1713,8 @@ send_message() {
         fi
         if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
           rm -f "$TOOLS_OUTPUT"
-          ALL_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES")
-          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES")
+          ALL_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null)
+          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
           rm -f "$TEMP_TOOLS_OUTPUT"
         else
           log_warn "fromjson failed, using fallback --arg serialization"
@@ -1775,7 +1772,7 @@ send_message() {
         echo "$RESPONSE" | render_markdown
 
         # Store final AI response
-        ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<"$ALL_MESSAGES")
+        ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<"$ALL_MESSAGES" 2>/dev/null)
         echo "$ALL_MESSAGES" > "$messages_path"
       fi
       break   # Leaving the loop
@@ -1783,12 +1780,12 @@ send_message() {
 
     # Handling model usage
     if [[ -n $USAGE && $USAGE != "null" ]]; then
-      local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE")
-      local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE")
-      local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE")
-      local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE")
-      local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
-      local cost ; cost=$(jq -rc .cost <<<"$USAGE")
+      local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE" 2>/dev/null)
+      local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE" 2>/dev/null)
+      local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE" 2>/dev/null)
+      local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE" 2>/dev/null)
+      local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE" 2>/dev/null)
+      local cost ; cost=$(jq -rc .cost <<<"$USAGE" 2>/dev/null)
 
       echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
       echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
@@ -1940,10 +1937,10 @@ run_one_shot_pipeline() {
 
           # Check for errors before continuing
           if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-            local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
-            local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE")
-            local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE")
-            [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+            local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE" 2>/dev/null)
+            local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+            local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+            [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
             [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
             log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
           fi
@@ -1975,10 +1972,10 @@ run_one_shot_pipeline() {
           # Handling model requested tools (Multi-Parallel Support)
           if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
             # 1. Grab assistant command message and push to history
-            ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE")
+            ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE" 2>/dev/null)
             # Write payload variables to temporary files inside the loop to capture any updates
             printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
-            ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES")
+            ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES" 2>/dev/null)
 
             # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
             local tool_count=0
@@ -2075,12 +2072,12 @@ run_one_shot_pipeline() {
 
           # Handling model usage
           if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-            local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE")
-            local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE")
-            local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE")
-            local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE")
-            local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
-            local cost ; cost=$(jq -rc .cost <<<"$USAGE")
+            local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE" 2>/dev/null)
+            local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE" 2>/dev/null)
+            local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE" 2>/dev/null)
+            local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE" 2>/dev/null)
+            local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE" 2>/dev/null)
+            local cost ; cost=$(jq -rc .cost <<<"$USAGE" 2>/dev/null)
 
             echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
             echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
@@ -2132,10 +2129,10 @@ run_one_shot_pipeline() {
 
         # Check for errors before continuing
         if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-          local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE")
-          local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE")
-          local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE")
-          [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta")"
+          local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE" 2>/dev/null)
+          local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+          local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
+          [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
           [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
           log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
         fi
@@ -2171,12 +2168,12 @@ run_one_shot_pipeline() {
 
         # Handling model usage
         if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-          local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE")
-          local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE")
-          local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE")
-          local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE")
-          local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE")
-          local cost ; cost=$(jq -rc .cost <<<"$USAGE")
+          local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE" 2>/dev/null)
+          local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE" 2>/dev/null)
+          local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE" 2>/dev/null)
+          local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE" 2>/dev/null)
+          local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE" 2>/dev/null)
+          local cost ; cost=$(jq -rc .cost <<<"$USAGE" 2>/dev/null)
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
           [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"

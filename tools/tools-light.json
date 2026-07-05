@@ -73,13 +73,13 @@
     "type": "function",
     "function": {
       "name": "web_search",
-      "description": "Search the web for information using a search query.",
+      "description": "Search the web for information using a search query. CRITICAL: Use ONLY for keyword searching when you don't know the exact URL. DO NOT pass a URL here; if you already have a target URL, use 'web_fetch' instead.",
       "parameters": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "The search terms to look up."
+            "description": "The search query terms (e.g. 'cachyos arch linux'). MUST NOT be a URL starting with 'http://' or 'https://'."
           }
         },
         "required": ["query"]
@@ -90,13 +90,13 @@
     "type": "function",
     "function": {
       "name": "web_fetch",
-      "description": "Fetch and extract the main text content of a specific web page.",
+      "description": "Fetch and extract the main content of a specific web page as clean Markdown. CRITICAL: Use ONLY when you have a specific, known URL to read. DO NOT pass search queries here; if you need to search, use 'web_search' instead. For advanced page interactions (clicks, forms) or screenshots, use 'web_browse' instead.",
       "parameters": {
         "type": "object",
         "properties": {
           "url": {
             "type": "string",
-            "description": "The target website URL to read."
+            "description": "The target website URL to fetch. MUST be a valid absolute URL starting with 'http://' or 'https://'."
           }
         },
         "required": ["url"]
@@ -107,7 +107,7 @@
     "type": "function",
     "function": {
       "name": "web_browse",
-      "description": "Navigate and capture screenshot or execute simple actions in a dynamic web page.",
+      "description": "Navigate and capture screenshot or execute simple actions in a dynamic web page. CRITICAL: Use ONLY when active interactions (clicks, typing, scrolling), DOM screenshots, or multi-step sessions are required. For simply reading a static page's content, 'web_fetch' is much faster and resource-friendly.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -117,7 +117,8 @@
           },
           "proxy": {
             "type": "string",
-            "description": "Optional proxy URL (e.g. 'socks5://127.0.0.1:9050'). Set to null or false to connect directly."
+            "description": "Optional proxy URL (e.g. 'socks5://127.0.0.1:9050'). Set to null or false to connect directly.",
+            "default": "socks5://127.0.0.1:9050"
           },
           "screenshot_path": {
             "type": "string",

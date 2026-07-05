@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.0.0
+# Version: 0.0.1
 # ==============================================================================
 
 # Options
@@ -424,7 +424,7 @@ parse_input() {
 
   # Parse out values
   URL=$(jq -rc '.url // empty' <<<"$raw_input")
-  HEADLESS=$(jq -rc '.headless // "true"' <<<"$raw_input")
+  HEADLESS=$(jq -rc 'if has("headless") then .headless else "true" end' <<<"$raw_input")
   VIEWPORT_WIDTH=$(jq -rc '.viewport.width // 1280' <<<"$raw_input")
   VIEWPORT_HEIGHT=$(jq -rc '.viewport.height // 800' <<<"$raw_input")
   PROXY=$(jq -rc '.proxy // empty' <<<"$raw_input")

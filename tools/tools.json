@@ -211,13 +211,13 @@
     "type": "function",
     "function": {
       "name": "web_search",
-      "description": "Perform an anonymous web search query through DuckDuckGo HTML using Tor and htmlq, returning a JSON array of search result objects containing title, url and snippet.",
+      "description": "Perform an anonymous web search query on DuckDuckGo using Tor. Returns titles, URLs, and snippets. CRITICAL: Use ONLY for keyword searching when you don't know the exact URL. DO NOT pass a URL here; if you already have a target URL, use 'web_fetch' instead.",
       "parameters": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "The search query terms to lock up (e.g. 'cachyos arch linux')"
+            "description": "The search query terms (e.g. 'cachyos arch linux'). MUST NOT be a URL starting with 'http://' or 'https://'."
           }
         },
         "required": ["query"]
@@ -228,13 +228,13 @@
     "type": "function",
     "function": {
       "name": "web_fetch",
-      "description": "Fetch and extract the main content of a specific web page. Sanitizes it to high-fidelity Markdown, optimized for terminal reading and AI consumption. Supports JS-rendering fallback, proxying and content-filtering.",
+      "description": "Fetch and extract the main content of a specific web page as clean Markdown. CRITICAL: Use ONLY when you have a specific, known URL to read. DO NOT pass search queries here; if you need to search, use 'web_search' instead. For advanced page interactions (clicks, forms) or screenshots, use 'web_browse' instead.",
       "parameters": {
         "type": "object",
         "properties": {
           "url": {
             "type": "string",
-            "description": "The target website URL to fetch."
+            "description": "The target website URL to fetch. MUST be a valid absolute URL starting with 'http://' or 'https://'."
           },
           "use_javascript": {
             "type": "boolean",
@@ -255,7 +255,7 @@
     "type": "function",
     "function": {
       "name": "web_browse",
-      "description": "Interact with and audit dynamic web pages and local servers using a headless/headful Puppeteer browser. Executes a sequence of navigation and interaction actions.",
+      "description": "Interact with and audit dynamic web pages and local servers using a headless/headful browser. CRITICAL: Use ONLY when active interactions (clicks, typing, scrolling), DOM screenshots, or multi-step sessions are required. For simply reading a static page's content, 'web_fetch' is much faster and resource-friendly.",
       "parameters": {
         "type": "object",
         "properties": {

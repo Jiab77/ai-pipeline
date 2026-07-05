@@ -24,9 +24,7 @@
             "description": "First line to read, 1-based (default: 1)"
           }
         },
-        "required": [
-          "path"
-        ]
+        "required": ["path"]
       }
     }
   },
@@ -51,9 +49,7 @@
             "description": "Base directory to search in"
           }
         },
-        "required": [
-          "path"
-        ]
+        "required": ["path"]
       }
     }
   },
@@ -86,10 +82,7 @@
             "description": "If true, include line numbers in results"
           }
         },
-        "required": [
-          "path",
-          "pattern"
-        ]
+        "required": ["path", "pattern"]
       }
     }
   },
@@ -114,9 +107,7 @@
             "description": "Timeout in seconds (default 10, max 60)"
           }
         },
-        "required": [
-          "command"
-        ]
+        "required": ["command"]
       }
     }
   },
@@ -137,10 +128,7 @@
             "description": "Path of the file to write"
           }
         },
-        "required": [
-          "path",
-          "content"
-        ]
+        "required": ["path", "content"]
       }
     }
   },
@@ -187,10 +175,7 @@
             "description": "Path to the file to edit"
           }
         },
-        "required": [
-          "path",
-          "changes"
-        ]
+        "required": ["path", "changes"]
       }
     }
   },
@@ -207,9 +192,7 @@
             "description": "Unified diff content in git diff format"
           }
         },
-        "required": [
-          "diff"
-        ]
+        "required": ["diff"]
       }
     }
   },
@@ -228,18 +211,16 @@
     "type": "function",
     "function": {
       "name": "web_search",
-      "description": "Perform an anonymous web search query through DuckDuckGo HTML using Tor and htmlq, returning a JSON array of search result objects containing title, url and snippet.",
+      "description": "Perform an anonymous web search query on DuckDuckGo using Tor. Returns titles, URLs, and snippets. CRITICAL: Use ONLY for keyword searching when you don't know the exact URL. DO NOT pass a URL here; if you already have a target URL, use 'web_fetch' instead.",
       "parameters": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "The search query terms to lock up (e.g. 'cachyos arch linux')"
+            "description": "The search query terms (e.g. 'cachyos arch linux'). MUST NOT be a URL starting with 'http://' or 'https://'."
           }
         },
-        "required": [
-          "query"
-        ]
+        "required": ["query"]
       }
     }
   },
@@ -247,28 +228,26 @@
     "type": "function",
     "function": {
       "name": "web_fetch",
-      "description": "Fetch and extract the main content of a specific web page. Sanitizes it to high-fidelity Markdown, optimized for terminal reading and AI consumption. Supports JS-rendering fallback, proxying and content-filtering.",
+      "description": "Fetch and extract the main content of a specific web page as clean Markdown. CRITICAL: Use ONLY when you have a specific, known URL to read. DO NOT pass search queries here; if you need to search, use 'web_search' instead. For advanced page interactions (clicks, forms) or screenshots, use 'web_browse' instead.",
       "parameters": {
         "type": "object",
         "properties": {
-          "proxy": {
-            "type": "string",
-            "description": "Optional proxy URL (e.g. 'socks5h://127.0.0.1:9050' for Tor). If omitted, falls back to the system environment defaults.",
-            "default": "socks5h://127.0.0.1:9050"
-          },
           "url": {
             "type": "string",
-            "description": "The target website URL to fetch."
+            "description": "The target website URL to fetch. MUST be a valid absolute URL starting with 'http://' or 'https://'."
           },
           "use_javascript": {
             "type": "string",
             "description": "If true, boot-up a headless browser to render SPAs / Dynamic content. If false (default), execute a lightweight raw HTML transfer using curl/fetch (much faster, saves battery & RAM).",
             "default": "false"
+          },
+          "proxy": {
+            "type": "string",
+            "description": "Optional proxy URL (e.g. 'socks5h://127.0.0.1:9050' for Tor). If omitted, falls back to the system environment defaults.",
+            "default": "socks5h://127.0.0.1:9050"
           }
         },
-        "required": [
-          "url"
-        ]
+        "required": ["url"]
       }
     }
   },
@@ -276,35 +255,41 @@
     "type": "function",
     "function": {
       "name": "web_browse",
-      "description": "Interact with and audit dynamic web pages and local servers using a headless/headful Puppeteer browser. Executes a sequence of navigation and interaction actions.",
+      "description": "Interact with and audit dynamic web pages and local servers using a headless/headful browser. CRITICAL: Use ONLY when active interactions (clicks, typing, scrolling), DOM screenshots, or multi-step sessions are required. For simply reading a static page's content, 'web_fetch' is much faster and resource-friendly.",
       "parameters": {
         "type": "object",
         "properties": {
+          "url": {
+            "type": "string",
+            "description": "The target website URL to navigate to."
+          },
+          "proxy": {
+            "type": "string",
+            "description": "Optional proxy URL (e.g. 'socks5://127.0.0.1:9050'). Set to null or false to connect directly.",
+            "default": "socks5://127.0.0.1:9050"
+          },
+          "headless": {
+            "type": "string",
+            "description": "Whether to run browser in headless mode (default: true). Set to false for headful visualization.",
+            "default": "true"
+          },
+          "viewport": {
+            "type": "object",
+            "description": "Optional custom browser viewport dimensions.",
+            "properties": {
+              "width": { "type": "string" },
+              "height": { "type": "string" }
+            }
+          },
           "actions": {
             "type": "array",
             "description": "Ordered list of actions to perform on the page sequentially.",
             "items": {
               "type": "object",
               "properties": {
-                "direction": {
+                "type": {
                   "type": "string",
-                  "description": "Scroll direction: 'down' or 'bottom' (for scroll action)"
-                },
-                "expression": {
-                  "type": "string",
-                  "description": "JavaScript expression to run on the page (for evaluate action)"
-                },
-                "fullPage": {
-                  "type": "string",
-                  "description": "Capture the entire page length (for screenshot action)"
-                },
-                "key": {
-                  "type": "string",
-                  "description": "Key code to press (e.g. Enter, Escape, Tab)"
-                },
-                "path": {
-                  "type": "string",
-                  "description": "File path to save output (for screenshot or pdf actions)"
+                  "description": "Action type: wait, click, type, press, evaluate, scroll, screenshot, pdf"
                 },
                 "selector": {
                   "type": "string",
@@ -314,50 +299,36 @@
                   "type": "string",
                   "description": "Text to enter (required for type) or key to press"
                 },
-                "timeout": {
+                "key": {
                   "type": "string",
+                  "description": "Key code to press (e.g. Enter, Escape, Tab)"
+                },
+                "timeout": {
+                  "type": "integer",
                   "description": "Duration to wait in milliseconds (for wait action)"
                 },
-                "type": {
+                "path": {
                   "type": "string",
-                  "description": "Action type: wait, click, type, press, evaluate, scroll, screenshot, pdf"
+                  "description": "File path to save output (for screenshot or pdf actions)"
+                },
+                "fullPage": {
+                  "type": "boolean",
+                  "description": "Capture the entire page length (for screenshot action)"
+                },
+                "expression": {
+                  "type": "string",
+                  "description": "JavaScript expression to run on the page (for evaluate action)"
+                },
+                "direction": {
+                  "type": "string",
+                  "description": "Scroll direction: 'down' or 'bottom' (for scroll action)"
                 }
               },
-              "required": [
-                "type"
-              ]
-            }
-          },
-          "headless": {
-            "type": "string",
-            "description": "Whether to run browser in headless mode (default: true). Set to false for headful visualization.",
-            "default": "true"
-          },
-          "proxy": {
-            "type": "string",
-            "description": "Optional proxy URL (e.g. 'socks5://127.0.0.1:9050'). Set to null or false to connect directly.",
-            "default": "socks5://127.0.0.1:9050"
-          },
-          "url": {
-            "type": "string",
-            "description": "The target website URL to navigate to."
-          },
-          "viewport": {
-            "type": "object",
-            "description": "Optional custom browser viewport dimensions.",
-            "properties": {
-              "height": {
-                "type": "string"
-              },
-              "width": {
-                "type": "string"
-              }
+              "required": ["type"]
             }
           }
         },
-        "required": [
-          "url"
-        ]
+        "required": ["url"]
       }
     }
   }

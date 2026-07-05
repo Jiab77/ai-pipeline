@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.1.1
+# Version: 1.1.2
 # ==============================================================================
 
 # Options
@@ -77,9 +77,11 @@ TEMP_BASE64_OUTPUT="/tmp/image_output.b64"
 TEMP_TOOLS_OUTPUT="/tmp/tools_output.json"
 TEMP_PAYLOAD_ASSISTANT="/tmp/payload_assistant.json"
 TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
+TEMP_PAYLOAD_SYSTEM="/tmp/payload_system.json"
 
 # Sovereign Personality & Identity
 AI_NAME="Jarvis"
+AI_RULES="${CONFIG_DIR}/rules.md"
 
 # Local Computing Controls
 QUANTIZATION="q8_0"   # Target quantization for resource-frugal models
@@ -127,6 +129,7 @@ cleanup_temp_files() {
         "$TEMP_TOOLS_OUTPUT" \
         "$TEMP_PAYLOAD_ASSISTANT" \
         "$TEMP_PAYLOAD_MESSAGES" \
+        "$TEMP_PAYLOAD_SYSTEM" \
         "$TOOLS_OUTPUT" \
         "${TOOLS_OUTPUT}.clean"
 }
@@ -755,6 +758,9 @@ set_system_prompt() {
     SYSTEM_PROMPT+="$SLM_PROMPT"
   fi
 
+  # Sets AI rules if they exists
+  [[ -r $AI_RULES ]] && SYSTEM_PROMPT+="The critical rules you must follow are described here:\n\n$(<"$AI_RULES")"
+
   # Sets 'framework' folder if it exists
   [[ -d "${DATA_STORE}/framework" ]] && SYSTEM_PROMPT+="Your behavioral framework files are located in your workspace under the \`framework\` folder. Load them before handling code related tasks.\n"
 
@@ -1070,8 +1076,9 @@ call_task_agent() {
 
   # Initialize local MESSAGES array in-memory for this specific agent's execution loop
   local ALL_MESSAGES
+  printf "%s" "$system_inst" > "$TEMP_PAYLOAD_SYSTEM"
   ALL_MESSAGES=$(jq -rc -n \
-    --arg sys "$system_inst" \
+    --rawfile sys "$TEMP_PAYLOAD_SYSTEM" \
     --arg usr "$user_content" \
     '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
   )
@@ -1347,7 +1354,10 @@ Take as many tool calls as you need. When you are fully done organizing and savi
 
   # Prepend the system instruction with bootstrapped memory
   dynamic_system=$(get_system_prompt 2>/dev/null)
-  PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES" 2>/dev/null)
+
+  # Write generated system prompte to temporary file to avoid reaching arg limit of 'jq'
+  printf "%s" "$dynamic_system" > "$TEMP_PAYLOAD_SYSTEM"
+  PAYLOAD_MESSAGES=$(jq -rc --rawfile sys "$TEMP_PAYLOAD_SYSTEM" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES" 2>/dev/null)
 
   # The Magic Loop
   while true; do
@@ -1368,7 +1378,11 @@ Take as many tool calls as you need. When you are fully done organizing and savi
 
     # Sending request and store response
     local raw_response ; raw_response=$(api_call "$payload")
-    [[ -z $raw_response || $raw_response == "null" ]] && { log_warn "Consolidation API call returned empty response."; break; }
+    if [[ -z $raw_response || $raw_response == "null" ]]; then
+      log_error "Consolidation API call returned empty response."
+      ((errors++))    # Increment errors counter
+      break
+    fi
 
     # Check for errors before continuing
     if jq -e '.error' <<<"$raw_response" &>/dev/null; then
@@ -1599,7 +1613,10 @@ send_message() {
   else
     PAYLOAD_MESSAGES=$(jq -rc --arg user "$user_content" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES" 2>/dev/null)
   fi
-  PAYLOAD_MESSAGES=$(jq -rc --arg sys "$dynamic_system" '[{role: "system", content: $sys}] + .' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
+
+  # Write generated system prompte to temporary file to avoid reaching arg limit of 'jq'
+  printf "%s" "$dynamic_system" > "$TEMP_PAYLOAD_SYSTEM"
+  PAYLOAD_MESSAGES=$(jq -rc --rawfile sys "$TEMP_PAYLOAD_SYSTEM" '[{role: "system", content: $sys}] + .' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
 
   # Append raw user prompt to persistent history (ALL_MESSAGES) to keep it clean and lightweight
   ALL_MESSAGES=$(jq -rc --arg prompt "$prompt" '. + [{role: "user", content: $prompt}]' <<<"$ALL_MESSAGES" 2>/dev/null)

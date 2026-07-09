@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.1.2
+# Version: 1.2.0
 # ==============================================================================
 
 # Options
@@ -209,13 +209,11 @@ draw_header() {
   local line_char
   local width ; width=$(get_term_width)
   local esc ; esc=$(printf '')
-  # local clean_prefix ; clean_prefix=$(echo -e "$prefix" | sed "s/${esc}[[0-9;]*m//g")
   local clean_prefix ; clean_prefix=$(sed "s/${esc}[[0-9;]*m//g" <<<"$prefix")
   # Measure visual length accurately, substituting emojis/wide chars with 2 chars
   local visual_prefix ; visual_prefix=$(sed 's/[👤🤖💭⚙🧠💻⚖🏛🔍ℹ✅⚠️❌]️*/xx/g' <<<"$clean_prefix")
   local prefix_len=${#visual_prefix}
   local remaining_width=$((width - prefix_len))
-  # [[ $remaining_width -lt 5 ]] && remaining_width=5
   printf -v line_char "%*s" "$remaining_width" ""
   echo -e "${prefix}${line_clr}${line_char// /$char}${ANSI_RESET}"
 }
@@ -266,6 +264,12 @@ log_debug() {
   if [[ -e $HOME/.debug || "$DEBUG" == "true" ]]; then
     log "\n${CLR_B_BLACK}${ICON_DEBUG} [DEBUG] $*${ANSI_RESET}"
   fi
+}
+
+# Log and exit helper
+error() {
+  log_error "$*"
+  exit 255
 }
 
 # Strings helpers
@@ -435,12 +439,6 @@ show_tool_header() {
   log "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}\n"
 }
 
-# Log and exit helper
-error() {
-  log_error "$*"
-  exit 255
-}
-
 # Image helpers
 get_image_type() {
   local ext="${1##*.}"
@@ -552,8 +550,9 @@ get_vision_model() {
     llamacpp) vision_model="${LLAMACPP_VISION}:${quant_upper}" ;;
     external)
       case $PROVIDER in
-        # cyberneurova) vision_model="cyberneurova-qwen" ;;
         groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
+        openrouter) vision_model="openrouter/auto" ;;
+        openrouter_free) vision_model="openrouter/free" ;;
         *) vision_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
@@ -569,6 +568,7 @@ set_temp_files() {
     TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
     TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
     TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
+    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.json"
     TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
   fi
 }
@@ -866,6 +866,28 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+        venice)
+          # Show ZDR policy warning when enabled
+          if [[ $ZDR_ENFORCED == true ]]; then
+            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not applied, you need to go in your settings -> General -> 'Disable Telemetry Collection' -> On." ; log
+          fi
+
+          # Remove Venice AI System Prompt by default
+          payload=$(jq -rc '.venice_parameters.include_venice_system_prompt = false' <<< "$payload" 2>/dev/null)
+
+          # Force E2EE calls by default (not enabled yet -- need to be sure it won't block everything)
+          # payload=$(jq -rc '.venice_parameters.enable_e2ee = true' <<< "$payload" 2>/dev/null)
+
+          # Force parallel tool calls by default
+          payload=$(jq -rc '.parallel_tool_calls = true' <<< "$payload" 2>/dev/null)
+
+          # Send custom payload
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | jq -rc .
+        ;;
         groq)
           # Add minor delay to avoid triggering the rate limiter
           sleep 1
@@ -896,7 +918,6 @@ api_call() {
               local wait_time="5" # Safe default fallback
 
               # Extract days (d), hours (h), minutes (m), and seconds (s) from the wait message
-              # Excludes trailing sentence period using character class boundary ([0-9a-z])
               if [[ $error_msg =~ try[[:space:]]again[[:space:]]in[[:space:]]([0-9hms.]*[0-9a-z]) ]]; then
                 local duration_str="${BASH_REMATCH[1]}"
                 local d=0 h=0 m=0 s=0
@@ -952,7 +973,7 @@ api_call() {
             payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
           fi
 
-          # Disable reasoning for Groq (causes issues)
+          # Disable reasoning for OpenAI (causes issues)
           payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
           [[ $DEBUG == true ]] && log ; log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for OpenAI."
 
@@ -1015,6 +1036,12 @@ get_credit_balance() {
               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
               -A "$USER_AGENT" | jq -rc .balance 2>/dev/null
       ;;
+      openrouter*)
+        curl "${curl_opts[@]}" "https://openrouter.ai/api/v1/key" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -A "$USER_AGENT" | jq -rc .data.usage 2>/dev/null
+      ;;
       cyberneurova)
         curl "${curl_opts[@]}" "https://api.cyberneurova.ai/v1/usage" \
               -H "Content-Type: application/json" \
@@ -1023,6 +1050,284 @@ get_credit_balance() {
       ;;
     esac
   fi
+}
+
+# -----------------------------------------------------------------------------
+# Unified Core Inference Engine (Master Loop)
+# -----------------------------------------------------------------------------
+# Parameters:
+#   1. active_model     : Model name to execute (e.g. $CHAT_MODEL or $VISION_MODEL)
+#   2. payload_messages : JSON array of active messages (system prompt + user/inline context)
+#   3. tools_option     : "all" (use BASE_TOOLS), "none" (no tools), or "readonly" (filtered BASE_TOOLS)
+#   4. enable_reasoning : "true" or "false" (passes reasoning config to JSON payload)
+#   5. output_stream    : "stdout" (prints to user terminal) or "stderr" (for agent loops)
+#   6. save_to_history  : "true" or "false" (automatically synchronizes and saves to messages.json)
+#   7. exit_keyword     : Exit loop early if keyword found (e.g. "[CONSOLIDATION_COMPLETE]")
+#   8. history_messages : Optional persistent history array
+# -----------------------------------------------------------------------------
+run_inference_loop() {
+  local active_model="$1"
+  local payload_messages="$2"
+  local tools_option="${3:-all}"
+  local enable_reasoning="${4:-true}"
+  local output_stream="${5:-stdout}"
+  local save_to_history="${6:-false}"
+  local exit_keyword="${7:-}"
+  local history_messages="${8:-[]}"
+  local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
+  local final_content=""
+  local loop_errors=0
+  local raw_res resolved_model reasoning content refusal tools usage balance assistant_msg
+
+  # Build the dynamic tools payload based on the tools_option constraint
+  local tools_payload=""
+  if [[ "$tools_option" == "all" ]]; then
+    tools_payload=$(<"$BASE_TOOLS")
+  elif [[ "$tools_option" == "readonly" ]]; then
+    # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
+    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS" 2>/dev/null)
+  fi
+
+  while true; do
+    # Write payload messages to temp file for jq --rawfile
+    printf "%s" "$payload_messages" > "$TEMP_PAYLOAD_MESSAGES"
+
+    # Build the OpenAI compliant Request Payload
+    local payload
+    if [[ -z $tools_payload || $tools_payload == "[]" || "$tools_option" == "none" ]]; then
+      payload=$(jq -rc -n \
+        --arg model "$active_model" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --argjson enabled_bool "$enable_reasoning" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: $enabled_bool},
+          stream: false
+        }'
+      )
+    else
+      payload=$(jq -rc -n \
+        --arg model "$active_model" \
+        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
+        --argjson enabled_bool "$enable_reasoning" \
+        --argjson tools_obj "$tools_payload" \
+        '{
+          model: $model,
+          messages: ($msgs | fromjson),
+          reasoning: {enabled: $enabled_bool},
+          tools: $tools_obj,
+          stream: false
+        }'
+      )
+    fi
+    raw_res=$(api_call "$payload")
+    [[ -z $raw_res || $raw_res == "null" ]] && error "API returned an empty response."
+
+    if jq -e '.error' <<<"$raw_res" &>/dev/null; then
+      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
+      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
+      local err_code; err_code=$(jq -rc '.error.code // .error.param.statusCode' <<<"$raw_res" 2>/dev/null)
+      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
+      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
+      log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
+      loop_errors=1
+      return $loop_errors
+    fi
+
+    # Retrieve components
+    resolved_model=$(jq -rc '.model' <<<"$raw_res" 2>/dev/null)
+    reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
+    content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
+    refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
+    tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
+    usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
+    balance=$(get_credit_balance)
+
+    # Handling model resolving
+    [[ -n $resolved_model && $resolved_model != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
+
+    # Output thinking (reasoning) if present
+    if [[ -n $reasoning && $reasoning != "null" ]]; then
+      if [[ "$output_stream" == "stdout" ]]; then
+        show_thinking_header
+        echo "$reasoning" | render_markdown
+      else
+        {
+          show_thinking_header
+          echo "$reasoning" | render_markdown
+        } >&2
+      fi
+    fi
+
+    # Output refusal to STDERR if present
+    if [[ -n $refusal && $refusal != "null" ]]; then
+      if [[ "$output_stream" == "stdout" ]]; then
+        show_ai_header
+        echo "$refusal" | render_markdown
+      else
+        {
+          show_ai_header
+          echo "$refusal" | render_markdown
+        } >&2
+      fi
+    fi
+
+    # Handle requested tool calls (Multi-Parallel Support)
+    if [[ -n $tools && $tools != "null" ]]; then
+      # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
+      if [[ "$tools_option" == "none" ]]; then
+        log_warn "Received unexpected tool calls despite tools disabled!"
+        break
+      fi
+
+      # 1. Grab assistant command message and push to local history
+      assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res" 2>/dev/null)
+      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
+      payload_messages=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$payload_messages" 2>/dev/null)
+      history_messages=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$history_messages" 2>/dev/null)
+
+      # 2. Extract and iterate over all requested parallel tools
+      local tool_count=0
+      local -a detected_images=()
+      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
+        ((tool_count++))
+        show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
+
+        # 3. Check and execute tool handler
+        if [[ -x $TOOLS_HANDLER ]]; then
+          "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT"
+        else
+          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
+          log_warn "Tool handler not executable."
+        fi
+
+        # 4. Fallback safeguard for empty output
+        [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
+
+        # 5. Format and sanitize output to protect JSON/JQ
+        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
+
+        # Accumulate generated images during this tool call
+        if [[ -r $TOOLS_OUTPUT ]]; then
+          while read -r img_p; do
+            if [[ -n $img_p && -r $img_p ]]; then
+              detected_images+=("$img_p")
+            fi
+          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
+        fi
+
+        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
+          rm -f "$TOOLS_OUTPUT"
+
+          # 6. Append tool output to messages array safely
+          payload_messages=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$payload_messages" 2>/dev/null)
+          history_messages=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$history_messages" 2>/dev/null)
+          rm -f "$TEMP_TOOLS_OUTPUT"
+        else
+          log_warn "Unable to parse tool output with rawfile, using fallback formatting"
+          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
+          payload_messages=$(jq -rc \
+            --arg id "$tool_id" \
+            --arg name "$tool_name" \
+            --arg content "$fallback_content" \
+            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$payload_messages"
+          )
+          history_messages=$(jq -rc \
+            --arg id "$tool_id" \
+            --arg name "$tool_name" \
+            --arg content "$fallback_content" \
+            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$history_messages"
+          )
+          rm -f "$TOOLS_OUTPUT"
+        fi
+      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
+
+      # Inject visual feedback if any images were generated
+      if (( ${#detected_images[@]} > 0 )); then
+        for img_path in "${detected_images[@]}"; do
+          local mime_type ; mime_type=$(get_image_type "$img_path")
+          local filename ; filename="${img_path##*/}"
+          (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
+          log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
+
+          # Inject encoded image directly into the active in-memory messages list
+          payload_messages=$(jq -rc \
+            --arg msg "Autonomous visual feedback of generated asset (${filename}):" \
+            --arg mime "$mime_type" \
+            --rawfile b64 "$TEMP_BASE64_OUTPUT" \
+            '. + [{
+              role: "user",
+              content: [
+                {type: "text", text: $msg},
+                {type: "image_url", image_url: {url: ("data:" + $mime + ";base64," + $b64)}}
+              ]
+            }]' <<<"$payload_messages"
+          )
+          rm -f "$TEMP_BASE64_OUTPUT"
+
+          if [[ $save_to_history == "true" ]]; then
+            # Keep the persistent messages history on disk lightweight and clean
+            history_messages=$(jq -rc \
+              --arg msg "[Autonomous visual feedback injected for generated asset: ${filename}]" \
+              '. + [{role: "user", content: $msg}]' <<<"$history_messages"
+            )
+          fi
+        done
+      fi
+
+    else
+      # If no tool calls, this is the final response
+      [[ -n $content && $content != "null" ]] && final_content="$content"
+
+      if [[ -n $final_content ]]; then
+        if [[ "$output_stream" == "stdout" ]]; then
+          show_ai_header
+          echo "$final_content" | render_markdown
+        fi
+
+        if [[ $save_to_history == "true" ]]; then
+          history_messages=$(jq -rc --arg ast "$final_content" '. + [{role: "assistant", content: $ast}]' <<<"$history_messages" 2>/dev/null)
+          echo "$history_messages" > "${messages_path}.tmp"
+          mv -f "${messages_path}.tmp" "$messages_path"
+        fi
+      fi
+      # Print usage metrics to STDERR to avoid polluting stdout
+      if [[ -n $usage && $usage != "null" ]]; then
+        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage" 2>/dev/null)
+        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage" 2>/dev/null)
+        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage" 2>/dev/null)
+        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage" 2>/dev/null)
+        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage" 2>/dev/null)
+        local cost ; cost=$(jq -rc '.cost.usd // .cost' <<<"$usage" 2>/dev/null)
+
+        {
+          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
+          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+          [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+          if [[ -n $balance && "$balance" != "null" ]]; then
+            case $PROVIDER in
+              cyberneurova) echo -e "${CLR_B_CYAN}Tokens Remaining:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
+              openrouter*) echo -e "${CLR_B_CYAN}Total Usage:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
+              *) echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
+            esac
+          fi
+          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
+        } >&2
+      fi
+
+      # Check if we should exit early based on keyword
+      if [[ -n $exit_keyword && "$final_content" == *"$exit_keyword"* ]]; then
+        break
+      fi
+
+      break
+    fi
+  done
+  if [[ "$output_stream" == "stderr" ]]; then
+    echo "$final_content"
+  fi
+  return $loop_errors
 }
 
 # -----------------------------------------------------------------------------
@@ -1065,15 +1370,6 @@ call_task_agent() {
 
   log_info "${purpose_msg} (${CLR_B_YELLOW}${active_model}${ANSI_RESET}) [Tools: ${CLR_B_GREEN}${tools_option}${ANSI_RESET} | Reasoning: ${CLR_B_GREEN}${enable_reasoning}${ANSI_RESET}]..."
 
-  # Build the dynamic tools payload based on the tools_option constraint
-  local tools_payload
-  if [[ "$tools_option" == "all" ]]; then
-    tools_payload=$(<"$BASE_TOOLS")
-  elif [[ "$tools_option" == "readonly" ]]; then
-    # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
-    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS" 2>/dev/null)
-  fi
-
   # Initialize local MESSAGES array in-memory for this specific agent's execution loop
   local ALL_MESSAGES
   printf "%s" "$system_inst" > "$TEMP_PAYLOAD_SYSTEM"
@@ -1083,207 +1379,8 @@ call_task_agent() {
     '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
   )
 
-  local final_content
-
-  while true; do
-    # Write payload messages to temp file for jq --rawfile
-    printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
-
-    # Build the OpenAI compliant Request Payload
-    local payload
-    if [[ -z $tools_payload || $tools_payload == "[]" || "$tools_option" == "none" ]]; then
-      payload=$(jq -rc -n \
-        --arg model "$active_model" \
-        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-        --argjson enabled_bool "$enable_reasoning" \
-        '{
-          model: $model,
-          messages: ($msgs | fromjson),
-          reasoning: {enabled: $enabled_bool},
-          stream: false
-        }'
-      )
-    else
-      payload=$(jq -rc -n \
-        --arg model "$active_model" \
-        --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-        --argjson enabled_bool "$enable_reasoning" \
-        --argjson tools_obj "$tools_payload" \
-        '{
-          model: $model,
-          messages: ($msgs | fromjson),
-          reasoning: {enabled: $enabled_bool},
-          tools: $tools_obj,
-          stream: false
-        }'
-      )
-    fi
-
-    local raw_res ; raw_res=$(api_call "$payload")
-    [[ -z $raw_res || $raw_res == "null" ]] && error "API returned an empty response."
-
-    if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
-      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
-      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_res" 2>/dev/null)
-      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
-      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
-      log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
-    fi
-
-    # Retrieve components
-    local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_res" 2>/dev/null)
-    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
-    local content ; content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
-    local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
-    local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
-    local usage ; usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
-    local balance ; balance=$(get_credit_balance)
-
-    # Handling model resolving
-    [[ -n $resolved_model && $resolved_model != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
-
-    # Output thinking (reasoning) if present - REDIRECT TO STDERR (>&2)
-    if [[ -n $reasoning && $reasoning != "null" ]]; then
-      {
-        show_thinking_header
-        echo "$reasoning" | render_markdown
-      } >&2
-    fi
-
-    # Output refusal to STDERR if present
-    if [[ -n $refusal && $refusal != "null" ]]; then
-      {
-        show_ai_header
-        echo "$refusal" | render_markdown
-      } >&2
-    fi
-
-    # Handle requested tool calls (Multi-Parallel Support)
-    if [[ -n $tools && $tools != "null" ]]; then
-      # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
-      if [[ "$tools_option" == "none" ]]; then
-        log_warn "Received unexpected tool calls despite tools disabled!"
-        break
-      fi
-
-      # 1. Grab assistant command message and push to local history
-      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res" 2>/dev/null)
-      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
-      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES" 2>/dev/null)
-
-      # 2. Extract and iterate over all requested parallel tools
-      local tool_count=0
-      local -a detected_images=()
-      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
-        ((tool_count++))
-        show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
-
-        # 3. Check and execute tool handler
-        if [[ -x $TOOLS_HANDLER ]]; then
-          "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT"
-        else
-          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-          log_warn "Tool handler not executable."
-        fi
-
-        # 4. Fallback safeguard for empty output
-        [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-
-        # 5. Format and sanitize output to protect JSON/JQ
-        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-
-        # Accumulate generated images during this tool call
-        if [[ -r $TOOLS_OUTPUT ]]; then
-          while read -r img_p; do
-            if [[ -n $img_p && -r $img_p ]]; then
-              detected_images+=("$img_p")
-            fi
-          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
-        fi
-        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-          rm -f "$TOOLS_OUTPUT"
-
-          # 6. Append tool output to messages array safely
-          local new_msgs
-          if new_msgs=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
-            ALL_MESSAGES="$new_msgs"
-          else
-            log_warn "fromjson failed, using fallback --arg serialization"
-            ALL_MESSAGES=$(jq -rc \
-              --arg id "$tool_id" \
-              --arg name "$tool_name" \
-              --arg content "$(<"$TEMP_TOOLS_OUTPUT")" \
-              '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-            )
-          fi
-          rm -f "$TEMP_TOOLS_OUTPUT"
-        else
-          log_warn "Unable to parse tool output with rawfile, using fallback formatting"
-
-          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
-          ALL_MESSAGES=$(jq -rc \
-            --arg id "$tool_id" \
-            --arg name "$tool_name" \
-            --arg content "$fallback_content" \
-            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-          )
-          rm -f "$TOOLS_OUTPUT"
-        fi
-      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
-
-      # Inject visual feedback if any images were generated
-      if (( ${#detected_images[@]} > 0 )); then
-        for img_path in "${detected_images[@]}"; do
-          local mime_type ; mime_type=$(get_image_type "$img_path")
-          local filename ; filename="${img_path##*/}"
-          (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
-          log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
-
-          # Inject encoded image directly into the active in-memory messages list
-          ALL_MESSAGES=$(jq -rc \
-            --arg msg "Autonomous visual feedback of generated asset (${filename}):" \
-            --arg mime "$mime_type" \
-            --rawfile b64 "$TEMP_BASE64_OUTPUT" \
-            '. + [{
-              role: "user",
-              content: [
-                {type: "text", text: $msg},
-                {type: "image_url", image_url: {url: ("data:" + $mime + ";base64," + $b64)}}
-              ]
-            }]' <<<"$ALL_MESSAGES"
-          )
-          rm -f "$TEMP_BASE64_OUTPUT"
-        done
-      fi
-
-    else
-      # If no tool calls, this is the final response
-      [[ -n $content && $content != "null" ]] && final_content="$content"
-
-      # Print usage metrics to STDERR to avoid polluting stdout
-      if [[ -n $usage && $usage != "null" ]]; then
-        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage" 2>/dev/null)
-        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage" 2>/dev/null)
-        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage" 2>/dev/null)
-        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage" 2>/dev/null)
-        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage" 2>/dev/null)
-        local cost ; cost=$(jq -rc .cost <<<"$usage" 2>/dev/null)
-
-        {
-          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-          [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-          [[ -n $balance && "$balance" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}"
-          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-        } >&2
-      fi
-      break
-    fi
-  done
-
-  # Return the final text content of the agent on stdout
-  echo "$final_content"
+  # Call the unified inference loop
+  run_inference_loop "$active_model" "$ALL_MESSAGES" "$tools_option" "$enable_reasoning" "stderr" "false" "" "$ALL_MESSAGES"
 }
 
 route_request() {
@@ -1359,169 +1456,9 @@ Take as many tool calls as you need. When you are fully done organizing and savi
   printf "%s" "$dynamic_system" > "$TEMP_PAYLOAD_SYSTEM"
   PAYLOAD_MESSAGES=$(jq -rc --rawfile sys "$TEMP_PAYLOAD_SYSTEM" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES" 2>/dev/null)
 
-  # The Magic Loop
-  while true; do
-    printf "%s" "$PAYLOAD_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
-
-    local payload
-    payload=$(jq -rc -n \
-      --arg model "$CHAT_MODEL" \
-      --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-      --rawfile tools "$BASE_TOOLS" \
-      '{
-        model: $model,
-        messages: ($msgs | fromjson),
-        reasoning: {enabled: true},
-        temperature: 0.1
-      } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
-    )
-
-    # Sending request and store response
-    local raw_response ; raw_response=$(api_call "$payload")
-    if [[ -z $raw_response || $raw_response == "null" ]]; then
-      log_error "Consolidation API call returned empty response."
-      ((errors++))    # Increment errors counter
-      break
-    fi
-
-    # Check for errors before continuing
-    if jq -e '.error' <<<"$raw_response" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_response" 2>/dev/null)
-      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_response" 2>/dev/null)
-      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$raw_response" 2>/dev/null)
-      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
-      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
-      log_error "Consolidation API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
-      ((errors++))    # Increment errors counter
-      break
-    fi
-
-    # Store relevant data
-    local usage ; usage=$(jq -rc '.usage' <<<"$raw_response" 2>/dev/null)
-    local balance ; balance=$(get_credit_balance)
-    local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_response" 2>/dev/null)
-    local reasoning ; reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_response" 2>/dev/null)
-    local response ; response=$(jq -rc '.choices[0].message.content' <<<"$raw_response" 2>/dev/null)
-    local refusal ; refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_response" 2>/dev/null)
-    local tools ; tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_response" 2>/dev/null)
-
-    # Handling model resolving
-    [[ -n $resolved_model && $resolved_model != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
-
-    # Handling model reasoning
-    if [[ -n $reasoning && $reasoning != "null" ]]; then
-      show_thinking_header
-      echo "$reasoning" | render_markdown
-    fi
-
-    # Handling model refusal
-    if [[ -n $refusal && $refusal != "null" ]]; then
-      show_ai_header
-      echo "$refusal" | render_markdown
-    fi
-
-    # Handling model requested tools (Multi-Parallel Support)
-    if [[ -n $tools && $tools != "null" ]]; then
-      local assistant_msg ; assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_response" 2>/dev/null)
-      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
-      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
-
-      local tool_count=0
-      local -a detected_images=()
-      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
-        ((tool_count++))
-        show_tool_header "$tool_count" "$tool_name" "$tool_args"
-
-        if [[ -x $TOOLS_HANDLER ]]; then
-          "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT"
-        else
-          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-        fi
-
-        [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-
-        # Clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
-        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-
-        # Accumulate generated images during this tool call
-        if [[ -r $TOOLS_OUTPUT ]]; then
-          while read -r img_p; do
-            if [[ -n $img_p && -r $img_p ]]; then
-              detected_images+=("$img_p")
-            fi
-          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
-        fi
-        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-          rm -f "$TOOLS_OUTPUT"
-          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
-          rm -f "$TEMP_TOOLS_OUTPUT"
-        else
-          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool)")
-          PAYLOAD_MESSAGES=$(jq -rc \
-            --arg id "$tool_id" \
-            --arg name "$tool_name" \
-            --arg content "$fallback_content" \
-            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$PAYLOAD_MESSAGES"
-          )
-          rm -f "$TOOLS_OUTPUT"
-        fi
-      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
-
-      # Inject visual feedback if any images were generated
-      if (( ${#detected_images[@]} > 0 )); then
-        for img_path in "${detected_images[@]}"; do
-          local mime_type ; mime_type=$(get_image_type "$img_path")
-          local filename ; filename="${img_path##*/}"
-          (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
-          log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
-
-          # Inject encoded image directly into the active API payload messages
-          PAYLOAD_MESSAGES=$(jq -rc \
-            --arg msg "Autonomous visual feedback of generated asset (${filename}):" \
-            --arg mime "$mime_type" \
-            --rawfile b64 "$TEMP_BASE64_OUTPUT" \
-            '. + [{
-              role: "user",
-              content: [
-                {type: "text", text: $msg},
-                {type: "image_url", image_url: {url: ("data:" + $mime + ";base64," + $b64)}}
-              ]
-            }]' <<<"$PAYLOAD_MESSAGES"
-          )
-          rm -f "$TEMP_BASE64_OUTPUT"
-        done
-      fi
-    else
-      if [[ -n $response && $response != "null" ]]; then
-        show_ai_header
-        echo "$response" | render_markdown
-        PAYLOAD_MESSAGES=$(jq -rc --arg ast "$response" '. + [{role: "assistant", content: $ast}]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
-
-        if [[ "$response" == *"[CONSOLIDATION_COMPLETE]"* ]]; then
-          log_success "Autonomous memory consolidation complete!"
-          break
-        fi
-      fi
-      log_warn "Consolidation cycle returned response without [CONSOLIDATION_COMPLETE]. Safely stopping cycle."
-      break
-    fi
-  done
-
-  # Handling model usage
-  if [[ -n $usage && $usage != "null" ]]; then
-    local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage" 2>/dev/null)
-    local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage" 2>/dev/null)
-    local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage" 2>/dev/null)
-    local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage" 2>/dev/null)
-    local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage" 2>/dev/null)
-    local cost ; cost=$(jq -rc .cost <<<"$usage" 2>/dev/null)
-
-    echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-    echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-    [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-    [[ -n $balance && "$balance" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}"
-    echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-  fi
+  # Call the unified inference loop
+  run_inference_loop "$CHAT_MODEL" "$PAYLOAD_MESSAGES" "all" "true" "stdout" "false" "[CONSOLIDATION_COMPLETE]" "$ALL_MESSAGES" || \
+    errors=1
 
   # Prune main context: Keep only the system prompt + last 2 turns of the original conversation
   if [[ $errors -eq 0 ]]; then
@@ -1564,7 +1501,6 @@ send_message() {
   local ALL_MESSAGES="[]"
   local is_image=false
   local user_content="$prompt"
-  local RAW_RESPONSE RESOLVED_MODEL REASONING RESPONSE REFUSAL TOOLS USAGE BALANCE ASSISTANT_MSG
 
   # Load messages file if already exist
   [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
@@ -1633,184 +1569,8 @@ send_message() {
     log_debug "Sending query chunk to external $PROVIDER backend (Model: $active_model)...\n"
   fi
 
-  # The Magic Loop
-  while true; do
-    # Write payload variables to temporary files inside the loop to capture any updates
-    printf "%s" "$PAYLOAD_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
-
-    local JSON_PAYLOAD
-    JSON_PAYLOAD=$(jq -rc -n \
-      --arg model "$active_model" \
-      --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-      --rawfile tools "$BASE_TOOLS" \
-      '{
-        model: $model,
-        messages: ($msgs | fromjson),
-        reasoning: {enabled: true}
-       } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
-    )
-    [[ -z $JSON_PAYLOAD ]] && error "Unexpected error while creating payload!"
-
-    # Sending request and store response
-    RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-    [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && log_error "Empty API response."
-
-    # Check for errors before continuing
-    if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE" 2>/dev/null)
-      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
-      local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
-      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
-      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
-      log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
-    fi
-
-    # Store relevant data
-    RESOLVED_MODEL=$(jq -rc '.model' <<<"$RAW_RESPONSE" 2>/dev/null)
-    REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
-    RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
-    REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
-    TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
-    USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
-    BALANCE=$(get_credit_balance)
-
-    # Handling model resolving
-    [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
-
-    # Handling model reasoning
-    if [[ -n $REASONING && $REASONING != "null" ]]; then
-      show_thinking_header
-      echo "$REASONING" | render_markdown
-    fi
-
-    # Handling model refusal
-    if [[ -n $REFUSAL && $REFUSAL != "null" ]]; then
-      show_ai_header
-      echo "$REFUSAL" | render_markdown
-    fi
-
-    # Handling model requested tools (Multi-Parallel Support)
-    if [[ -n $TOOLS && $TOOLS != "null" ]]; then
-      # 1. Grab assistant command message and push to history
-      ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE" 2>/dev/null)
-      # Write payload variables to temporary files inside the loop to capture any updates
-      printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
-      ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES" 2>/dev/null)
-      PAYLOAD_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
-
-      # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
-      local tool_count=0
-      local -a detected_images=()
-      while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
-        ((tool_count++))
-        show_tool_header "$tool_count" "$tool_name" "$tool_args"
-
-        # 3. Check and execute tool handler
-        if [[ -x $TOOLS_HANDLER ]]; then
-          "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT"
-        else
-          echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-          log_warn "Tool handler not executable."
-        fi
-
-        # 4. Fallback safeguard for empty output
-        [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-
-        # 5. Format according to OpenAI guidelines
-        # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
-        iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-
-        # Accumulate generated images during this tool call
-        if [[ -r $TOOLS_OUTPUT ]]; then
-          while read -r img_p; do
-            if [[ -n $img_p && -r $img_p ]]; then
-              detected_images+=("$img_p")
-            fi
-          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
-        fi
-        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-          rm -f "$TOOLS_OUTPUT"
-          ALL_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null)
-          PAYLOAD_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
-          rm -f "$TEMP_TOOLS_OUTPUT"
-        else
-          log_warn "fromjson failed, using fallback --arg serialization"
-          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool)")
-          ALL_MESSAGES=$(jq -rc \
-            --arg id "$tool_id" \
-            --arg name "$tool_name" \
-            --arg content "$fallback_content" \
-            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-          )
-          PAYLOAD_MESSAGES=$(jq -rc \
-            --arg id "$tool_id" \
-            --arg name "$tool_name" \
-            --arg content "$fallback_content" \
-            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$PAYLOAD_MESSAGES"
-          )
-          rm -f "$TOOLS_OUTPUT"
-        fi
-      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$TOOLS" 2>/dev/null)
-
-      # Inject visual feedback if any images were generated
-      if (( ${#detected_images[@]} > 0 )); then
-        for img_path in "${detected_images[@]}"; do
-          local mime_type ; mime_type=$(get_image_type "$img_path")
-          local filename ; filename="${img_path##*/}"
-          (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
-          log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
-
-          # Inject encoded image directly into the active API payload messages
-          PAYLOAD_MESSAGES=$(jq -rc \
-            --arg msg "Autonomous visual feedback of generated asset (${filename}):" \
-            --arg mime "$mime_type" \
-            --rawfile b64 "$TEMP_BASE64_OUTPUT" \
-            '. + [{
-              role: "user",
-              content: [
-                {type: "text", text: $msg},
-                {type: "image_url", image_url: {url: ("data:" + $mime + ";base64," + $b64)}}
-              ]
-            }]' <<<"$PAYLOAD_MESSAGES"
-          )
-          rm -f "$TEMP_BASE64_OUTPUT"
-
-          # Keep the persistent messages history on disk lightweight and clean
-          ALL_MESSAGES=$(jq -rc \
-            --arg msg "[Autonomous visual feedback injected for generated asset: ${filename}]" \
-            '. + [{role: "user", content: $msg}]' <<<"$ALL_MESSAGES"
-          )
-        done
-      fi
-
-    else
-      if [[ -n $RESPONSE && $RESPONSE != "null" ]]; then
-        show_ai_header
-        echo "$RESPONSE" | render_markdown
-
-        # Store final AI response
-        ALL_MESSAGES=$(jq -rc --arg ast "$RESPONSE" '. + [{role: "assistant", content: $ast}]' <<<"$ALL_MESSAGES" 2>/dev/null)
-        echo "$ALL_MESSAGES" > "$messages_path"
-      fi
-      break   # Leaving the loop
-    fi
-
-    # Handling model usage
-    if [[ -n $USAGE && $USAGE != "null" ]]; then
-      local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE" 2>/dev/null)
-      local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE" 2>/dev/null)
-      local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE" 2>/dev/null)
-      local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE" 2>/dev/null)
-      local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE" 2>/dev/null)
-      local cost ; cost=$(jq -rc .cost <<<"$USAGE" 2>/dev/null)
-
-      echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-      echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-      [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-      [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
-      echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-    fi
-  done
+  # Call the unified inference loop
+  run_inference_loop "$active_model" "$PAYLOAD_MESSAGES" "all" "true" "stdout" "true" "" "$ALL_MESSAGES"
 
   check_and_trigger_heartbeat
 }
@@ -1914,292 +1674,49 @@ run_one_shot_pipeline() {
   if (( is_question == 1 )); then
     SIMPLE_PROMPT="Question: ${USER_PROMPT}\n\nContext:\n${CONTEXT_DATA}"
 
-    case $BACKEND in
-      ollama|llamacpp|external)
-        if [[ $BACKEND == "ollama" ]]; then
-          log_info "Question mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
-        elif [[ $BACKEND == "llamacpp" ]]; then
-          log_info "Question mode detected. Calling local llama.cpp model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
-        else
-          log_info "Question mode detected. Calling cloud model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
-        fi
-        printf "%s" "$active_system" > "$TEMP_MEMORY_SYSTEM"
-        printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
-        ALL_MESSAGES=$(jq -rc -n \
-          --rawfile sys "$TEMP_MEMORY_SYSTEM" \
-          --rawfile user "$TEMP_MEMORY_USER" \
-          '[{role: "system", content: $sys}, {role: "user", content: $user}]'
-        )
+    if [[ $BACKEND == "ollama" ]]; then
+      log_info "Question mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
+    elif [[ $BACKEND == "llamacpp" ]]; then
+      log_info "Question mode detected. Calling local llama.cpp model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
+    else
+      log_info "Question mode detected. Calling cloud model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})..."
+    fi
+    printf "%s" "$active_system" > "$TEMP_MEMORY_SYSTEM"
+    printf "%s" "$SIMPLE_PROMPT" > "$TEMP_MEMORY_USER"
+    ALL_MESSAGES=$(jq -rc -n \
+      --rawfile sys "$TEMP_MEMORY_SYSTEM" \
+      --rawfile user "$TEMP_MEMORY_USER" \
+      '[{role: "system", content: $sys}, {role: "user", content: $user}]'
+    )
 
-        # The Magic Loop
-        while true; do
-          printf "%s" "$ALL_MESSAGES" > "$TEMP_PAYLOAD_MESSAGES"
-
-          local JSON_PAYLOAD
-          JSON_PAYLOAD=$(jq -rc -n \
-            --arg model "$CHAT_MODEL" \
-            --rawfile msgs "$TEMP_PAYLOAD_MESSAGES" \
-            --rawfile tools "$BASE_TOOLS" \
-            '{
-              model: $model,
-              messages: ($msgs | fromjson),
-              reasoning: {enabled: true}
-            } + if (($tools | fromjson) | length) > 0 then {tools: ($tools | fromjson)} else {} end'
-          )
-          [[ -z $JSON_PAYLOAD ]] && error "Unexpected error while creating payload!"
-
-          # Sending request and store response
-          RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-          [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && error "Empty API response."
-
-          # Check for errors before continuing
-          if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-            local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE" 2>/dev/null)
-            local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
-            local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
-            [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
-            [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
-            log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
-          fi
-
-          # Store relevant data
-          RESOLVED_MODEL=$(jq -rc '.model' <<<"$RAW_RESPONSE" 2>/dev/null)
-          REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
-          RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
-          REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
-          TOOLS=$(jq -rc '.choices[0].message.tool_calls' <<<"$RAW_RESPONSE" 2>/dev/null)
-          USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
-          BALANCE=$(get_credit_balance)
-
-          # Handling model resolving
-          [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
-
-          # Handling model reasoning
-          if [[ -n $REASONING && ! $REASONING == "null" ]]; then
-            show_thinking_header
-            echo "$REASONING" | render_markdown
-          fi
-
-          # Handling model refusal
-          if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
-            show_ai_header
-            echo "$REFUSAL" | render_markdown
-          fi
-
-          # Handling model requested tools (Multi-Parallel Support)
-          if [[ -n $TOOLS && ! $TOOLS == "null" ]]; then
-            # 1. Grab assistant command message and push to history
-            ASSISTANT_MSG=$(jq -rc '.choices[0].message' <<<"$RAW_RESPONSE" 2>/dev/null)
-            # Write payload variables to temporary files inside the loop to capture any updates
-            printf "%s" "$ASSISTANT_MSG" > "$TEMP_PAYLOAD_ASSISTANT"
-            ALL_MESSAGES=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$ALL_MESSAGES" 2>/dev/null)
-
-            # 2. Extract and iterate over all requested parallel tools (Single-jq process optimized stream)
-            local tool_count=0
-            local -a detected_images=()
-            while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
-              ((tool_count++))
-              show_tool_header "$tool_count" "$tool_name" "$tool_args"
-
-              # 3. Check and execute tool handler
-              if [[ -x $TOOLS_HANDLER ]]; then
-                "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT"
-              else
-                echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
-                log_warn "Tool handler not executable."
-              fi
-
-              # 4. Fallback safeguard for empty output
-              [[ ! -s $TOOLS_OUTPUT ]] && echo "(Tool executed successfully and returned empty stdout)" > "$TOOLS_OUTPUT"
-
-              # 5. Format according to OpenAI guidelines
-              # and clean/sanitize TOOLS_OUTPUT to ensure 100% valid UTF-8 and protect JQ
-              iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
-
-              # Accumulate generated images during this tool call
-              if [[ -r $TOOLS_OUTPUT ]]; then
-                while read -r img_p; do
-                  if [[ -n $img_p && -r $img_p ]]; then
-                    detected_images+=("$img_p")
-                  fi
-                done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
-              fi
-              if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-                rm -f "$TOOLS_OUTPUT"
-
-                # 6. Append tool output to messages array safely
-                if NEW_MESSAGES=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$ALL_MESSAGES" 2>/dev/null); then
-                  ALL_MESSAGES="$NEW_MESSAGES"
-                else
-                  log_warn "fromjson failed, using fallback --arg serialization"
-                  ALL_MESSAGES=$(jq -rc \
-                    --arg id "$tool_id" \
-                    --arg name "$tool_name" \
-                    --arg content "$(<"$TEMP_TOOLS_OUTPUT")" \
-                    '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-                  )
-                fi
-                rm -f "$TEMP_TOOLS_OUTPUT"
-              else
-                log_warn "Unable to parse tool output with rawfile, using fallback formatting"
-                local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
-                ALL_MESSAGES=$(jq -rc \
-                  --arg id "$tool_id" \
-                  --arg name "$tool_name" \
-                  --arg content "$fallback_content" \
-                  '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$ALL_MESSAGES"
-                )
-                rm -f "$TOOLS_OUTPUT"
-              fi
-            done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$TOOLS" 2>/dev/null)
-
-            # Inject visual feedback if any images were generated
-            if (( ${#detected_images[@]} > 0 )); then
-              for img_path in "${detected_images[@]}"; do
-                local mime_type ; mime_type=$(get_image_type "$img_path")
-                local filename ; filename="${img_path##*/}"
-                (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
-                log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
-
-                # Inject encoded image directly into the active in-memory messages list
-                ALL_MESSAGES=$(jq -rc \
-                  --arg msg "Autonomous visual feedback of generated asset (${filename}):" \
-                  --arg mime "$mime_type" \
-                  --rawfile b64 "$TEMP_BASE64_OUTPUT" \
-                  '. + [{
-                    role: "user",
-                    content: [
-                      {type: "text", text: $msg},
-                      {type: "image_url", image_url: {url: ("data:" + $mime + ";base64," + $b64)}}
-                    ]
-                  }]' <<<"$ALL_MESSAGES"
-                )
-                rm -f "$TEMP_BASE64_OUTPUT"
-              done
-            fi
-
-          # Handling model final response
-          else
-            if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-              show_ai_header
-              echo "$RESPONSE" | render_markdown
-            fi
-            break   # Leaving the loop
-          fi
-
-          # Handling model usage
-          if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-            local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE" 2>/dev/null)
-            local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE" 2>/dev/null)
-            local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE" 2>/dev/null)
-            local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE" 2>/dev/null)
-            local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE" 2>/dev/null)
-            local cost ; cost=$(jq -rc .cost <<<"$USAGE" 2>/dev/null)
-
-            echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-            echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-            [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-            [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
-            echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-          fi
-        done
-      ;;
-      *) error "Unsupported backend given: $BACKEND" ;;
-    esac
+    # Call the unified inference loop
+    run_inference_loop "$CHAT_MODEL" "$ALL_MESSAGES" "all" "true" "stdout" "false" "" "$ALL_MESSAGES"
     exit $?   # End of Question Mode
 
   # Route B: Compare Mode
   elif (( is_compare == 1 )); then
     COMPARE_PROMPT="${active_system}\n\nThe user wants to compare two files, show the main differences.\n\nContext:\n${CONTEXT_DATA}"
 
-    case $BACKEND in
-      ollama|llamacpp|external)
-        if [[ $BACKEND == "ollama" ]]; then
-          log_info "Compare mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
-        elif [[ $BACKEND == "llamacpp" ]]; then
-          log_info "Compare mode detected. Calling local llama.cpp model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
-        else
-          log_info "Compare mode detected. Calling cloud model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
-        fi
-        printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
-        printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
+    if [[ $BACKEND == "ollama" ]]; then
+      log_info "Compare mode detected. Calling local Ollama model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
+    elif [[ $BACKEND == "llamacpp" ]]; then
+      log_info "Compare mode detected. Calling local llama.cpp model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
+    else
+      log_info "Compare mode detected. Calling cloud model (${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET})... "
+    fi
+    printf "%s" "$COMPARE_PROMPT" > "$TEMP_MEMORY_SYSTEM"
+    printf "%s" "$USER_PROMPT" > "$TEMP_MEMORY_USER"
 
-        local JSON_PAYLOAD
-        JSON_PAYLOAD=$(jq -rc -n \
-          --arg model "$CHAT_MODEL" \
-          --rawfile system "$TEMP_MEMORY_SYSTEM" \
-          --rawfile user "$TEMP_MEMORY_USER" \
-          '{
-            model: $model,
-            messages: [
-              {role: "system", content: $system},
-              {role: "user", content: $user}
-            ],
-            reasoning: {enabled: true}
-          }'
-        )
-        [[ -z $JSON_PAYLOAD ]] && error "Unexpected error while creating payload!"
+    local JSON_PAYLOAD
+    JSON_PAYLOAD=$(jq -rc -n \
+      --arg model "$CHAT_MODEL" \
+      --rawfile system "$TEMP_MEMORY_SYSTEM" \
+      --rawfile user "$TEMP_MEMORY_USER" \
+      '[{role: "system", content: $system}, {role: "user", content: $user}]'
+    )
 
-        # Sending request and store response
-        RAW_RESPONSE=$(api_call "$JSON_PAYLOAD")
-        [[ -z $RAW_RESPONSE || $RAW_RESPONSE == "null" ]] && error "Empty API response."
-
-        # Check for errors before continuing
-        if jq -e '.error' <<<"$RAW_RESPONSE" &>/dev/null; then
-          local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$RAW_RESPONSE" 2>/dev/null)
-          local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
-          local err_code; err_code=$(jq -rc '.error.code // empty' <<<"$RAW_RESPONSE" 2>/dev/null)
-          [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
-          [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
-          log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
-        fi
-
-        # Store relevant data
-        RESOLVED_MODEL=$(jq -rc '.model' <<<"$RAW_RESPONSE" 2>/dev/null)
-        REASONING=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$RAW_RESPONSE" 2>/dev/null)
-        RESPONSE=$(jq -rc '.choices[0].message.content' <<<"$RAW_RESPONSE" 2>/dev/null)
-        REFUSAL=$(jq -rc '.choices[0].message.refusal' <<<"$RAW_RESPONSE" 2>/dev/null)
-        USAGE=$(jq -rc '.usage' <<<"$RAW_RESPONSE" 2>/dev/null)
-        BALANCE=$(get_credit_balance)
-
-        # Handling model resolving
-        [[ -n $RESOLVED_MODEL && $RESOLVED_MODEL != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${RESOLVED_MODEL}${ANSI_RESET}"
-
-        # Handling model reasoning
-        if [[ -n $REASONING && ! $REASONING == "null" ]]; then
-          show_thinking_header
-          echo "$REASONING" | render_markdown
-        fi
-
-        # Handling model refusal
-        if [[ -n $REFUSAL && ! $REFUSAL == "null" ]]; then
-          show_ai_header
-          echo "$REFUSAL" | render_markdown
-        fi
-
-        # Handling model final response
-        if [[ -n $RESPONSE && ! $RESPONSE == "null" ]]; then
-          show_ai_header
-          echo "$RESPONSE" | render_markdown
-        fi
-
-        # Handling model usage
-        if [[ -n $USAGE && ! $USAGE == "null" ]]; then
-          local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$USAGE" 2>/dev/null)
-          local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$USAGE" 2>/dev/null)
-          local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$USAGE" 2>/dev/null)
-          local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$USAGE" 2>/dev/null)
-          local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$USAGE" 2>/dev/null)
-          local cost ; cost=$(jq -rc .cost <<<"$USAGE" 2>/dev/null)
-          echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
-          echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-          [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-          [[ -n $BALANCE && "$BALANCE" != "null" ]] && echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${BALANCE}${ANSI_RESET}"
-          echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-        fi
-      ;;
-      *) error "Unsupported backend given: $BACKEND" ;;
-    esac
+    # Call the unified inference loop
+    run_inference_loop "$CHAT_MODEL" "$JSON_PAYLOAD" "none" "true" "stdout" "false" "" "$JSON_PAYLOAD"
     exit $?   # End of Compare Mode
 
   # Route C: Task Mode

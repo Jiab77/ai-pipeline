@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%20Vercel%20%7C%20OpenRouter%20%7C%20Mammouth%20AI%20%7C%20OpenAI%20%7C%20Groq%20%7C%20CyberNeurova-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.1.0-blue.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%208%20external%20providers-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.2.0-blue.svg)]()
 
 > A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory.
 
@@ -140,7 +140,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
   - `web_browse` for live browser interaction, screenshots, and JS-aware auditing
 - 🔒 **Privacy & Sovereignty Tooling**: Tor routing, ZDR payload injection, encrypted provider keys, and local-first backend support.
 - 🔁 **Adaptive Hardware / Backend Routing**: Execution adapts to RAM, CPU, Termux constraints, backend type, and provider behavior.
-- 🧬 **Polyglot without bloat**: Bash + JS + PHP, each used where it has a concrete structural advantage.
+- 🧬 **Polyglot without bloat**: Bash + PHP, each used where it has a concrete structural advantage.
 
 ### Security, Reliability & Runtime Upgrades
 - 🔑 **Sovereign Key Chest (ChaCha20 + PBKDF2)**: A zero-dependency local key chest using **ChaCha20 + PBKDF2** with **500,000 iterations** via native OpenSSL. It auto-generates a 256-bit random master key (`key.dat` in `chmod 600`) and encrypts individual provider keys (`keys/<provider>.key`), ensuring absolute local security. Keys are decrypted on-the-fly directly in RAM and never written to disk in cleartext.
@@ -149,7 +149,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 🔍 **Credentials Pre-Flight Checks**: Automatically intercepts missing credentials at startup. If a provider key is missing, it dynamically triggers the interactive setup wizard on-the-fly during active chat sessions.
 - ⏳ **Groq Rate-Limiter Retry Loop**: Intercepts Groq's TPM/RPM/TPD rate limit errors, extracts compound wait times, converts them into safe delays, and retries automatically.
 - 🛡️ **Refined Zero-Fork Sandboxing**: Upgraded system-level boundaries in `tools.sh` to anchor patterns to `${SCRIPT_DIR}/`, eliminating false positives while maintaining protection of active production scripts.
-- 💳 **Credit Balance HUD**: Real-time remaining credit balance display in `SYSTEM METRICS` HUD (integrated with Vercel AI Gateway).
+- 💳 **Credit Balance HUD**: Real-time remaining credit balance display in `SYSTEM METRICS` HUD (integrated with Vercel AI Gateway, CyberNeurova and OpenRouter).
 - 🔄 **Interactive `/replay` Command**: Instantly resends the last user message using a lightweight, zero-fork in-memory `LAST_USER_MSG` state.
 - 🎨 **Sleek Terminal UI**: High-intensity ANSI color flows, contextual icons, themed execution headers, and dynamic ASCII art banners with fallbacks.
 - 📐 **Pixel-Perfect Auto-Sizing Terminal Headers**: Visual alignment logic that accounts for wide emojis and narrow mobile terminals.
@@ -173,7 +173,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 - 🔌 **Decoupled API Provider Registry**: Endpoints, default models, and ZDR options are centralized in `config/providers.json`.
 - ⚡ **Single-Fork JQ Registry Reading**: Endpoint URLs, models, and ZDR options are loaded via one optimized `jq` process.
 - 🐘 **Mammouth AI Native Integration**: First-class support for Mammouth AI as a European-sovereign provider.
-- 👁️ **Multimodal Vision Integration & Vision Autoload**: Local and cloud vision model compatibility with multimodal projector support.
+- 👁️ **Multimodal Vision Integration & Vision Autoload**: Local and cloud vision model compatibility with multimodal projector support. Cloud auto-vision routing dynamically selects capable models via meta-routers (`openrouter/auto` for paid, `openrouter/free` for free tiers).
 - 🌀 **Autonomous Visual Feedback Loop**: Tool-generated visual assets are intercepted, encoded, and fed back into context automatically.
 - ⚙️ **Dynamic Model Parameter Middleware Registry**: Sampling parameters are decoupled into `config/models.json` and injected on-the-fly.
 - 🔌 **Adaptive Keep-Alive Strategy**: Dynamic model keep-alive periods for chat warmth vs task-mode resource economy.
@@ -186,10 +186,10 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.1.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
-| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.0.0)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys` and `/replay`), and isolates model reasoning streams. |
+| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.2.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
+| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.1.0)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, and `/model`), and isolates model reasoning streams. |
 | [`tools.sh`](tools.sh) | **Execution Runner (v0.3.3)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
-| [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.2.0)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
+| [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.3.0)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
 | [`web-browse.sh`](tools/web-browse.sh) | **Stateless Browser Automation (v0.0.0)**: Pure Bash one-shot Chrome DevTools Protocol (CDP) engine with zero Node.js dependencies, SOCKS5 proxying, form interaction, screenshots, and PDFs. |
 | [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formal tool definitions for the full-function calling surface. |
 | [`tools-groq.json`](tools/tools-groq.json) | **Groq Schema Adaptation**: Specialized schema file adapted to Groq's stricter validation behavior. |
@@ -215,6 +215,7 @@ During the chat session, you can invoke control actions using slash prefixes:
 | `/keys` | Launches the interactive **Sovereign Key Chest Manager** to configure, update, or purge encrypted API keys. |
 | `/replay` | Instantly resends the last user message using a zero-fork in-memory variable. |
 | `/draw [ratio] [prompt]` | Generates visual assets (experimental stub - coming soon!). |
+| `/model <name>` | Change the active model during the chat session. |
 | `/load <file>` | Loads a text or image file into the active chat session. |
 | `/unload` | Unloads the previously loaded file from the active chat session context. |
 | `/run <cmd>` | Executes standard shell commands directly from within the chat loop. |
@@ -251,12 +252,15 @@ You can configure the active engine inside `core.sh` by modifying the `BACKEND` 
 - **Default Active Providers**:
   - **Groq**: `https://api.groq.com/openai/v1/chat/completions`
   - **Vercel AI Gateway**: `https://ai-gateway.vercel.sh/v1/chat/completions`
+  - **Venice AI**: `https://api.venice.ai/api/v1/chat/completions`
   - **OpenAI**: `https://api.openai.com/v1/chat/completions`
+  - **OpenRoute**: `https://openroute.cyberneurova.com/v1/chat/completions`
   - **OpenRouter**: `https://openrouter.ai/api/v1/chat/completions`
   - **Mammouth AI**: `https://api.mammouth.ai/v1/chat/completions`
   - **CyberNeurova**: `https://api.cyberneurova.ai/v1/chat/completions`
 - **Default Active Model**: `google/gemini-3.5-flash` (Vercel/OpenRouter) or `gemini-3.5-flash` (Mammouth).
 - **Features**: dynamic config loading, provider-aware payload mutation, reasoning fallbacks, tool schemas, and secure Tor integration.
+  - 🔒 **Venice AI ZDR Limitation**: Venice AI does not support server-side ZDR injection. When using Venice, manually disable telemetry in `Settings → General → Disable Telemetry Collection` to approximate zero-data-retention.
 
 ### 2. **Ollama (`ollama`)**
 - **Inference Endpoint**: `http://localhost:11434/v1/chat/completions`
@@ -461,8 +465,8 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ## ⚖️ License & Project Status
 
-- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.0.0).
-- **Next Roadmap Milestones (v1.1.0 - A.I.D.E. Web & CLI Modernization)**:
+- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.2.0).
+- **Next Roadmap Milestones (v1.3.0 - A.I.D.E. Web & CLI Modernization)**:
   - 🌐 **A.I.D.E. Web**: local-first responsive web dashboard served by `web/server.php`
   - 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: richer CLI interactions with graceful fallbacks
   - 🛡️ **Cognitive Router & Proxy (CRP) Gateway**: local OpenAI-compatible endpoint backed by Jarvis memory injection and Tor + ZDR routing

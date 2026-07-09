@@ -8,5 +8,10 @@ keys/
 tools/web-browse/tests/
 providers.biollm.json
 core.conf
+core.sh.bak
+core-v*.sh
 tools.log
 web-fetch.log
+test-core.sh
+specs.sh
+specs.log

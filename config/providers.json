@@ -4,7 +4,7 @@
     "url": "https://api.cyberneurova.ai/v1/chat/completions",
     "keys": "https://platform.cyberneurova.com/keys",
     "default": {
-      "model": "cyberneurova-qwen",
+      "model": "cyberneurova-deepseek",
       "zdr": false
     }
   },
@@ -35,6 +35,15 @@
       "zdr": false
     }
   },
+  "openroute": {
+    "name": "OpenRoute (CyberNeurova)",
+    "url": "https://openroute.cyberneurova.com/v1/chat/completions",
+    "keys": "https://openroute.cyberneurova.com/account/keys",
+    "default": {
+      "model": "cyberneurova/deepseek-v4",
+      "zdr": false
+    }
+  },
   "openrouter": {
     "name": "OpenRouter",
     "url": "https://openrouter.ai/api/v1/chat/completions",
@@ -50,6 +59,15 @@
     "keys": "https://openrouter.ai/keys",
     "default": {
       "model": "openrouter/free",
+      "zdr": false
+    }
+  },
+  "venice": {
+    "name": "Venice AI",
+    "url": "https://api.venice.ai/api/v1/chat/completions",
+    "keys": "https://venice.ai/settings/api",
+    "default": {
+      "model": "z-ai-glm-5v-turbo",
       "zdr": false
     }
   },

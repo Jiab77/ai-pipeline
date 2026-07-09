@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.2.1
+# Version: 0.3.0
 # ==============================================================================
 
 # Options
@@ -79,6 +79,10 @@ CURL_OPTS=("-sfSL" "-A" "$USER_AGENT" "--connect-timeout" "10")
 if [[ $USE_TOR == true && -n $IF_TOR_PROXY ]]; then
   CURL_OPTS+=("-x" "$IF_TOR_PROXY")
 fi
+
+# Strings helpers
+to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
+to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
 
 # Logger function
 log() {
@@ -220,6 +224,112 @@ handle_github() {
       echo "$readme_content"
     else
       echo "*No README found or error fetching README.*"
+    fi
+
+  # MATCH SINGLE ISSUE / PULL REQUEST (GitHub treats Pull Requests as Issues for basic text fetching!)
+  elif [[ $url =~ ^https?://(www\.)?github\.com/([^/]+)/([^/]+)/(issues|pull)/([0-9]+)/?$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    local type="${BASH_REMATCH[4]}"
+    local number="${BASH_REMATCH[5]}"
+
+    log "GitHub Issue/PR: owner=$owner repo=$repo type=$type number=$number"
+
+    # API request (using the unified /issues/ endpoint which covers both issues and pulls descriptions)
+    local api_url="https://api.github.com/repos/$owner/$repo/issues/$number"
+    local json_data
+
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      local title state author body comments created_at html_url
+      title=$(jq -rc '.title' <<< "$json_data")
+      state=$(jq -rc '.state' <<< "$json_data")
+      author=$(jq -rc '.user.login' <<< "$json_data")
+      comments=$(jq -rc '.comments' <<< "$json_data")
+      created_at=$(jq -rc '.created_at' <<< "$json_data")
+      html_url=$(jq -rc '.html_url' <<< "$json_data")
+      body=$(jq -rc '.body // ""' <<< "$json_data")
+
+      echo "# 🐛 GitHub $(to_upper "$type") #$number: $title"
+      echo "> **Repository:** [$owner/$repo](https://github.com/$owner/$repo) | **Author:** @$author | **State:** \`$state\`"
+      echo "> **Created at:** $created_at | **Comments:** $comments | **Web URL:** [$html_url]($html_url)"
+      echo ""
+      echo "---"
+      echo ""
+      if [[ -n $body && $body != "null" ]]; then
+        echo "$body"
+      else
+        echo "*No description provided.*"
+      fi
+
+      # Dynamic ingestion of the comments thread if comments are present!
+      if [[ $comments -gt 0 ]]; then
+        local comments_url="https://api.github.com/repos/$owner/$repo/issues/$number/comments"
+        local comments_json
+        if comments_json=$(curl "${CURL_OPTS[@]}" "$comments_url" 2>/dev/null); then
+          echo ""
+          echo "---"
+          echo "### 💬 Discussion Thread ($comments comments)"
+          echo ""
+          while read -r comment; do
+            [[ -z $comment ]] && continue
+            local c_author c_body c_date
+            c_author=$(jq -rc '.user.login' <<< "$comment")
+            c_date=$(jq -rc '.created_at' <<< "$comment")
+            c_body=$(jq -rc '.body' <<< "$comment")
+            echo "#### 👤 @$c_author ($c_date)"
+            echo "$c_body"
+            echo ""
+            echo "---"
+          done < <(jq -c '.[]' <<< "$comments_json" 2>/dev/null)
+        fi
+      fi
+    else
+      echo "Error: Could not retrieve issue/PR from API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH ISSUES OR PULLS LIST
+  elif [[ $url =~ ^https?://(www\.)?github\.com/([^/]+)/([^/]+)/(issues|pulls)/?$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    local type="${BASH_REMATCH[4]}"
+
+    log "GitHub Issues/PRs List: owner=$owner repo=$repo type=$type"
+
+    local endpoint="issues"
+    [[ $type == "pulls" ]] && endpoint="pulls"
+
+    local api_url="https://api.github.com/repos/$owner/$repo/$endpoint?state=open"
+    local json_data
+
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      local list_title="Open Issues"
+      [[ $type == "pulls" ]] && list_title="Open Pull Requests"
+
+      echo "# 📋 GitHub $list_title: $owner/$repo"
+      echo "> **Repository:** [github.com/$owner/$repo](https://github.com/$owner/$repo)"
+      echo ""
+      echo "| # | Title | Author | Comments | Created At |"
+      echo "| --- | --- | --- | --- | --- |"
+
+      while read -r row; do
+        [[ -z $row ]] && continue
+        local number title author comments created_at html_url
+        number=$(jq -rc '.number' <<< "$row")
+        title=$(jq -rc '.title' <<< "$row")
+        author=$(jq -rc '.user.login' <<< "$row")
+        comments=$(jq -rc '.comments // 0' <<< "$row")
+        created_at=$(jq -rc '.created_at' <<< "$row")
+        html_url=$(jq -rc '.html_url' <<< "$row")
+
+        # Sanitize pipe characters in title to prevent breaking markdown tables
+        title="${title//|/\\|}"
+
+        echo "| [#$number]($html_url) | $title | @$author | $comments | $created_at |"
+      done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
+    else
+      echo "Error: Could not retrieve $type list from API ($api_url)" >&2
+      exit 2
     fi
   else
     echo "Error: Invalid GitHub URL format." >&2
@@ -370,6 +480,153 @@ handle_gitlab() {
       done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
     else
       echo "Error: Could not retrieve directory listing from GitLab API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH SINGLE ISSUE
+  elif [[ $url =~ (.*)/-/issues/([0-9]+)/? ]]; then
+    local raw_project_path="${BASH_REMATCH[1]}"
+    local issue_iid="${BASH_REMATCH[2]}"
+    local project_path="${raw_project_path#*://*/}"
+    local encoded_project="${project_path////%2F}"
+
+    log "GitLab Single Issue: project=$project_path issue_iid=$issue_iid"
+
+    local api_url="https://gitlab.com/api/v4/projects/$encoded_project/issues/$issue_iid"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      local title state author body created_at web_url
+      title=$(jq -rc '.title' <<< "$json_data")
+      state=$(jq -rc '.state' <<< "$json_data")
+      author=$(jq -rc '.author.username' <<< "$json_data")
+      created_at=$(jq -rc '.created_at' <<< "$json_data")
+      web_url=$(jq -rc '.web_url' <<< "$json_data")
+      body=$(jq -rc '.description // ""' <<< "$json_data")
+
+      echo "# 🦊 GitLab Issue #$issue_iid: $title"
+      echo "> **Project:** [$project_path]($raw_project_path) | **Author:** @$author | **State:** \`$state\`"
+      echo "> **Created at:** $created_at | **Web URL:** [$web_url]($web_url)"
+      echo ""
+      echo "---"
+      echo ""
+      if [[ -n $body && $body != "null" ]]; then
+        echo "$body"
+      else
+        echo "*No description provided.*"
+      fi
+    else
+      echo "Error: Could not retrieve GitLab issue from API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH SINGLE MERGE REQUEST
+  elif [[ $url =~ (.*)/-/merge_requests/([0-9]+)/? ]]; then
+    local raw_project_path="${BASH_REMATCH[1]}"
+    local mr_iid="${BASH_REMATCH[2]}"
+    local project_path="${raw_project_path#*://*/}"
+    local encoded_project="${project_path////%2F}"
+
+    log "GitLab Merge Request: project=$project_path mr_iid=$mr_iid"
+
+    local api_url="https://gitlab.com/api/v4/projects/$encoded_project/merge_requests/$mr_iid"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      local title state author body created_at web_url source_branch target_branch
+      title=$(jq -rc '.title' <<< "$json_data")
+      state=$(jq -rc '.state' <<< "$json_data")
+      author=$(jq -rc '.author.username' <<< "$json_data")
+      created_at=$(jq -rc '.created_at' <<< "$json_data")
+      web_url=$(jq -rc '.web_url' <<< "$json_data")
+      body=$(jq -rc '.description // ""' <<< "$json_data")
+      source_branch=$(jq -rc '.source_branch' <<< "$json_data")
+      target_branch=$(jq -rc '.target_branch' <<< "$json_data")
+
+      echo "# 🦊 GitLab Merge Request #$mr_iid: $title"
+      echo "> **Project:** [$project_path]($raw_project_path) | **Author:** @$author | **State:** \`$state\`"
+      echo "> **Branches:** \`$source_branch\` ➔ \`$target_branch\`"
+      echo "> **Created at:** $created_at | **Web URL:** [$web_url]($web_url)"
+      echo ""
+      echo "---"
+      echo ""
+      if [[ -n $body && $body != "null" ]]; then
+        echo "$body"
+      else
+        echo "*No description provided.*"
+      fi
+    else
+      echo "Error: Could not retrieve GitLab merge request from API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH ISSUES LIST
+  elif [[ $url =~ (.*)/-/issues/?$ ]]; then
+    local raw_project_path="${BASH_REMATCH[1]}"
+    local project_path="${raw_project_path#*://*/}"
+    local encoded_project="${project_path////%2F}"
+
+    log "GitLab Issues List: project=$project_path"
+
+    local api_url="https://gitlab.com/api/v4/projects/$encoded_project/issues?state=opened"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      echo "# 📋 GitLab Open Issues: $project_path"
+      echo "> **Project:** [$project_path]($raw_project_path)"
+      echo ""
+      echo "| # | Title | Author | Created At |"
+      echo "| --- | --- | --- | --- |"
+
+      while read -r row; do
+        [[ -z $row ]] && continue
+        local iid title author created_at web_url
+        iid=$(jq -rc '.iid' <<< "$row")
+        title=$(jq -rc '.title' <<< "$row")
+        author=$(jq -rc '.author.username' <<< "$row")
+        created_at=$(jq -rc '.created_at' <<< "$row")
+        web_url=$(jq -rc '.web_url' <<< "$row")
+
+        title="${title//|/\\|}"
+
+        echo "| [#$iid]($web_url) | $title | @$author | $created_at |"
+      done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
+    else
+      echo "Error: Could not retrieve GitLab issues list from API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH MERGE REQUESTS LIST
+  elif [[ $url =~ (.*)/-/merge_requests/?$ ]]; then
+    local raw_project_path="${BASH_REMATCH[1]}"
+    local project_path="${raw_project_path#*://*/}"
+    local encoded_project="${project_path////%2F}"
+
+    log "GitLab MRs List: project=$project_path"
+
+    local api_url="https://gitlab.com/api/v4/projects/$encoded_project/merge_requests?state=opened"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      echo "# 📋 GitLab Open Merge Requests: $project_path"
+      echo "> **Project:** [$project_path]($raw_project_path)"
+      echo ""
+      echo "| # | Title | Author | Branches | Created At |"
+      echo "| --- | --- | --- | --- | --- |"
+
+      while read -r row; do
+        [[ -z $row ]] && continue
+        local iid title author created_at web_url source_branch target_branch
+        iid=$(jq -rc '.iid' <<< "$row")
+        title=$(jq -rc '.title' <<< "$row")
+        author=$(jq -rc '.author.username' <<< "$row")
+        created_at=$(jq -rc '.created_at' <<< "$row")
+        web_url=$(jq -rc '.web_url' <<< "$row")
+        source_branch=$(jq -rc '.source_branch' <<< "$row")
+        target_branch=$(jq -rc '.target_branch' <<< "$row")
+
+        title="${title//|/\\|}"
+
+        echo "| [#$iid]($web_url) | $title | @$author | \`$source_branch\` ➔ \`$target_branch\` | $created_at |"
+      done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
+    else
+      echo "Error: Could not retrieve GitLab MRs list from API ($api_url)" >&2
       exit 2
     fi
 
@@ -585,6 +842,149 @@ handle_codeberg() {
       fi
     else
       echo "Error: Could not retrieve info for $file_path" >&2
+      exit 2
+    fi
+
+  # MATCH SINGLE ISSUE
+  elif [[ $url =~ ^https?://(www\.)?codeberg\.org/([^/]+)/([^/]+)/issues/([0-9]+)/?$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    local number="${BASH_REMATCH[4]}"
+
+    log "Codeberg Single Issue: owner=$owner repo=$repo number=$number"
+
+    local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/issues/$number"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      local title state author body created_at html_url comments
+      title=$(jq -rc '.title' <<< "$json_data")
+      state=$(jq -rc '.state' <<< "$json_data")
+      author=$(jq -rc '.user.username' <<< "$json_data")
+      created_at=$(jq -rc '.created_at' <<< "$json_data")
+      html_url=$(jq -rc '.html_url' <<< "$json_data")
+      body=$(jq -rc '.body // ""' <<< "$json_data")
+      comments=$(jq -rc '.comments // 0' <<< "$json_data")
+
+      echo "# 🏔️ Codeberg Issue #$number: $title"
+      echo "> **Repository:** [$owner/$repo](https://codeberg.org/$owner/$repo) | **Author:** @$author | **State:** \`$state\`"
+      echo "> **Created at:** $created_at | **Comments:** $comments | **Web URL:** [$html_url]($html_url)"
+      echo ""
+      echo "---"
+      echo ""
+      if [[ -n $body && $body != "null" ]]; then
+        echo "$body"
+      else
+        echo "*No description provided.*"
+      fi
+    else
+      echo "Error: Could not retrieve Codeberg issue from API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH SINGLE PULL REQUEST
+  elif [[ $url =~ ^https?://(www\.)?codeberg\.org/([^/]+)/([^/]+)/pulls/([0-9]+)/?$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+    local number="${BASH_REMATCH[4]}"
+
+    log "Codeberg Single Pull Request: owner=$owner repo=$repo number=$number"
+
+    local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/pulls/$number"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      local title state author body created_at html_url head_branch base_branch
+      title=$(jq -rc '.title' <<< "$json_data")
+      state=$(jq -rc '.state' <<< "$json_data")
+      author=$(jq -rc '.user.username' <<< "$json_data")
+      created_at=$(jq -rc '.created_at' <<< "$json_data")
+      html_url=$(jq -rc '.html_url' <<< "$json_data")
+      body=$(jq -rc '.body // ""' <<< "$json_data")
+      head_branch=$(jq -rc '.head.label' <<< "$json_data")
+      base_branch=$(jq -rc '.base.label' <<< "$json_data")
+
+      echo "# 🏔️ Codeberg Pull Request #$number: $title"
+      echo "> **Repository:** [$owner/$repo](https://codeberg.org/$owner/$repo) | **Author:** @$author | **State:** \`$state\`"
+      echo "> **Branches:** \`$head_branch\` ➔ \`$base_branch\`"
+      echo "> **Created at:** $created_at | **Web URL:** [$html_url]($html_url)"
+      echo ""
+      echo "---"
+      echo ""
+      if [[ -n $body && $body != "null" ]]; then
+        echo "$body"
+      else
+        echo "*No description provided.*"
+      fi
+    else
+      echo "Error: Could not retrieve Codeberg pull request from API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH ISSUES LIST
+  elif [[ $url =~ ^https?://(www\.)?codeberg\.org/([^/]+)/([^/]+)/issues/?$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+
+    log "Codeberg Issues List: owner=$owner repo=$repo"
+
+    local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/issues?state=open&type=issues"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      echo "# 📋 Codeberg Open Issues: $owner/$repo"
+      echo "> **Repository:** [codeberg.org/$owner/$repo](https://codeberg.org/$owner/$repo)"
+      echo ""
+      echo "| # | Title | Author | Comments | Created At |"
+      echo "| --- | --- | --- | --- | --- |"
+
+      while read -r row; do
+        [[ -z $row ]] && continue
+        local number title author comments created_at html_url
+        number=$(jq -rc '.number' <<< "$row")
+        title=$(jq -rc '.title' <<< "$row")
+        author=$(jq -rc '.user.username' <<< "$row")
+        comments=$(jq -rc '.comments // 0' <<< "$row")
+        created_at=$(jq -rc '.created_at' <<< "$row")
+        html_url=$(jq -rc '.html_url' <<< "$row")
+
+        title="${title//|/\\|}"
+
+        echo "| [#$number]($html_url) | $title | @$author | $comments | $created_at |"
+      done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
+    else
+      echo "Error: Could not retrieve Codeberg issues list from API ($api_url)" >&2
+      exit 2
+    fi
+
+  # MATCH PULLS LIST
+  elif [[ $url =~ ^https?://(www\.)?codeberg\.org/([^/]+)/([^/]+)/pulls/?$ ]]; then
+    local owner="${BASH_REMATCH[2]}"
+    local repo="${BASH_REMATCH[3]}"
+
+    log "Codeberg Pull Requests List: owner=$owner repo=$repo"
+
+    local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/pulls?state=open"
+    local json_data
+    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      echo "# 📋 Codeberg Open Pull Requests: $owner/$repo"
+      echo "> **Repository:** [codeberg.org/$owner/$repo](https://codeberg.org/$owner/$repo)"
+      echo ""
+      echo "| # | Title | Author | Created At |"
+      echo "| --- | --- | --- | --- |"
+
+      while read -r row; do
+        [[ -z $row ]] && continue
+        local number title author created_at html_url
+        number=$(jq -rc '.number' <<< "$row")
+        title=$(jq -rc '.title' <<< "$row")
+        author=$(jq -rc '.user.username' <<< "$row")
+        created_at=$(jq -rc '.created_at' <<< "$row")
+        html_url=$(jq -rc '.html_url' <<< "$row")
+
+        title="${title//|/\\|}"
+
+        echo "| [#$number]($html_url) | $title | @$author | $created_at |"
+      done < <(jq -c '.[]' <<< "$json_data" 2>/dev/null)
+    else
+      echo "Error: Could not retrieve Codeberg pulls list from API ($api_url)" >&2
       exit 2
     fi
 

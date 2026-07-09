@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.0.1
+# Version: 1.1.0
 # ==============================================================================
 
 # Options
@@ -65,6 +65,7 @@ run_chat() {
         echo -e "  ${CLR_B_GREEN}/draw [ratio] [prompt]${ANSI_RESET}    • Generate images"
         echo -e "  ${CLR_B_GREEN}/keys${ANSI_RESET}                     • Manage your encrypted cloud provider API keys"
         echo -e "  ${CLR_B_GREEN}/replay${ANSI_RESET}                   • Resend the last message"
+        echo -e "  ${CLR_B_GREEN}/model <name>${ANSI_RESET}             • Change active model"
         echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}              • Load file in the chat context"
         echo -e "  ${CLR_B_GREEN}/run <cmd>${ANSI_RESET}                • Execute a shell command locally in the session"
         echo -e "  ${CLR_B_GREEN}/unload${ANSI_RESET}                   • Unload previously loaded file from the chat context"
@@ -80,6 +81,12 @@ run_chat() {
           log_step "Replaying last message: ${CLR_B_WHITE}${LAST_USER_MSG}${ANSI_RESET}"
           send_message "$LAST_USER_MSG"
         fi
+      ;;
+      "/model") log_warn "Missing command arguments. Usage: /run <command>" ;;
+      "/model "*)
+        local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
+        log_step "New active model: ${CLR_B_WHITE}${active_model}${ANSI_RESET}"
+        set_system_prompt   # Update system prompt with new active model
       ;;
       "/load") log_warn "Missing command arguments. Usage: /load <file>" ;;
       "/load "*)

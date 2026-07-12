@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.0
+# Version: 1.2.1
 # ==============================================================================
 
 # Options
@@ -64,6 +64,7 @@ PROVIDERS_CONFIG="${CONFIG_DIR}/providers.json"
 MESSAGES_FILE="messages.json"
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+IS_IMAGE=false
 
 # Keys
 KEYS_DIR="${SCRIPT_DIR}/keys"
@@ -552,7 +553,7 @@ get_vision_model() {
       case $PROVIDER in
         groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
         openrouter) vision_model="openrouter/auto" ;;
-        openrouter_free) vision_model="openrouter/free" ;;
+        openrouter_free) vision_model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" ;;
         *) vision_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
@@ -994,8 +995,12 @@ api_call() {
           # Force OpenRouter to route the request to the right provider / model for given parameters
           payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
 
-          # Disallow prompt training by default
-          payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
+          # Disallow prompt training by default (except for analyzing images in free mode)
+          # Required because there is no providers on OpenRouter that accepts to process image without keeping data for training purposes
+          # Let's see if that's an acceptable trade-off for the 'openrouter_free' provider...
+          if [[ $IS_IMAGE == false ]]; then
+            payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
+          fi
 
           # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
@@ -1122,7 +1127,7 @@ run_inference_loop() {
       )
     fi
     raw_res=$(api_call "$payload")
-    [[ -z $raw_res || $raw_res == "null" ]] && error "API returned an empty response."
+    [[ -z $raw_res || $raw_res == "null" ]] && log_error "API returned an empty response."
 
     if jq -e '.error' <<<"$raw_res" &>/dev/null; then
       local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
@@ -1499,8 +1504,10 @@ send_message() {
   local dynamic_system ; dynamic_system=$(get_system_prompt 2>/dev/null)
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
-  local is_image=false
   local user_content="$prompt"
+
+  # Reset 'IS_IMAGE' global var
+  [[ $IS_IMAGE == true ]] && IS_IMAGE=false
 
   # Load messages file if already exist
   [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
@@ -1508,11 +1515,11 @@ send_message() {
   # Build user content for active payload (injecting loaded file context if present)
   if [[ -n $EXTERNAL_FILE_LOADED && -r $EXTERNAL_FILE_LOADED ]]; then
     if is_image_file "$EXTERNAL_FILE_LOADED"; then
-      is_image=true
+      IS_IMAGE=true
       local mime_type ; mime_type=$(get_image_type "$EXTERNAL_FILE_LOADED")
       (base64 -i -w0 "$EXTERNAL_FILE_LOADED" 2>/dev/null || base64 -i "$EXTERNAL_FILE_LOADED" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
       log_brain "Injecting active image in context: ${CLR_B_WHITE}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET} (${mime_type})"
-      unset EXTERNAL_FILE_LOADED
+      unset EXTERNAL_FILE_LOADED    # Remove this line if it creates issue and rely on the '/unload' command to remove the injected file
     else
       log_brain "Injecting active file in context: ${CLR_B_WHITE}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET}"
       local file_content ; file_content=$(<"$EXTERNAL_FILE_LOADED")
@@ -1526,13 +1533,13 @@ send_message() {
 
   # Define the model to use for this request (auto-switch to vision model if image loaded)
   local active_model="$CHAT_MODEL"
-  if [[ $is_image == true ]]; then
+  if [[ $IS_IMAGE == true ]]; then
     active_model="$VISION_MODEL"
-    log_brain "Autonomous Multimodal Vision activated: Using ${CLR_B_YELLOW}${active_model##*/}${ANSI_RESET}"
+    log_brain "Autonomous Multimodal Vision activated: Using ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
   fi
 
   # Create PAYLOAD_MESSAGES (which contains system prompt, previous history, and the current user query with file context)
-  if [[ $is_image == true ]]; then
+  if [[ $IS_IMAGE == true ]]; then
     PAYLOAD_MESSAGES=$(jq -rc \
       --arg prompt "$prompt" \
       --arg mime "$mime_type" \
@@ -1571,6 +1578,9 @@ send_message() {
 
   # Call the unified inference loop
   run_inference_loop "$active_model" "$PAYLOAD_MESSAGES" "all" "true" "stdout" "true" "" "$ALL_MESSAGES"
+
+  # Reset 'IS_IMAGE' global var before heartbeat gets triggered
+  [[ $IS_IMAGE == true ]] && IS_IMAGE=false
 
   check_and_trigger_heartbeat
 }

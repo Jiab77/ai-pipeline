@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%208%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.2.0-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.2.1-blue.svg)]()
 
 > A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory.
 
@@ -186,7 +186,7 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.2.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
+| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.2.1)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
 | [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.1.0)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, and `/model`), and isolates model reasoning streams. |
 | [`tools.sh`](tools.sh) | **Execution Runner (v0.3.3)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
 | [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.3.0)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
@@ -261,6 +261,7 @@ You can configure the active engine inside `core.sh` by modifying the `BACKEND` 
 - **Default Active Model**: `google/gemini-3.5-flash` (Vercel/OpenRouter) or `gemini-3.5-flash` (Mammouth).
 - **Features**: dynamic config loading, provider-aware payload mutation, reasoning fallbacks, tool schemas, and secure Tor integration.
   - 🔒 **Venice AI ZDR Limitation**: Venice AI does not support server-side ZDR injection. When using Venice, manually disable telemetry in `Settings → General → Disable Telemetry Collection` to approximate zero-data-retention.
+  - 🔒 **OpenRouter Free-Tier Vision Trade-off**: Free multimodal vision on OpenRouter cannot be combined with `data_collection: "deny"` (zero prompt-training). To keep free vision functional, **image requests drop the `deny` shield** (prompt training may apply to images only); all text/tool turns keep `deny`. Paid OpenRouter (`openrouter/auto`) and Vercel (`disallowPromptTraining: true`) preserve the shield across all modalities.
 
 ### 2. **Ollama (`ollama`)**
 - **Inference Endpoint**: `http://localhost:11434/v1/chat/completions`
@@ -465,7 +466,7 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ## ⚖️ License & Project Status
 
-- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.2.0).
+- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.2.1).
 - **Next Roadmap Milestones (v1.3.0 - A.I.D.E. Web & CLI Modernization)**:
   - 🌐 **A.I.D.E. Web**: local-first responsive web dashboard served by `web/server.php`
   - 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: richer CLI interactions with graceful fallbacks

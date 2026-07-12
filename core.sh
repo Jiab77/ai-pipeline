@@ -985,7 +985,30 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
-        openrouter*)
+        openrouter)
+          # Apply ZDR policy when enabled
+          if [[ $ZDR_ENFORCED == true ]]; then
+            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
+            payload=$(jq -rc '.provider.zdr = true' <<< "$payload" 2>/dev/null)
+          fi
+
+          # Force OpenRouter to route the request to the right provider / model for given parameters
+          payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
+
+          # Disallow prompt training by default
+          payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
+
+          # Send custom payload
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+               -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
+               -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
+               -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | jq -rc .
+        ;;
+        openrouter_free)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
@@ -1000,6 +1023,8 @@ api_call() {
           # Let's see if that's an acceptable trade-off for the 'openrouter_free' provider...
           if [[ $IS_IMAGE == false ]]; then
             payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
+          else
+            log ; log_warn "🔒 ${CLR_B_CYAN}[DPT]${ANSI_RESET} Disallow Prompt Training policy disabled temporary during image processing." ; log
           fi
 
           # Send custom payload

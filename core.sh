@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.1
+# Version: 1.2.2
 # ==============================================================================
 
 # Options
@@ -310,6 +310,15 @@ decrypt_provider_key() {
   fi
 }
 
+load_provider_key() {
+  if has_provider_key "$PROVIDER"; then
+    PROVIDER_API_KEY=$(decrypt_provider_key "$PROVIDER" 2>/dev/null)
+  elif [[ -r $CREDENTIALS ]]; then
+    # Fallback to legacy credentials file
+    PROVIDER_API_KEY=$(<"$CREDENTIALS")
+  fi
+}
+
 purge_all_keys() {
   if [[ -d $KEYS_DIR ]]; then
     rm -rf "$KEYS_DIR"
@@ -552,7 +561,7 @@ get_vision_model() {
     external)
       case $PROVIDER in
         groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
-        openrouter) vision_model="openrouter/auto" ;;
+        openrouter) vision_model="openrouter/auto" ;;   # Might be useless to do that when the active model already have native vision... I might reconsider this part in the future.
         openrouter_free) vision_model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" ;;
         *) vision_model="$PROVIDER_API_MODEL" ;;
       esac
@@ -2028,6 +2037,7 @@ init_core() {
   # Define right vision model
   [[ -n $USER_MODEL ]] && VISION_MODEL="$USER_MODEL" || VISION_MODEL="$(get_vision_model)"
 
+  # Set system prompt based on defined models
   set_system_prompt
 
   [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
@@ -2048,12 +2058,7 @@ init_core() {
 
   if [[ $BACKEND == "external" ]]; then
     # Try loading from the encrypted key chest first
-    if has_provider_key "$PROVIDER"; then
-      PROVIDER_API_KEY=$(decrypt_provider_key "$PROVIDER" 2>/dev/null)
-    elif [[ -r $CREDENTIALS ]]; then
-      # Fallback to legacy credentials file
-      PROVIDER_API_KEY=$(<"$CREDENTIALS")
-    fi
+    load_provider_key
 
     # Pre-flight check: if no key is configured, prompt user or fail
     if [[ -z $PROVIDER_API_KEY ]]; then

@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.1.0
+# Version: 1.2.0
 # ==============================================================================
 
 # Options
@@ -65,6 +65,7 @@ run_chat() {
         echo -e "  ${CLR_B_GREEN}/draw [ratio] [prompt]${ANSI_RESET}    • Generate images"
         echo -e "  ${CLR_B_GREEN}/keys${ANSI_RESET}                     • Manage your encrypted cloud provider API keys"
         echo -e "  ${CLR_B_GREEN}/replay${ANSI_RESET}                   • Resend the last message"
+        echo -e "  ${CLR_B_GREEN}/provider <name>${ANSI_RESET}          • Change active provider"
         echo -e "  ${CLR_B_GREEN}/model <name>${ANSI_RESET}             • Change active model"
         echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}              • Load file in the chat context"
         echo -e "  ${CLR_B_GREEN}/run <cmd>${ANSI_RESET}                • Execute a shell command locally in the session"
@@ -82,7 +83,14 @@ run_chat() {
           send_message "$LAST_USER_MSG"
         fi
       ;;
-      "/model") log_warn "Missing command arguments. Usage: /run <command>" ;;
+      "/provider") log_warn "Missing command arguments. Usage: /provider <command>" ;;
+      "/provider "*)
+        local active_provider="${USER_MSG#"/provider "}" ; PROVIDER="$active_provider"
+        log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
+        set_api_provider    # Reflect new active provider
+        load_provider_key   # Load corresponding provider key
+      ;;
+      "/model") log_warn "Missing command arguments. Usage: /model <command>" ;;
       "/model "*)
         local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
         log_step "New active model: ${CLR_B_WHITE}${active_model}${ANSI_RESET}"

@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.2
+# Version: 1.2.3
 # ==============================================================================
 
 # Options
@@ -638,6 +638,22 @@ set_base_tools() {
   esac
 }
 
+set_chat_model() {
+  if [[ -n $USER_MODEL ]]; then
+    CHAT_MODEL="$USER_MODEL"
+  else
+    CHAT_MODEL="$(get_chat_model)"
+  fi
+}
+
+set_vision_model() {
+  if [[ -n $USER_MODEL ]]; then
+    VISION_MODEL="$USER_MODEL"
+  else
+    VISION_MODEL="$(get_vision_model)"
+  fi
+}
+
 set_api_provider() {
   local provider_data provider_zdr
 
@@ -1033,7 +1049,7 @@ api_call() {
           if [[ $IS_IMAGE == false ]]; then
             payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
           else
-            log ; log_warn "🔒 ${CLR_B_CYAN}[DPT]${ANSI_RESET} Disallow Prompt Training policy disabled temporary during image processing." ; log
+            log_warn "🔒 ${CLR_B_CYAN}[DPT]${ANSI_RESET} Disallow Prompt Training policy disabled temporary during image processing." ; log
           fi
 
           # Send custom payload
@@ -2032,10 +2048,10 @@ init_core() {
   set_api_provider
 
   # Define right chat model
-  [[ -n $USER_MODEL ]] && CHAT_MODEL="$USER_MODEL" || CHAT_MODEL="$(get_chat_model)"
+  set_chat_model
 
   # Define right vision model
-  [[ -n $USER_MODEL ]] && VISION_MODEL="$USER_MODEL" || VISION_MODEL="$(get_vision_model)"
+  set_vision_model
 
   # Set system prompt based on defined models
   set_system_prompt

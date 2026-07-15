@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.0
+# Version: 1.2.1
 # ==============================================================================
 
 # Options
@@ -89,6 +89,7 @@ run_chat() {
         log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
         set_api_provider    # Reflect new active provider
         load_provider_key   # Load corresponding provider key
+        set_vision_model    # Update corresponding vision model for new provider
       ;;
       "/model") log_warn "Missing command arguments. Usage: /model <command>" ;;
       "/model "*)

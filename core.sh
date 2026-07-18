@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.3
+# Version: 1.3.0
 # ==============================================================================
 
 # Options
@@ -563,6 +563,7 @@ get_vision_model() {
         groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
         openrouter) vision_model="openrouter/auto" ;;   # Might be useless to do that when the active model already have native vision... I might reconsider this part in the future.
         openrouter_free) vision_model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" ;;
+        vercel_free) vision_model="google/gemini-2.5-flash" ;;
         *) vision_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
@@ -756,6 +757,7 @@ set_model_settings() {
 
 set_system_prompt() {
   local SLM_PROMPT ; SLM_PROMPT=$(<"${CONFIG_DIR}/slm-prompt.md")
+  local CORE_FILE
 
   # Define system prompt for cloud models
   if [[ $BACKEND == "external" ]]; then
@@ -800,7 +802,12 @@ set_system_prompt() {
   [[ -d "${DATA_STORE}/docs" ]] && SYSTEM_PROMPT+="Your shared documents are located in your workspace under the \`docs\` folder. Look at them when necessary or requested.\n"
 
   # Sets important rules
-  SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, and \`${BASE_TOOLS##*/}\`.\n"
+  [[ -n $CORE_LIB && -r $CORE_LIB ]] && CORE_FILE="${CORE_LIB##*/}"
+  if [[ -n $CORE_FILE ]]; then
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${TOOLS_HANDLER##*/}\`, and \`${BASE_TOOLS##*/}\`.\n"
+  else
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, and \`${BASE_TOOLS##*/}\`.\n"
+  fi
   SYSTEM_PROMPT+="Modifying these files will break the core pipeline functionalities."
 }
 
@@ -873,7 +880,7 @@ api_call() {
 
       # Provider selector
       case $PROVIDER in
-        vercel)
+        vercel*)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
             [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for Vercel AI Gateway."
@@ -1085,7 +1092,7 @@ get_credit_balance() {
   # Provider selector
   if [[ $BACKEND == "external" ]]; then
     case $PROVIDER in
-      vercel)
+      vercel*)
         curl "${curl_opts[@]}" "https://ai-gateway.vercel.sh/v1/credits" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
@@ -1183,9 +1190,13 @@ run_inference_loop() {
       local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
       local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
       local err_code; err_code=$(jq -rc '.error.code // .error.param.statusCode' <<<"$raw_res" 2>/dev/null)
-      [[ -n $err_meta && $err_meta != "null" ]] && local err_string_meta ; err_string_meta="Details:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
-      [[ -n $err_code && $err_code != "null" ]] && local err_string_code ; err_string_code="Code: ${err_code}"
-      log_error "Unexpected API error (${err_string_code}).\n\n${err_msg}\n\n${err_string_meta}\n"
+      if [[ -n $err_meta && ! $err_meta == "null" ]]; then
+        local err_string_meta ; err_string_meta="\n\nDetails:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
+      fi
+      if [[ -n $err_code && ! $err_code == "null" ]]; then
+        local err_string_code ; err_string_code=" (Code: ${err_code})"
+      fi
+      log_error "Unexpected API error${err_string_code}.\n\n${err_msg}${err_string_meta}\n"
       loop_errors=1
       return $loop_errors
     fi
@@ -1200,10 +1211,10 @@ run_inference_loop() {
     balance=$(get_credit_balance)
 
     # Handling model resolving
-    [[ -n $resolved_model && $resolved_model != "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
+    [[ -n $resolved_model && ! $resolved_model == "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
     # Output thinking (reasoning) if present
-    if [[ -n $reasoning && $reasoning != "null" ]]; then
+    if [[ -n $reasoning && ! $reasoning == "null" ]]; then
       if [[ "$output_stream" == "stdout" ]]; then
         show_thinking_header
         echo "$reasoning" | render_markdown
@@ -1216,7 +1227,7 @@ run_inference_loop() {
     fi
 
     # Output refusal to STDERR if present
-    if [[ -n $refusal && $refusal != "null" ]]; then
+    if [[ -n $refusal && ! $refusal == "null" ]]; then
       if [[ "$output_stream" == "stdout" ]]; then
         show_ai_header
         echo "$refusal" | render_markdown
@@ -1229,7 +1240,7 @@ run_inference_loop() {
     fi
 
     # Handle requested tool calls (Multi-Parallel Support)
-    if [[ -n $tools && $tools != "null" ]]; then
+    if [[ -n $tools && ! $tools == "null" ]]; then
       # If tools are disabled or we got calls we didn't specify (highly unlikely), safeguard
       if [[ "$tools_option" == "none" ]]; then
         log_warn "Received unexpected tool calls despite tools disabled!"
@@ -1333,7 +1344,7 @@ run_inference_loop() {
 
     else
       # If no tool calls, this is the final response
-      [[ -n $content && $content != "null" ]] && final_content="$content"
+      [[ -n $content && ! $content == "null" ]] && final_content="$content"
 
       if [[ -n $final_content ]]; then
         if [[ "$output_stream" == "stdout" ]]; then
@@ -1348,7 +1359,7 @@ run_inference_loop() {
         fi
       fi
       # Print usage metrics to STDERR to avoid polluting stdout
-      if [[ -n $usage && $usage != "null" ]]; then
+      if [[ -n $usage && ! $usage == "null" ]]; then
         local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage" 2>/dev/null)
         local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage" 2>/dev/null)
         local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage" 2>/dev/null)
@@ -1359,8 +1370,8 @@ run_inference_loop() {
         {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
-          [[ -n $cost && "$cost" != "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
-          if [[ -n $balance && "$balance" != "null" ]]; then
+          [[ -n $cost && ! "$cost" == "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
+          if [[ -n $balance && ! "$balance" == "null" ]]; then
             case $PROVIDER in
               cyberneurova) echo -e "${CLR_B_CYAN}Tokens Remaining:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
               openrouter*) echo -e "${CLR_B_CYAN}Total Usage:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;

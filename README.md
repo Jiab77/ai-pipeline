@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%208%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.2.3-blue.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2010%20external%20providers-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.3.0-blue.svg)]()
 
 > A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory.
 
@@ -186,11 +186,11 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.2.3)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
-| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.2.1)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, `/provider`, and `/model`), and isolates model reasoning streams. |
-| [`tools.sh`](tools.sh) | **Execution Runner (v0.3.3)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
-| [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.3.0)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
-| [`web-browse.sh`](tools/web-browse.sh) | **Stateless Browser Automation (v0.0.0)**: Pure Bash one-shot Chrome DevTools Protocol (CDP) engine with zero Node.js dependencies, SOCKS5 proxying, form interaction, screenshots, and PDFs. |
+| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.3.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
+| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.2.2)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, `/provider`, and `/model`), and isolates model reasoning streams. |
+| [`tools.sh`](tools.sh) | **Execution Runner (v0.4.0)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
+| [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.4.0)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
+| [`web-browse.sh`](tools/web-browse.sh) | **Stateless Browser Automation (v0.0.2)**: Pure Bash one-shot Chrome DevTools Protocol (CDP) engine with zero Node.js dependencies, SOCKS5 proxying, form interaction, screenshots, and PDFs. |
 | [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formal tool definitions for the full-function calling surface. |
 | [`tools-groq.json`](tools/tools-groq.json) | **Groq Schema Adaptation**: Specialized schema file adapted to Groq's stricter validation behavior. |
 | [`tools-light.json`](tools/tools-light.json) | **Lightweight Schemas**: Simplified tool contract for smaller local models. |
@@ -252,11 +252,11 @@ You can configure the active engine inside `core.sh` by modifying the `BACKEND` 
 - **Configuration file**: managed through `config/providers.json`.
 - **Default Active Providers**:
   - **Groq**: `https://api.groq.com/openai/v1/chat/completions`
-  - **Vercel AI Gateway**: `https://ai-gateway.vercel.sh/v1/chat/completions`
+  - **Vercel AI Gateway (Free + Paid)**: `https://ai-gateway.vercel.sh/v1/chat/completions`
   - **Venice AI**: `https://api.venice.ai/api/v1/chat/completions`
   - **OpenAI**: `https://api.openai.com/v1/chat/completions`
   - **OpenRoute**: `https://openroute.cyberneurova.com/v1/chat/completions`
-  - **OpenRouter**: `https://openrouter.ai/api/v1/chat/completions`
+  - **OpenRouter (Free + Paid)**: `https://openrouter.ai/api/v1/chat/completions`
   - **Mammouth AI**: `https://api.mammouth.ai/v1/chat/completions`
   - **CyberNeurova**: `https://api.cyberneurova.ai/v1/chat/completions`
 - **Default Active Model**: `google/gemini-3.5-flash` (Vercel/OpenRouter) or `gemini-3.5-flash` (Mammouth).
@@ -467,8 +467,8 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ## ⚖️ License & Project Status
 
-- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.2.3).
-- **Next Roadmap Milestones (v1.3.0 - A.I.D.E. Web & CLI Modernization)**:
+- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.3.0).
+- **Next Roadmap Milestones (v2.0.0 - A.I.D.E. Web & CLI Modernization)**:
   - 🌐 **A.I.D.E. Web**: local-first responsive web dashboard served by `web/server.php`
   - 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: richer CLI interactions with graceful fallbacks
   - 🛡️ **Cognitive Router & Proxy (CRP) Gateway**: local OpenAI-compatible endpoint backed by Jarvis memory injection and Tor + ZDR routing

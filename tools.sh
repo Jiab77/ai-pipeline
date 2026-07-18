@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.3.3
+# Version: 0.4.0
 # ==============================================================================
 
 # Options
@@ -30,6 +30,7 @@ SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
 WEB_BROWSE="${TOOLS_DIR}/web-browse.sh"
+WEB_BROWSE_MOBILE="${TOOLS_DIR}/web-browse-mobile.sh"
 WEB_FETCH="${TOOLS_DIR}/web-fetch.sh"
 LOG_FILE="${SCRIPT_NAME}.log"
 
@@ -41,10 +42,14 @@ FUNC_ARGS="$2"
 log() {
   echo -e "$*" >&2
 }
-
 error() {
   echo -e "\nError: $*\n" >&2
   exit 255
+}
+is_termux() {
+  [[ -n "${TERMUX_VERSION:-}" ]] && return 0
+  [[ -d "/data/data/com.termux" ]] && return 0
+  return 1
 }
 
 # Pure Bash URL Decoder (Bash 3.2+ Compatible, 0 Subshells!)
@@ -311,15 +316,19 @@ apply_diff() {
     error "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
   fi
 
-  if [[ -n $FUNC_ARGS ]]; then
-    {
-      IFS= read -r -d '' diff_content
-    } < <(jq -j '.diff, "\u0000"' <<< "$FUNC_ARGS")
+  # Extract the unified diff from the tool arguments
+  diff_content=$(jq -r '.diff // empty' <<< "$FUNC_ARGS")
+
+  # Fail loud, not silent: empty payload must NOT be a no-op success
+  if [[ -z $diff_content ]]; then
+    error "apply_diff: empty or missing .diff payload"
   fi
 
-  if [[ -n $diff_content && $diff_content != null ]]; then
-    echo "$diff_content" | git apply --whitespace=fix -
-  fi
+  # Apply with patch (fuzzy-tolerant, path-agnostic).
+  # Paths in the diff dictate the target (absolute / relative / ../) — NO cd.
+  # -p1 strips a/ b/ prefixes (git-style hunks).
+  printf '%s\n' "$diff_content" | patch -p1 --fuzz=2 --no-backup-if-mismatch \
+    || error "apply_diff failed (see .rej files for rejected hunks)"
 }
 
 # 8. Retrieve the current system date and time
@@ -426,7 +435,7 @@ web_fetch() {
   "$WEB_FETCH" "${opts[@]}" "$url"
 }
 
-# 11. Interact with and audit dynamic web pages using Puppeteer
+# 11. Interact with and audit dynamic web pages WITHOUT Puppeteer
 web_browse() {
   local proxy="$SOCKS_PROXY"
   local proxy_val
@@ -448,8 +457,12 @@ web_browse() {
     updated_args=$(jq --arg prx "$proxy" '. + {"proxy": $prx}' <<< "$FUNC_ARGS")
   fi
 
-  # Call our optimized Puppeteer script
-  "$WEB_BROWSE" "$updated_args"
+  # Call our optimized script WITHOUT Puppeteer
+  if is_termux ; then
+    "$WEB_BROWSE_MOBILE" "$updated_args"
+  else
+    "$WEB_BROWSE" "$updated_args"
+  fi
 }
 
 # Bootstrap

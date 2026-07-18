@@ -4,11 +4,15 @@ node_modules
 # Backup files
 *.bak
 
-# Files that must never be published
+# Folders that must never be published
+archive/
 data*/
 models/
 keys/
 tools/web-browse/tests/
+tests/
+
+# Files that must never be published
 providers.biollm.json
 core.conf
 core-v*.sh

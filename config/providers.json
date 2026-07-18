@@ -79,5 +79,14 @@
       "model": "google/gemini-3.5-flash",
       "zdr": false
     }
+  },
+  "vercel_free": {
+    "name": "Vercel AI Gateway (Free)",
+    "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    "keys": "https://vercel.com/docs/ai-gateway",
+    "default": {
+      "model": "google/gemini-2.5-flash",
+      "zdr": false
+    }
   }
 }

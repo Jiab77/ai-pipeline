@@ -183,13 +183,13 @@
     "type": "function",
     "function": {
       "name": "apply_diff",
-      "description": "Apply a unified diff to edit one or more files using git apply. Use this instead of edit_file when the changes are complex.",
+      "description": "Apply a unified diff to edit one or more files using patch (fuzzy-tolerant, path-agnostic). Use this instead of edit_file when the changes are complex. Paths in the diff dictate the target: absolute for out-of-root edits, relative for in-repo, or ../ to escape. Always verify after applying.",
       "parameters": {
         "type": "object",
         "properties": {
           "diff": {
             "type": "string",
-            "description": "Unified diff content in git diff format"
+            "description": "Unified diff content (git/hunk format, a/ b/ prefixes). Paths may be absolute (out-of-root), relative, or use ../ — resolved as-is, no anchoring."
           }
         },
         "required": ["diff"]

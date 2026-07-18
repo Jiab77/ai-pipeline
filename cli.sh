@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.1
+# Version: 1.2.2
 # ==============================================================================
 
 # Options
@@ -88,8 +88,15 @@ run_chat() {
         local active_provider="${USER_MSG#"/provider "}" ; PROVIDER="$active_provider"
         log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
         set_api_provider    # Reflect new active provider
+        log_step "New active model: ${CLR_B_WHITE}${PROVIDER_API_MODEL}${ANSI_RESET}"
         load_provider_key   # Load corresponding provider key
+        if [[ -z $PROVIDER_API_KEY ]]; then
+          interactive_key_setup "$active_provider" && \
+          load_provider_key   # Load corresponding provider key
+        fi
+        set_chat_model      # Update corresponding chat model for new provider
         set_vision_model    # Update corresponding vision model for new provider
+        set_system_prompt   # Update system prompt with new active model
       ;;
       "/model") log_warn "Missing command arguments. Usage: /model <command>" ;;
       "/model "*)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2001
+# shellcheck disable=SC2034,SC2001,SC2094
 # ==============================================================================
 # core.sh — Sovereign Cognitive & Reasoning Engine (Library)
 # ==============================================================================
@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.3.0
+# Version: 1.4.0
 # ==============================================================================
 
 # Options
@@ -38,7 +38,8 @@ PULL_MODELS=false
 DEBUG=true
 USE_TOR=true          # Route cloud API calls through Tor proxy
 USE_TOOLS=true        # Enable/Disable tool calling capabilities
-ZDR_ENFORCED=false    # Enforce Zero Data Retention for cloud providers
+VISION_ENABLED=true   # Enable vision for all cloud providers models
+ZDR_ENFORCED=false    # Enforce Zero Data Retention for all cloud providers
 
 # Self-Discovery Paths (Dynamic Sandbox & Root Mounting)
 CORE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -656,18 +657,21 @@ set_vision_model() {
 }
 
 set_api_provider() {
-  local provider_data provider_zdr
+  local provider_data provider_zdr provider_vision
 
   [[ ! -r "$PROVIDERS_CONFIG" ]] && error "Unable to read providers config file: $PROVIDERS_CONFIG"
 
   # Read both values in a single jq process call using tab-delimited parsing
-  provider_data=$(jq -rc --arg p "$PROVIDER" '.[$p] | select(. != null) | "\(.url)\t\(.default.model)\t\(.default.zdr)"' "$PROVIDERS_CONFIG" 2>/dev/null)
+  provider_data=$(jq -rc --arg p "$PROVIDER" '.[$p] | select(. != null) | "\(.url)\t\(.default.model)\t\(.default.zdr)\t\(.default.vision)"' "$PROVIDERS_CONFIG" 2>/dev/null)
   [[ -z $provider_data ]] && error "Unsupported provider defined: $PROVIDER"
 
-  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_API_MODEL provider_zdr <<< "$provider_data"
+  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_API_MODEL provider_zdr provider_vision <<< "$provider_data"
 
   [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $PROVIDER"
   [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $PROVIDER"
+
+  # Set model vision capability based on the provider config
+  VISION_ENABLED=$provider_vision
 
   # Enforce ZDR if enabled in the provider config, while preserving command-line overrides
   [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
@@ -925,9 +929,14 @@ api_call() {
           # Add minor delay to avoid triggering the rate limiter
           sleep 1
 
+          # Warn that ZDR policy is not implemented yet for Groq
+          if [[ $ZDR_ENFORCED == true ]]; then
+            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented yet for Groq."
+          fi
+
           # Disable reasoning for Groq (causes issues)
           payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
-          [[ $DEBUG == true ]] && log ; log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
+          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
 
           local response
           local attempt=1
@@ -999,16 +1008,39 @@ api_call() {
           # If all retries failed, return last response
           jq -rc . <<<"$response"
         ;;
+        deepseek)
+          # Warn that ZDR policy does not exist on DeepSeek
+          if [[ $ZDR_ENFORCED == true ]]; then
+            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported by DeepSeek."
+          fi
+
+          # Get current reasoning value before removing it (for compatibility reason)
+          local reasoning ; reasoning=$(jq -rc .reasoning.enabled <<< "$payload" 2>/dev/null)
+          if [[ -n $reasoning && $reasoning == true ]]; then
+            payload=$(jq -rc '.thinking.type = "enabled"' <<< "$payload" 2>/dev/null)
+          fi
+
+          # Remove not supported 'reasoning' property before sending payload
+          payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for DeepSeek."
+
+          # Send custom payload
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | jq -rc .
+        ;;
         openai)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
-            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
+            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenAI."
             payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
           fi
 
           # Disable reasoning for OpenAI (causes issues)
           payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
-          [[ $DEBUG == true ]] && log ; log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for OpenAI."
+          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for OpenAI."
 
           # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
@@ -1109,6 +1141,12 @@ get_credit_balance() {
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
               -A "$USER_AGENT" | jq -rc .data.tokens.input.remaining 2>/dev/null
+      ;;
+      deepseek)
+        curl "${curl_opts[@]}" "https://api.deepseek.com/user/balance" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -A "$USER_AGENT" | jq -rc .balance_infos[0].total_balance 2>/dev/null
       ;;
     esac
   fi
@@ -1262,7 +1300,7 @@ run_inference_loop() {
 
         # 3. Check and execute tool handler
         if [[ -x $TOOLS_HANDLER ]]; then
-          "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT"
+          "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT" 2> >(tee -a "$TOOLS_OUTPUT" >&2)
         else
           echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
           log_warn "Tool handler not executable."
@@ -1310,7 +1348,7 @@ run_inference_loop() {
       done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
 
       # Inject visual feedback if any images were generated
-      if (( ${#detected_images[@]} > 0 )); then
+      if [[ $VISION_ENABLED == true && (( ${#detected_images[@]} -gt 0 )) ]]; then
         for img_path in "${detected_images[@]}"; do
           local mime_type ; mime_type=$(get_image_type "$img_path")
           local filename ; filename="${img_path##*/}"

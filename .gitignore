@@ -16,8 +16,6 @@ tests/
 providers.biollm.json
 core.conf
 core-v*.sh
-tools.log
-web-fetch.log
 test-core.sh
 specs.sh
-specs.log
+*.log

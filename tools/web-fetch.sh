@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (hy3)
 #
-# Version: 0.4.0
+# Version: 0.4.1
 # ==============================================================================
 
 # Options
@@ -86,7 +86,7 @@ to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
 
 # Logger function
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
+  echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nArguments: $*" >> "$LOG_FILE"
 }
 
 if [[ $USE_JS == true ]]; then

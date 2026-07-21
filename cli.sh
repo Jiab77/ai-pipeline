@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.2
+# Version: 1.2.3
 # ==============================================================================
 
 # Options
@@ -85,6 +85,7 @@ run_chat() {
       ;;
       "/provider") log_warn "Missing command arguments. Usage: /provider <command>" ;;
       "/provider "*)
+        unset PROVIDER_API_KEY    # Should fix the bug where the new API key is not updated
         local active_provider="${USER_MSG#"/provider "}" ; PROVIDER="$active_provider"
         log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
         set_api_provider    # Reflect new active provider

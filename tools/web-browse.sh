@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.0.2
+# Version: 0.0.3
 # ==============================================================================
 
 # Options
@@ -28,6 +28,11 @@ PAGE_URL=""
 SCREENSHOT_PATHS=()
 EVAL_RESULTS=()
 WS_CLIENT=""
+
+# Internals
+SCRIPT_FILE="${0##*/}"
+SCRIPT_NAME="${SCRIPT_FILE%.*}"
+LOG_FILE="${SCRIPT_NAME}.log"
 
 # Helper: Detect OS
 is_macos() {
@@ -682,5 +687,8 @@ main() {
   [[ $SUCCESS == "false" ]] && exit 1
   exit 0
 }
+
+# Logging
+echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nArguments: $*" >> "$LOG_FILE"
 
 main "$@"

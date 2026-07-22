@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2011%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.3.0-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.4.1-blue.svg)]()
 
 > A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory.
 
@@ -186,12 +186,14 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.4.0)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
-| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.2.3)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, `/provider`, and `/model`), and isolates model reasoning streams. |
+| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.4.1)**: Agnostic, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
+| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.2.4)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, `/provider`, and `/model`), and isolates model reasoning streams. |
 | [`tools.sh`](tools.sh) | **Execution Runner (v0.4.1)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
 | [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.4.1)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
 | [`web-browse.sh`](tools/web-browse.sh) | **Stateless Browser Automation (v0.0.3)**: Pure Bash one-shot Chrome DevTools Protocol (CDP) engine with zero Node.js dependencies, SOCKS5 proxying, form interaction, screenshots, and PDFs. |
+| [`web-browse-mobile.sh`](tools/web-browse-mobile.sh) | **Mobile Stateless Browser Automation (v0.0.2)**: Pure Bash one-shot Chrome DevTools Protocol (CDP) engine with zero Node.js dependencies, zero privileges, SOCKS5 proxying, form interaction, screenshots, and PDFs. |
 | [`tools.json`](tools/tools.json) | **Declaration Schemas**: Formal tool definitions for the full-function calling surface. |
+| [`tools-mobile.json`](tools/tools-mobile.json) | **Mobile Schema Adaptation**: Specialized schema file adapted with a different SOCKS proxy version. |
 | [`tools-groq.json`](tools/tools-groq.json) | **Groq Schema Adaptation**: Specialized schema file adapted to Groq's stricter validation behavior. |
 | [`tools-light.json`](tools/tools-light.json) | **Lightweight Schemas**: Simplified tool contract for smaller local models. |
 | [`config/models.json`](config/models.json) | **Models Registry**: Centralized model and sampling parameter registry. |
@@ -319,19 +321,19 @@ Ensure you have standard system packages installed:
 
 ```bash
 # Debian / Ubuntu / Mint
-sudo apt update && sudo apt install -y curl jq awk sed tor glow cargo openssl
+sudo apt update && sudo apt install -y curl jq awk sed tor glow cargo openssl websocat
 cargo install htmlq
 
 # macOS (Homebrew)
-brew install jq sed glow tor htmlq openssl awk
+brew install jq sed glow tor htmlq openssl awk websocat
 
 # Arch Linux
-sudo pacman -Syu curl jq sed tor glow openssl awk
+sudo pacman -Syu curl jq sed tor glow openssl awk websocat
 # htmlq can be installed via AUR (e.g. paru -S htmlq) or Cargo:
 cargo install htmlq
 
 # Android / Termux
-pkg install curl jq sed glow cargo-binstall openssl awk
+pkg install curl jq sed glow cargo-binstall openssl awk websocat android-tools
 cargo-binstall htmlq
 ```
 
@@ -469,7 +471,7 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ## ⚖️ License & Project Status
 
-- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.4.0).
+- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.4.1).
 - **Next Roadmap Milestones (v2.0.0 - A.I.D.E. Web & CLI Modernization)**:
   - 🌐 **A.I.D.E. Web**: local-first responsive web dashboard served by `web/server.php`
   - 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: richer CLI interactions with graceful fallbacks

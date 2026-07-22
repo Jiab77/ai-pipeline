@@ -15,6 +15,7 @@ RUN apt update && apt install -y --no-install-recommends \
     sed \
     openssl \
     ncurses-bin \
+    websocat \
     && rm -rf /var/lib/apt/lists/*
 
 # Install glow (Markdown renderer in terminal)

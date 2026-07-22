@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.4.0
+# Version: 1.4.1
 # ==============================================================================
 
 # Options
@@ -312,8 +312,9 @@ decrypt_provider_key() {
 }
 
 load_provider_key() {
-  if has_provider_key "$PROVIDER"; then
-    PROVIDER_API_KEY=$(decrypt_provider_key "$PROVIDER" 2>/dev/null)
+  local target_provider ; target_provider="${1:-$PROVIDER}"
+  if has_provider_key "$target_provider"; then
+    PROVIDER_API_KEY=$(decrypt_provider_key "$target_provider" 2>/dev/null)
   elif [[ -r $CREDENTIALS ]]; then
     # Fallback to legacy credentials file
     PROVIDER_API_KEY=$(<"$CREDENTIALS")
@@ -356,6 +357,9 @@ interactive_key_setup() {
   # Encrypt and save key
   encrypt_provider_key "$provider" "$raw_key"
   log_success "API key encrypted and sealed successfully inside '${KEYS_DIR##*/}/${provider}.key'."
+
+  # Load new provider key
+  load_provider_key "$provider"
 }
 
 manage_keys() {
@@ -626,7 +630,11 @@ set_base_tools() {
   case $BACKEND in
     ollama|llamacpp)
       if [[ $memory_size -gt 8 ]]; then
-        BASE_TOOLS="${TOOLS_DIR}/tools.json"
+        if is_termux; then
+          BASE_TOOLS="${TOOLS_DIR}/tools-mobile.json"
+        else
+          BASE_TOOLS="${TOOLS_DIR}/tools.json"
+        fi
       else
         BASE_TOOLS="${TOOLS_DIR}/tools-light.json"
       fi
@@ -634,7 +642,13 @@ set_base_tools() {
     external)
       case $PROVIDER in
         groq) BASE_TOOLS="${TOOLS_DIR}/tools-groq.json" ;;
-        *) BASE_TOOLS="${TOOLS_DIR}/tools.json" ;;
+        *)
+          if is_termux; then
+            BASE_TOOLS="${TOOLS_DIR}/tools-mobile.json"
+          else
+            BASE_TOOLS="${TOOLS_DIR}/tools.json"
+          fi
+        ;;
       esac
     ;;
   esac
@@ -2131,10 +2145,10 @@ init_core() {
         # Running interactively in Chat mode, prompt user to configure keys
         log_warn "Missing cloud credentials for provider: ${CLR_B_YELLOW}${PROVIDER}${ANSI_RESET}."
         interactive_key_setup "$PROVIDER"
-        # Reload key after interactive setup
-        if has_provider_key "$PROVIDER"; then
-          PROVIDER_API_KEY=$(decrypt_provider_key "$PROVIDER" 2>/dev/null)
-        fi
+        # Reload key after interactive setup (already done in 'interactive_key_setup' now)
+        # if has_provider_key "$PROVIDER"; then
+        #   PROVIDER_API_KEY=$(decrypt_provider_key "$PROVIDER" 2>/dev/null)
+        # fi
       fi
     fi
 

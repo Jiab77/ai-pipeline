@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.3
+# Version: 1.2.4
 # ==============================================================================
 
 # Options
@@ -92,8 +92,7 @@ run_chat() {
         log_step "New active model: ${CLR_B_WHITE}${PROVIDER_API_MODEL}${ANSI_RESET}"
         load_provider_key   # Load corresponding provider key
         if [[ -z $PROVIDER_API_KEY ]]; then
-          interactive_key_setup "$active_provider" && \
-          load_provider_key   # Load corresponding provider key
+          interactive_key_setup "$active_provider"
         fi
         set_chat_model      # Update corresponding chat model for new provider
         set_vision_model    # Update corresponding vision model for new provider

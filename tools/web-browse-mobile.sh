@@ -18,7 +18,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (hy3)
 #
-# Version: 0.0.1
+# Version: 0.0.2
 # ==============================================================================
 
 # Options
@@ -595,7 +595,7 @@ init_android_browser() {
   # so we set it via CDP instead of a launch flag. The device Chrome reaches
   # Termux's Tor on the shared device loopback (127.0.0.1:9050).
   if [[ $NO_TOR == "false" && -z $PROXY ]]; then
-    PROXY="socks5://127.0.0.1:9050"
+    PROXY="socks4a://127.0.0.1:9050"
   fi
   [[ $PROXY == "null" || $PROXY == "false" ]] && PROXY=""
   if [[ -n $PROXY ]]; then

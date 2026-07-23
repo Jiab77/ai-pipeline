@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.4.1
+# Version: 1.4.2
 # ==============================================================================
 
 # Options
@@ -28,7 +28,7 @@ BACKEND="${BACKEND:-external}"
 PROVIDER="${PROVIDER:-vercel}"
 PROVIDER_API_KEY=""
 MEMORY_TYPE="${MEMORY_TYPE:-markdown}"
-HEARTBEAT_THRESHOLD=10
+HEARTBEAT_THRESHOLD=15
 PBKDF_ITERATIONS=500000
 CREDENTIALS="${HOME}/.creds"
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -1582,7 +1582,11 @@ Take as many tool calls as you need. When you are fully done organizing and savi
   if [[ $errors -eq 0 ]]; then
     log_brain "Pruning active messages log to release token pressure..."
     if [[ -r $messages_path ]]; then
-      jq -rc '.[-2:]' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
+      # bad
+      # jq -rc '.[-2:]' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
+
+      # good
+      jq -rc '([.[].role] | reverse | index("user")) as $ri | if $ri then .[length - $ri - 1:] else [] end' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
       mv -f "${messages_path}.tmp" "$messages_path"
     else
       echo "[]" > "$messages_path"

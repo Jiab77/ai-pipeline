@@ -18,7 +18,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (hy3)
 #
-# Version: 0.0.3
+# Version: 0.0.4
 # ==============================================================================
 
 # Options
@@ -536,14 +536,22 @@ init_android_browser() {
   ensure_adb_connected || exit 1
 
   local launched=false
-  local window_mode
+  local target_pkg window_mode
+  local known_browsers=("org.cromite.cromite" "com.android.chrome" "com.brave.browser" "com.kiwi_browser.browser")
+
+  # When changing launch mode, kill any existing instance to avoid reusing
+  # a fullscreen browser for a freeform launch (or vice-versa).
+  if [[ ! $LAUNCH_MODE == "fullscreen" ]]; then
+    echo "[CDP] Launch mode '$LAUNCH_MODE' — killing any existing browser instance..." >&2
+    for browser in "${known_browsers[@]}"; do
+      adb shell am force-stop "$browser" 2>/dev/null
+    done
+  fi
 
   if adb shell cat /proc/net/unix 2>/dev/null | grep -q "chrome_devtools_remote"; then
     echo "[CDP] Active Chrome DevTools socket detected. Reusing existing browser." >&2
   else
-    echo "[CDP] No active socket. Detecting Chromium browser..." >&2
-    local known_browsers=("org.cromite.cromite" "com.android.chrome" "com.brave.browser" "com.kiwi_browser.browser")
-    local target_pkg
+    echo "[CDP] No active socket. Detecting Chromium based browser..." >&2
     for pkg in "${known_browsers[@]}"; do
       if adb shell pm list packages 2>/dev/null | grep -q "$pkg"; then
         target_pkg="$pkg"

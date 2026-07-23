@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.4.2
+# Version: 0.4.3
 # ==============================================================================
 
 # Options
@@ -267,7 +267,7 @@ edit_file() {
 
   # Create backup to temp file
   tmp_file=$(mktemp)
-  cp "$path" "$tmp_file"
+  cp -p "$path" "$tmp_file"
 
   # Extract and stream sorted changes with null delimiters to execute exactly ONE jq process instead of (1 + 4*N) processes!
   while IFS= read -r -d '' mode && IFS= read -r -d '' line_start && IFS= read -r -d '' line_end && IFS= read -r -d '' content; do

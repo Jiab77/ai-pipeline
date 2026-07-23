@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.4.1
+# Version: 0.4.2
 # ==============================================================================
 
 # Options
@@ -432,7 +432,7 @@ web_fetch() {
   fi
 
   # Call our optimized smart script
-  "$WEB_FETCH" "${opts[@]}" "$url" 2>&1
+  "$WEB_FETCH" "${opts[@]}" "$url"
 }
 
 # 11. Interact with and audit dynamic web pages WITHOUT Puppeteer
@@ -459,9 +459,9 @@ web_browse() {
 
   # Call our optimized script WITHOUT Puppeteer
   if is_termux ; then
-    "$WEB_BROWSE_MOBILE" "$updated_args" 2>&1
+    "$WEB_BROWSE_MOBILE" "$updated_args"
   else
-    "$WEB_BROWSE" "$updated_args" 2>&1
+    "$WEB_BROWSE" "$updated_args"
   fi
 }
 

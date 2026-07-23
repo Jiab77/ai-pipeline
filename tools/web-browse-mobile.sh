@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#
+# shellcheck disable=SC2001,SC2016
 # ==============================================================================
 # web-browse-mobile.sh — Pure Bash Stateless One-Shot CDP Browser Automation Engine
 # ==============================================================================
@@ -18,7 +18,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (hy3)
 #
-# Version: 0.0.2
+# Version: 0.0.3
 # ==============================================================================
 
 # Options
@@ -46,6 +46,7 @@ LOG_FILE="${SCRIPT_NAME}.log"
 
 # Runtime mode flags
 LOCAL_CHROME=false
+LAUNCH_MODE="fullscreen"
 ADB_MODE=false
 ADB_CLEANUP=false
 
@@ -82,8 +83,16 @@ cleanup() {
 
   # Mobile mode: the ADB forward is idempotent and persistent; removing it is
   # opt-in (--cleanup-adb) so that consecutive runs are near-instant (<200ms).
-  if is_termux && [[ "${ADB_CLEANUP:-false}" == "true" ]]; then
+  if is_termux && [[ -n $ADB_CLEANUP && $ADB_CLEANUP == true ]]; then
+    # Restore default settings
+    adb shell settings delete global enable_freeform_support
+    adb shell settings delete secure force_resizable_activities
+
+    # Remove forwarding
     adb forward --remove tcp:"${DEBUG_PORT:-9222}" 2>/dev/null
+
+    # Kill adb server
+    adb kill-server
   fi
 }
 trap cleanup EXIT INT TERM
@@ -212,8 +221,11 @@ action_wait() {
     # Wait for selector to exist in DOM
     local retries=$((timeout / 200))
     [[ $retries -eq 0 ]] && retries=1
+    local escaped_selector ; escaped_selector="${selector//\\/\\\\}"
+    escaped_selector="${escaped_selector//\'/\\\'}"
+    escaped_selector=$(sed 's/`/\\`/g' <<< "$escaped_selector")
     for ((k=0; k<retries; k++)); do
-      local found ; found=$(cdp_eval "document.querySelector('$selector') !== null")
+      local found ; found=$(cdp_eval "document.querySelector('$escaped_selector') !== null")
       if [[ $found == "true" ]]; then
         return 0
       fi
@@ -238,9 +250,13 @@ action_wait() {
 action_click() {
   local selector="$1"
 
+  local escaped_selector ; escaped_selector="${selector//\\/\\\\}"
+  escaped_selector="${escaped_selector//\'/\\\'}"
+  escaped_selector=$(sed 's/`/\\`/g' <<< "$escaped_selector")
+
   local src="
     (function() {
-      const el = document.querySelector('$selector');
+      const el = document.querySelector('$escaped_selector');
       if (!el) return 'NOT_FOUND';
       el.scrollIntoView({ block: 'center', inline: 'center' });
       const rect = el.getBoundingClientRect();
@@ -271,9 +287,13 @@ action_type() {
 
   local escaped_text ; escaped_text=$(jq -rc . <<<"$text")
 
+  local escaped_selector ; escaped_selector="${selector//\\/\\\\}"
+  escaped_selector="${escaped_selector//\'/\\\'}"
+  escaped_selector=$(sed 's/`/\\`/g' <<< "$escaped_selector")
+
   local src="
     (function() {
-      const el = document.querySelector('$selector');
+      const el = document.querySelector('$escaped_selector');
       if (!el) return 'NOT_FOUND';
       el.scrollIntoView({ block: 'center' });
       el.focus();
@@ -516,6 +536,8 @@ init_android_browser() {
   ensure_adb_connected || exit 1
 
   local launched=false
+  local window_mode
+
   if adb shell cat /proc/net/unix 2>/dev/null | grep -q "chrome_devtools_remote"; then
     echo "[CDP] Active Chrome DevTools socket detected. Reusing existing browser." >&2
   else
@@ -535,8 +557,39 @@ init_android_browser() {
     fi
 
     echo "[CDP] Launching $target_pkg..." >&2
-    # Universal Intent launch: no hardcoded Activity name required.
-    adb shell am start -a android.intent.action.VIEW -d "about:blank" -p "$target_pkg" &>/dev/null
+
+    # Check defined launch mode
+    case $LAUNCH_MODE in
+      fullscreen)
+        # Universal Intent launch: no hardcoded Activity name required.
+        adb shell am start -a android.intent.action.VIEW -d "about:blank" -p "$target_pkg" &>/dev/null
+      ;;
+      freeform)
+        # Set required settings for controlling browser window position
+        adb shell settings put global enable_freeform_support 1
+        adb shell settings put secure force_resizable_activities 1
+
+        # Set required window mode
+        # - Freeform + Movable = 5 (Works with '-p' and '-n')
+        # - Freeform + Fixed = 4 (works only with '-n' because it requires exact activity name)
+        #
+        # For compatibility reason, only mode 5 will be supported because I don't want to pass
+        # my time at finding and testing each specific activity can be used for each supported browsers.
+        window_mode=5
+
+        # Start browser in freeform mode (movable, not fixed)
+        adb shell am start \
+          -a android.intent.action.VIEW \
+          -d "about:blank" \
+          -p "$target_pkg" \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_LEFT 200 \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_TOP 300 \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_RIGHT 880 \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_BOTTOM 1500 \
+          --windowingMode $window_mode &>/dev/null
+      ;;
+    esac
+
     launched=true
 
     # Poll the kernel socket instead of a fixed sleep (robust on slow devices).
@@ -710,6 +763,7 @@ parse_input() {
   # Mode overrides coming from the JSON payload (CLI flags take precedence).
   LOCAL_CHROME_JSON=$(jq -rc '.localChrome // false' <<<"$raw_input")
   ADB_MODE_JSON=$(jq -rc '.android // false' <<<"$raw_input")
+  LAUNCH_MODE=$(jq -rc '.launch_mode // "fullscreen"' <<<"$raw_input")
   [[ $LOCAL_CHROME_JSON == "true" ]] && LOCAL_CHROME=true
   [[ $ADB_MODE_JSON == "true" ]] && ADB_MODE=true
 
@@ -730,6 +784,9 @@ main() {
       --adb) ADB_MODE=true ;;
       --local-chrome) LOCAL_CHROME=true ;;
       --cleanup-adb) ADB_CLEANUP=true ;;
+      --launch-mode)
+        shift ; LAUNCH_MODE="$1" ; shift
+      ;;
       *) INPUT_ARG="$arg" ;;
     esac
   done

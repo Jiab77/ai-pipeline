@@ -281,6 +281,12 @@
               "height": { "type": "integer" }
             }
           },
+          "launch_mode": {
+            "type": "string",
+            "enum": ["fullscreen", "freeform"],
+            "default": "fullscreen",
+            "description": "Android window mode: 'fullscreen' (default), 'freeform' (draggable+resizable). Ignored on desktop."
+          },
           "actions": {
             "type": "array",
             "description": "Ordered list of actions to perform on the page sequentially.",

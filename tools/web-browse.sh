@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#
+# shellcheck disable=SC2001,SC2016
 # ==============================================================================
 # web-browse.sh — Pure Bash Stateless One-Shot CDP Browser Automation Engine
 # ==============================================================================
@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.0.3
+# Version: 0.0.4
 # ==============================================================================
 
 # Options
@@ -184,8 +184,11 @@ action_wait() {
     # Wait for selector to exist in DOM
     local retries=$((timeout / 200))
     [[ $retries -eq 0 ]] && retries=1
+    local escaped_selector ; escaped_selector="${selector//\\/\\\\}"
+    escaped_selector="${escaped_selector//\'/\\\'}"
+    escaped_selector=$(sed 's/`/\\`/g' <<< "$escaped_selector")
     for ((k=0; k<retries; k++)); do
-      local found ; found=$(cdp_eval "document.querySelector('$selector') !== null")
+      local found ; found=$(cdp_eval "document.querySelector('$escaped_selector') !== null")
       if [[ $found == "true" ]]; then
         return 0
       fi
@@ -210,9 +213,13 @@ action_wait() {
 action_click() {
   local selector="$1"
 
+  local escaped_selector ; escaped_selector="${selector//\\/\\\\}"
+  escaped_selector="${escaped_selector//\'/\\\'}"
+  escaped_selector=$(sed 's/`/\\`/g' <<< "$escaped_selector")
+
   local src="
     (function() {
-      const el = document.querySelector('$selector');
+      const el = document.querySelector('$escaped_selector');
       if (!el) return 'NOT_FOUND';
       el.scrollIntoView({ block: 'center', inline: 'center' });
       const rect = el.getBoundingClientRect();
@@ -243,9 +250,13 @@ action_type() {
 
   local escaped_text ; escaped_text=$(jq -rc . <<<"$text")
 
+  local escaped_selector ; escaped_selector="${selector//\\/\\\\}"
+  escaped_selector="${escaped_selector//\'/\\\'}"
+  escaped_selector=$(sed 's/`/\\`/g' <<< "$escaped_selector")
+
   local src="
     (function() {
-      const el = document.querySelector('$selector');
+      const el = document.querySelector('$escaped_selector');
       if (!el) return 'NOT_FOUND';
       el.scrollIntoView({ block: 'center' });
       el.focus();

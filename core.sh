@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.4.2
+# Version: 1.4.3
 # ==============================================================================
 
 # Options
@@ -28,6 +28,7 @@ BACKEND="${BACKEND:-external}"
 PROVIDER="${PROVIDER:-vercel}"
 PROVIDER_API_KEY=""
 MEMORY_TYPE="${MEMORY_TYPE:-markdown}"
+DEFAULT_TERM_WIDTH=80
 HEARTBEAT_THRESHOLD=15
 PBKDF_ITERATIONS=500000
 CREDENTIALS="${HOME}/.creds"
@@ -185,19 +186,18 @@ ICON_USER="👤 "
 ICON_AI="🤖"
 
 # Get terminal width safely
+set_term_width() {
+  TERM_WIDTH=$(tput cols 2>/dev/null || echo $DEFAULT_TERM_WIDTH)
+  TERM_WIDTH=$((TERM_WIDTH - 1))
+}
 get_term_width() {
-  local cols
-  cols=$(tput cols 2>/dev/null || echo 80)
-  if [[ ! "$cols" =~ ^[0-9]+$ ]] || [ "$cols" -lt 20 ]; then
-    cols=80
-  fi
-  echo "$((cols - 1))"
+  echo "$TERM_WIDTH"
 }
 
 # Draw full width visual horizontal line
 draw_line() {
   local char="${1:-─}"
-  local count="${2:-80}"
+  local count="${2:-$TERM_WIDTH}"
   local line
   printf -v line "%*s" "$count" ""
   echo -e "${line// /$char}"
@@ -210,6 +210,7 @@ draw_header() {
   local line_clr="$3"
   local line_char
   local width ; width=$(get_term_width)
+  [[ $prefix == *Tool* ]] && width=$((width + 1))
   local esc ; esc=$(printf '')
   local clean_prefix ; clean_prefix=$(sed "s/${esc}[[0-9;]*m//g" <<<"$prefix")
   # Measure visual length accurately, substituting emojis/wide chars with 2 chars
@@ -2089,6 +2090,9 @@ parse_cli_flags() {
 
 init_core() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
+
+  # Set initial terminal width
+  set_term_width
 
   # Fix Emojis/Icons for Termux
   if is_termux; then

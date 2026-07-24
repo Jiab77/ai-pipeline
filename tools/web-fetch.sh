@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (hy3)
 #
-# Version: 0.4.1
+# Version: 0.4.2
 # ==============================================================================
 
 # Options
@@ -25,9 +25,11 @@ TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 LOG_FILE="${SCRIPT_NAME}.log"
+WEB_BROWSE_TOOL="${SCRIPT_DIR}/web-browse.sh"
 
 # Proxy SOCKS5 for Tor (if active)
 IF_TOR_PROXY=""
@@ -41,14 +43,20 @@ USE_TOR=true
 URL=""
 
 while [[ $# -gt 0 ]]; do
-  case "$1" in
+  case $1 in
+    -h|--help)
+      echo "Usage: $SCRIPT_NAME [options] <URL>"
+      echo "Options:"
+      echo "  -h, --help    Print this message and exit"
+      echo "  -j, --js      Use JavaScript headless browser (fallback to 'web_browse' tool)"
+      echo "  --no-tor      Bypass Tor SOCKS5 proxy even if available"
+      exit 0
+    ;;
     --no-tor)
-      USE_TOR=false
-      shift
+      USE_TOR=false ; shift
     ;;
     -j|--js)
-      USE_JS=true
-      shift
+      USE_JS=true ; shift
     ;;
     -*)
       echo "Error: Unknown option $1" >&2
@@ -67,9 +75,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z $URL ]]; then
-  echo "Usage: $0 [options] <URL>"
+  echo "Usage: $SCRIPT_NAME [options] <URL>"
   echo "Options:"
-  echo "  -j, --js      Use JavaScript headless browser (Puppeteer fallback, when available)"
+  echo "  -h, --help    Print this message and exit"
+  echo "  -j, --js      Use JavaScript headless browser (fallback to 'web_browse' tool)"
   echo "  --no-tor      Bypass Tor SOCKS5 proxy even if available"
   exit 1
 fi
@@ -90,7 +99,9 @@ log() {
 }
 
 if [[ $USE_JS == true ]]; then
-  log "JavaScript fallback option is selected but not natively needed for specific REST APIs."
+  # log "JavaScript fallback option is selected but not natively needed for specific REST APIs."
+  bash "$WEB_BROWSE_TOOL" --url "$URL"
+  exit $?
 fi
 
 # -----------------------------------------------------------------------------

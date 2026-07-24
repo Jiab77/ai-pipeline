@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 0.0.4
+# Version: 0.1.0
 # ==============================================================================
 
 # Options
@@ -425,6 +425,51 @@ detect_chrome_binary() {
   return 1
 }
 
+# Parse Options
+NO_TOR=false
+HEADLESS=true
+URL=""
+PROXY=""
+USER_AGENT=""
+SCREENSHOT_PATH_CONV=""
+WAIT_UNTIL="complete"
+
+# Parse given arguments
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -h|--help)
+        echo "Usage: $SCRIPT_NAME [options]"
+        echo "Options:"
+        echo "  -h, --help                Print this message and exit"
+        echo "  -u, --url                 Set target URL"
+        echo "  -p, --proxy <url>         Set proxy URL"
+        echo "  --screenshot <path>       Save screenshot to given path"
+        echo "  --viewport <WxH>          Viewport Width x Height"
+        echo "  --headless <true|false>   Headless mode"
+        echo "  --no-tor                  Disabled Tor proxy"
+        exit 0
+      ;;
+      -u|--url) URL="$2" ; shift 2 ;;
+      -p|--proxy) PROXY="$2" ; shift 2 ;;
+      --viewport)
+        VIEWPORT_WIDTH=$(cut -d "x" -f1 <<< "$2")
+        VIEWPORT_HEIGHT=$(cut -d "x" -f2 <<< "$2")
+        [[ -z $VIEWPORT_WIDTH ]] && VIEWPORT_WIDTH=1280
+        [[ -z $VIEWPORT_HEIGHT ]] && VIEWPORT_HEIGHT=800
+        shift 2
+      ;;
+      --screenshot) SCREENSHOT_PATH_CONV="$2" ; shift 2 ;;
+      --headless) HEADLESS="${2:-true}" ; shift 2 ;;
+      --no-tor) NO_TOR=true ; shift ;;
+      *)
+        # Parse standard inputs
+        parse_input "$1" ; shift
+      ;;
+    esac
+  done
+}
+
 # Parse JSON input string or read from stdin/file
 parse_input() {
   local raw_input="$1"
@@ -461,8 +506,8 @@ main() {
   local ret_code_navigate ret_code_wait ret_code_click ret_code_type ret_code_press
   local ret_code_screenshot ret_code_pdf ret_code_evaluate ret_code_scroll
 
-  # Parse standard inputs
-  parse_input "$1"
+  # Parse given arguments
+  parse_args "$@"
 
   if [[ -z $URL ]]; then
     echo "{\"success\":false,\"error\":\"Missing target URL in payload\"}"

@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.4
+# Version: 1.2.5
 # ==============================================================================
 
 # Options
@@ -85,7 +85,8 @@ run_chat() {
       ;;
       "/provider") log_warn "Missing command arguments. Usage: /provider <command>" ;;
       "/provider "*)
-        unset PROVIDER_API_KEY    # Should fix the bug where the new API key is not updated
+        unset USER_MODEL          # Remove initially defined model
+        unset PROVIDER_API_KEY    # Remove previous provider API key
         local active_provider="${USER_MSG#"/provider "}" ; PROVIDER="$active_provider"
         log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
         set_api_provider    # Reflect new active provider
@@ -100,8 +101,10 @@ run_chat() {
       ;;
       "/model") log_warn "Missing command arguments. Usage: /model <command>" ;;
       "/model "*)
+        unset USER_MODEL    # Remove initially defined model
         local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
         log_step "New active model: ${CLR_B_WHITE}${active_model}${ANSI_RESET}"
+        set_vision_model    # Update corresponding vision model
         set_system_prompt   # Update system prompt with new active model
       ;;
       "/load") log_warn "Missing command arguments. Usage: /load <file>" ;;

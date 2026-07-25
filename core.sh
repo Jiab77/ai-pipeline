@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.4.3
+# Version: 1.4.4
 # ==============================================================================
 
 # Options
@@ -568,7 +568,7 @@ get_vision_model() {
       case $PROVIDER in
         groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
         openrouter) vision_model="openrouter/auto" ;;   # Might be useless to do that when the active model already have native vision... I might reconsider this part in the future.
-        openrouter_free) vision_model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" ;;
+        openrouter_free) vision_model="openrouter/free" ;;
         vercel_free) vision_model="google/gemini-2.5-flash" ;;
         *) vision_model="$PROVIDER_API_MODEL" ;;
       esac
@@ -664,11 +664,12 @@ set_chat_model() {
 }
 
 set_vision_model() {
-  if [[ -n $USER_MODEL ]]; then
-    VISION_MODEL="$USER_MODEL"
-  else
-    VISION_MODEL="$(get_vision_model)"
-  fi
+  VISION_MODEL="$(get_vision_model)"
+  # if [[ -n $USER_MODEL ]]; then
+  #   VISION_MODEL="$USER_MODEL"
+  # else
+  #   VISION_MODEL="$(get_vision_model)"
+  # fi
 }
 
 set_api_provider() {
@@ -1100,7 +1101,7 @@ api_call() {
           # Disallow prompt training by default (except for analyzing images in free mode)
           # Required because there is no providers on OpenRouter that accepts to process image without keeping data for training purposes
           # Let's see if that's an acceptable trade-off for the 'openrouter_free' provider...
-          if [[ $IS_IMAGE == false ]]; then
+          if [[ $(grep -ci "image_url" <<< "$payload") -eq 0 ]]; then
             payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
           else
             log_warn "🔒 ${CLR_B_CYAN}[DPT]${ANSI_RESET} Disallow Prompt Training policy disabled temporary during image processing." ; log
@@ -1244,7 +1245,7 @@ run_inference_loop() {
       local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
       local err_code; err_code=$(jq -rc '.error.code // .error.param.statusCode' <<<"$raw_res" 2>/dev/null)
       if [[ -n $err_meta && ! $err_meta == "null" ]]; then
-        local err_string_meta ; err_string_meta="\n\nDetails:\n\n$(jq -rc '.raw' <<<"$err_meta" 2>/dev/null)"
+        local err_string_meta ; err_string_meta="\n\nDetails:\n\n$(jq -rc '.raw // "N/A"' <<<"$err_meta" 2>/dev/null)"
       fi
       if [[ -n $err_code && ! $err_code == "null" ]]; then
         local err_string_code ; err_string_code=" (Code: ${err_code})"
@@ -1653,7 +1654,7 @@ send_message() {
   local active_model="$CHAT_MODEL"
   if [[ $IS_IMAGE == true ]]; then
     active_model="$VISION_MODEL"
-    log_brain "Autonomous Multimodal Vision activated: Using ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
+    log_brain "Autonomous Multimodal Vision activated using: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
   fi
 
   # Create PAYLOAD_MESSAGES (which contains system prompt, previous history, and the current user query with file context)

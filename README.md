@@ -481,12 +481,12 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ---
 
-## 📈 Star History
+## Star History
 
-<a href="https://www.star-history.com/?repos=jiab77%2Fai-pipeline&type=date&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=jiab77/ai-pipeline&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=jiab77/ai-pipeline&type=date&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jiab77/ai-pipeline&type=date&legend=top-left" />
-  </picture>
+<a href="https://www.star-history.com/?repos=Jiab77%2Fai-pipeline&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&theme=dark&legend=top-left&sealed_token=5myKTqP6S6kvsFGYsC9NjzslqwBScknkzts6e0m4xgDItzX6fOS59R-xXBmXs2PWLgkWTeMdNZrdAVir_hZzbZm7X3na9om_q96MVZ9zQoRweCqOphQoPA" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&legend=top-left&sealed_token=5myKTqP6S6kvsFGYsC9NjzslqwBScknkzts6e0m4xgDItzX6fOS59R-xXBmXs2PWLgkWTeMdNZrdAVir_hZzbZm7X3na9om_q96MVZ9zQoRweCqOphQoPA" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&legend=top-left&sealed_token=5myKTqP6S6kvsFGYsC9NjzslqwBScknkzts6e0m4xgDItzX6fOS59R-xXBmXs2PWLgkWTeMdNZrdAVir_hZzbZm7X3na9om_q96MVZ9zQoRweCqOphQoPA" />
+ </picture>
 </a>

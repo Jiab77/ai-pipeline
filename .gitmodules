@@ -1,0 +1,3 @@
+[submodule "web/lib/fatfree-core"]
+	path = web/lib/fatfree-core
+	url = https://github.com/f3-factory/fatfree-core

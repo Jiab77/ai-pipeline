@@ -1,5 +1,5 @@
 {
-    "title": "Jarvis Command Center",
+    "title": "A.I.D.E Web",
     "subtitle": "Sovereign AI OS Dashboard",
     "version_label": "v0.0.0",
     "cpu_label": "CPU",
@@ -11,6 +11,8 @@
     "tab_scratchpad": "Scratchpad",
     "active_engine_profile": "Active Engine Profile",
     "backend_label": "Backend",
+    "provider_label": "Provider",
+    "model_label": "Model",
     "credits_label": "Credits",
     "welcome_message": "Hello Jiab77! I am fully operational and connected to our sovereign pipeline. How can I assist you today in your development and security cockpit? 🚀",
     "chat_placeholder": "Enter your instruction here (Press Enter or click Send)...",

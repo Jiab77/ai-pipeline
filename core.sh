@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.4.4
+# Version: 1.5.0
 # ==============================================================================
 
 # Options
@@ -63,6 +63,7 @@ WEB_SERVER="${SCRIPT_DIR}/web/server.php"
 SCRIPT_CONFIG="${CONFIG_DIR}/${SCRIPT_NAME}.conf"
 MODELS_CONFIG="${CONFIG_DIR}/models.json"
 PROVIDERS_CONFIG="${CONFIG_DIR}/providers.json"
+STATE_FILE="${CONFIG_DIR}/state.json"
 MESSAGES_FILE="messages.json"
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
@@ -653,6 +654,17 @@ set_base_tools() {
       esac
     ;;
   esac
+}
+
+set_state() {
+  local json_string=''
+  json_string+='{'
+  json_string+='"backend":"'"$BACKEND"'",'      # Set active backend
+  json_string+='"provider":"'"$PROVIDER"'",'    # Set active provider
+  json_string+='"model":"'"$CHAT_MODEL"'",'     # Set active chat model
+  json_string+='"vision":"'"$VISION_MODEL"'"'   # Set active vision model
+  json_string+='}'
+  echo "$json_string" > "$STATE_FILE"
 }
 
 set_chat_model() {
@@ -2124,6 +2136,9 @@ init_core() {
 
   # Define right vision model
   set_vision_model
+
+  # Set current state
+  set_state
 
   # Set system prompt based on defined models
   set_system_prompt

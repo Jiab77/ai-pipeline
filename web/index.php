@@ -9,12 +9,16 @@
  *
  * Architect: Jiab77
  * AI Sorcerer: Jarvis (The Great Master Flash)
- * Version: 0.0.0
+ * Version: 0.0.1
  */
 
 // Load Fat-Free Framework Core
-require_once 'lib/fatfree-core/base.php';
+require_once __DIR__ . '/lib/fatfree-core/base.php';
 
+define('PROJECT_ROOT', dirname(realpath(__DIR__)));
+define('WEB_ROOT', PROJECT_ROOT . '/web');
+
+// Init
 $f3 = \Base::instance();
 
 // Configure F3 parameters
@@ -36,6 +40,7 @@ if ($f3->exists('GET.lang')) {
         setcookie('aide_lang', $lang, time() + (86400 * 30), '/');
     }
 } elseif (isset($_COOKIE['aide_lang']) && in_array($_COOKIE['aide_lang'], ['fr', 'en'])) {
+    $lang = $_COOKIE['aide_lang'];
 } else {
     // Auto-detect using Accept-Language header
     $acceptLang = $f3->get('HEADERS.Accept-Language');
@@ -50,15 +55,30 @@ if ($f3->exists('GET.lang')) {
 $f3->set('ACTIVE_LANG', $lang);
 
 // Load target JSON dictionary
-$dictFile = "i18n/{$lang}.json";
+$dictFile = __DIR__ . "/i18n/{$lang}.json";
 if (file_exists($dictFile)) {
     $translations = json_decode(file_get_contents($dictFile), true);
 } else {
-    $translations = json_decode(file_get_contents("i18n/en.json"), true);
+    $translations = json_decode(file_get_contents(__DIR__ . '/i18n/en.json'), true);
 }
 
 // Bind dictionary into F3 container
 $f3->set('DICT', $translations);
+
+// Load version file
+if (file_exists(WEB_ROOT . '/version.json')) {
+    $f3->set('WEB_VERSION', json_decode(file_get_contents(WEB_ROOT . '/version.json'))->version);
+}
+
+// Load provider config file
+if (file_exists(PROJECT_ROOT . '/config/providers.json')) {
+    $f3->set('PROVIDERS', json_decode(file_get_contents(PROJECT_ROOT . '/config/providers.json')));
+}
+
+// Load state config file
+if (file_exists(PROJECT_ROOT . '/config/state.json')) {
+    $f3->set('CONFIG_STATE', json_decode(file_get_contents(PROJECT_ROOT . '/config/state.json')));
+}
 
 // Dynamic Translation Helper function
 function __($key) {
@@ -126,7 +146,7 @@ $f3->route('GET /api/telemetry', function($f3) {
         if (preg_match('/MemAvailable:\s+(\d+) kB/', $meminfo, $matches)) {
             $memFree = (int)$matches[1] * 1024;
         } else if (preg_match('/MemFree:\s+(\d+) kB/', $meminfo, $matches)) {
-            $memFree = (int)$matches[1] * 1024; // fallback
+            $memFree = (int)$matches[1] * 1024;
         }
         $memUsed = $memTotal - $memFree;
     }
@@ -139,69 +159,89 @@ $f3->route('GET /api/telemetry', function($f3) {
             $battery = json_decode($batRaw, true);
         }
     }
+    elseif (file_exists('/sys/class/power_supply/BAT0/present')) {
+        $rawPresent = file_get_contents('/sys/class/power_supply/BAT0/present');
+        $rawCapacity = file_get_contents('/sys/class/power_supply/BAT0/capacity');
+        $rawStatus = file_get_contents('/sys/class/power_supply/BAT0/status');
+        $batPresent = trim($rawPresent) == '1' ? "true" : "false";
+        // $batObj = new \StdClass();
+        // $batObj->present = $batPresent;
+        // $batObj->percentage = trim($rawCapacity);
+        // $batObj->status = strtoupper(trim($rawStatus));
+        // if (is_object($batObj)) {
+        //     $battery = json_decode(json_encode($batObj));
+        // }
+        $batRaw  = '{';
+        $batRaw .= '"present": ' . $batPresent . ', ';
+        $batRaw .= '"percentage": ' . (int)trim($rawCapacity) . ', ';
+        $batRaw .= '"status": "' . strtoupper(trim($rawStatus)) . '"';
+        $batRaw .= '}';
+        if (is_string($batRaw)) {
+            $battery = json_decode($batRaw, true);
+        }
+    }
 
-    // Active Models & Configs (Read config/test.conf or config/pipeline.conf)
-    // TODO: Either parse real data from 'data/test-core.sh' or 'core.sh' or 'config/models.json'
-    //       If not config file exist but do not present fake data!
-    $activeModel = "google/gemini-3.5-flash";
-    $activeProvider = "vercel";
-    $activeBackend = "external";
+    // Active Models & Configs (read from config file, NO hardcoded fallback)
+    $activeModel = null;
+    $activeProvider = null;
+    $activeBackend = null;
+    $useTor = false;
 
-    $confFile = '../config/test.conf';
+    $confFile = PROJECT_ROOT . '/config/cli.conf';
     if (!file_exists($confFile)) {
-        $confFile = '../config/pipeline.conf';
+        $confFile = PROJECT_ROOT . '/config/core.conf';
+    }
+    if (!file_exists($confFile)) {
+        $confFile = PROJECT_ROOT . '/core.sh';
     }
 
     if (file_exists($confFile)) {
         $conf = file_get_contents($confFile);
-        if (preg_match('/PROVIDER=["\']?([^"\']+)["\']?/', $conf, $matches)) {
-            $activeProvider = $matches[1];
-        }
-        if (preg_match('/BACKEND=["\']?([^"\']+)["\']?/', $conf, $matches)) {
-            $activeBackend = $matches[1];
-        }
-        if (preg_match('/CHAT_MODEL=["\']?([^"\']+)["\']?/', $conf, $matches)) {
-            $activeModel = $matches[1];
-        }
-        if (preg_match('/USE_TOR=["\']?(true)["\']?/', $conf)) {
+        $activeBackend = !is_null($f3->get('CONFIG_STATE')) ? $f3->get('CONFIG_STATE')->backend : '';
+        $activeProvider = !is_null($f3->get('CONFIG_STATE')) ? $f3->get('CONFIG_STATE')->provider : '';
+        $activeModel = !is_null($f3->get('CONFIG_STATE')) ? $f3->get('CONFIG_STATE')->model : '';
+        // $activeModel = $f3->get('PROVIDERS')->{$activeProvider}->default->model;
+        if (preg_match('/USE_TOR=["\']?(true)["\']?/i', $conf)) {
             $useTor = true;
         }
     }
 
-    // Tor
-    $useTor = $activeBackend === "external" ? true : false;
-
-    // Get credit balance if vercel/external
-    $credits = null;
-    if ($activeProvider === 'vercel') {
-        $apiKey = '';
-        if (file_exists($confFile)) {
-            if (preg_match('/PROVIDER_API_KEY=["\']?([^"\']+)["\']?/', $conf, $matches)) {
-                $apiKey = $matches[1];
-            }
-        }
-        if (!empty($apiKey)) {
-            $ch = curl_init("https://ai-gateway.vercel.sh/v1/credits");
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                "Content-Type: application/json",
-                "Authorization: Bearer " . $apiKey,
-                "User-Agent: AIDEWeb"
-            ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 3);
-            if ($useTor) {
-                curl_setopt($ch, CURLOPT_PROXY, "socks5h://127.0.0.1:9050");
-            }
-            $res = curl_exec($ch);
-            curl_close($ch);
-            if ($res) {
-                $json = json_decode($res, true);
-                if (isset($json['balance'])) {
-                    $credits = $json['balance'];
-                }
-            }
-        }
+    // Tor detection: if backend is external, assume Tor-capable
+    if ($activeBackend === 'external' && !$useTor) {
+        $useTor = true;
     }
+
+    // Get credit balance
+    // FIXME: Disabled until I find a better way to handle this part
+    $credits = null;
+    // if ($activeProvider === 'vercel' && file_exists($confFile)) {
+    //     $apiKey = '';
+    //     $conf = file_get_contents($confFile);
+    //     if (preg_match('/PROVIDER_API_KEY=["\']?([^"\']+)["\']?/', $conf, $matches)) {
+    //         $apiKey = $matches[1];
+    //     }
+    //     if (!empty($apiKey)) {
+    //         $ch = curl_init("https://ai-gateway.vercel.sh/v1/credits");
+    //         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    //         curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    //             "Content-Type: application/json",
+    //             "Authorization: Bearer " . $apiKey,
+    //             "User-Agent: AIDEWeb"
+    //         ]);
+    //         curl_setopt($ch, CURLOPT_TIMEOUT, 3);
+    //         if ($useTor) {
+    //             curl_setopt($ch, CURLOPT_PROXY, "socks5h://127.0.0.1:9050");
+    //         }
+    //         $res = curl_exec($ch);
+    //         curl_close($ch);
+    //         if ($res) {
+    //             $json = json_decode($res, true);
+    //             if (isset($json['balance'])) {
+    //                 $credits = $json['balance'];
+    //             }
+    //         }
+    //     }
+    // }
 
     echo json_encode([
         'cpu' => [
@@ -236,11 +276,10 @@ $f3->route('GET /api/memory', function($f3) {
     header('Content-Type: application/json');
     $files = [];
 
-    // Read data/memory/
-    $memDir = '../data/memory';
+    $memDir = PROJECT_ROOT . '/data/memory';
     if (is_dir($memDir)) {
         foreach (scandir($memDir) as $file) {
-            if ($file !== '.' && $file !== '..' && str_ends_with($file, '.md')) {
+            if ($file !== '.' && $file !== '..' && substr($file, -3) === '.md') {
                 $files[] = [
                     'group' => 'Memory',
                     'name' => $file,
@@ -252,11 +291,10 @@ $f3->route('GET /api/memory', function($f3) {
         }
     }
 
-    // Read data/skills/
-    $skillsDir = '../data/skills';
+    $skillsDir = PROJECT_ROOT . '/data/skills';
     if (is_dir($skillsDir)) {
         foreach (scandir($skillsDir) as $file) {
-            if ($file !== '.' && $file !== '..' && str_ends_with($file, '.md')) {
+            if ($file !== '.' && $file !== '..' && substr($file, -3) === '.md') {
                 $files[] = [
                     'group' => 'Skills',
                     'name' => $file,
@@ -283,7 +321,7 @@ $f3->route('GET /api/memory/content', function($f3) {
         exit;
     }
 
-    $fullPath = '../' . $path;
+    $fullPath = PROJECT_ROOT . '/' . $path;
     if (file_exists($fullPath)) {
         echo json_encode([
             'path' => $path,
@@ -309,8 +347,7 @@ $f3->route('POST /api/memory/save', function($f3) {
         exit;
     }
 
-    $fullPath = '../' . $path;
-
+    $fullPath = PROJECT_ROOT . '/' . $path;
     if (file_put_contents($fullPath, $content) !== false) {
         echo json_encode(['success' => true]);
     } else {
@@ -328,14 +365,19 @@ $f3->route('GET /api/chat/stream', function($f3) {
 
     $query = $f3->get('GET.q');
     if (empty($query)) {
-        echo "data: " . json_encode(['error' => 'Empty query']) . "\n\n";
+        echo "data: " . json_encode(['error' => 'Empty query']) . PHP_EOL . PHP_EOL;
         exit;
     }
 
     // Target execution script
-    $script = '../data/test-core.sh';
+    $script = PROJECT_ROOT . '/data/test-core.sh';
     if (!file_exists($script)) {
-        $script = '../core.sh';
+        $script = PROJECT_ROOT . '/core.sh';
+    }
+
+    if (!file_exists($script)) {
+        echo "data: " . json_encode(['type' => 'error', 'text' => 'Core script not found: ' . $script]) . PHP_EOL . PHP_EOL;
+        exit;
     }
 
     $descriptorspec = [
@@ -376,14 +418,14 @@ $f3->route('GET /api/chat/stream', function($f3) {
                     if ($pipe === $pipes[1]) {
                         $line = fgets($pipes[1]);
                         if ($line !== false && $line !== '') {
-                            echo "data: " . json_encode(['type' => 'stdout', 'text' => $line]) . "\n\n";
+                            echo "data: " . json_encode(['type' => 'stdout', 'text' => $line]) . PHP_EOL . PHP_EOL;
                             ob_flush();
                             flush();
                         }
                     } else if ($pipe === $pipes[2]) {
                         $line = fgets($pipes[2]);
                         if ($line !== false && $line !== '') {
-                            echo "data: " . json_encode(['type' => 'stderr', 'text' => $line]) . "\n\n";
+                            echo "data: " . json_encode(['type' => 'stderr', 'text' => $line]) . PHP_EOL . PHP_EOL;
                             ob_flush();
                             flush();
                         }
@@ -400,10 +442,10 @@ $f3->route('GET /api/chat/stream', function($f3) {
         fclose($pipes[2]);
         proc_close($process);
     } else {
-        echo "data: " . json_encode(['type' => 'error', 'text' => 'Failed to initialize core subprocess.']) . "\n\n";
+        echo "data: " . json_encode(['type' => 'error', 'text' => 'Failed to initialize core subprocess.']) . PHP_EOL . PHP_EOL;
     }
 
-    echo "data: " . json_encode(['type' => 'done']) . "\n\n";
+    echo "data: " . json_encode(['type' => 'done']) . PHP_EOL . PHP_EOL;
     ob_flush();
     flush();
     exit;
@@ -627,12 +669,143 @@ $f3->route('GET /', function($f3) {
             color: #64b5f6 !important;
             font-family: 'Courier New', Courier, monospace;
         }
+
+        /* ================================================================
+           HAMBURGER BUTTON — hidden on desktop
+           ================================================================ */
+        #mobile-nav-toggle {
+            display: none;
+            background: none;
+            border: 1px solid rgba(255,255,255,0.12);
+            color: var(--color-text);
+            font-size: 1.3rem;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 1001;
+        }
+        #mobile-nav-toggle:hover { background: rgba(255,255,255,0.05); }
+
+        /* Sidebar overlay backdrop */
+        #sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 998;
+        }
+
+        /* ================================================================
+           MOBILE RESPONSIVE — v0.0.1
+           ================================================================ */
+        @media (max-width: 767px) {
+            body { font-size: 14px; overflow-x: hidden; }
+
+            /* Show hamburger, hide it on desktop handled by default */
+            #mobile-nav-toggle { display: block !important; }
+
+            .main-grid {
+                height: auto !important;
+                margin: 0 2px !important;
+            }
+
+            /* Sidebar: slide-in overlay from left */
+            .ui.grid.main-grid > .three.wide.column {
+                position: fixed !important;
+                top: 0;
+                left: -285px;
+                width: 270px !important;
+                height: 100vh !important;
+                z-index: 999;
+                transition: left 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+                padding: 12px !important;
+                overflow-y: auto;
+                background: var(--bg-card);
+                border-right: 1px solid var(--border-neon);
+                box-shadow: 4px 0 30px rgba(0,0,0,0.6);
+            }
+            .ui.grid.main-grid > .three.wide.column.open {
+                left: 0 !important;
+            }
+
+            .ui.vertical.menu.inverted.sidebar-menu {
+                height: 100% !important;
+                display: flex !important;
+                flex-direction: column !important;
+                border-right: none !important;
+                border-radius: 0 !important;
+                background: transparent !important;
+            }
+            .sidebar-menu .item {
+                font-size: 0.9rem !important;
+                padding: 12px 14px !important;
+                border-left: 3px solid transparent !important;
+                border-bottom: none !important;
+                text-align: left !important;
+            }
+            .sidebar-menu .item i.icon { display: inline-block !important; margin-right: 8px !important; font-size: 1rem !important; }
+            .sidebar-menu .item.active {
+                border-left: 3px solid var(--accent-blue) !important;
+                border-bottom: none !important;
+            }
+
+            /* Show profile card in slide-out sidebar */
+            .sidebar-menu .item[style*="position: absolute"] {
+                display: block !important;
+                position: relative !important;
+                margin-top: auto !important;
+                bottom: auto !important;
+                left: auto !important;
+                right: auto !important;
+            }
+
+            /* Right panel full width */
+            .ui.grid.main-grid > .thirteen.wide.column {
+                width: 100% !important;
+                padding: 0 4px !important;
+                height: auto !important;
+            }
+
+            /* Header: relative for hamburger positioning */
+            .premium-card:first-of-type { position: relative !important; padding-right: 50px !important; }
+            .premium-card > .ui.grid > .column { width: 100% !important; text-align: left !important; }
+            .premium-card > .ui.grid > .six.wide.column { margin-top: 8px !important; }
+            .premium-card h2 { font-size: 1.2rem !important; }
+            .premium-card .sub.header { font-size: 0.78rem !important; }
+
+            /* Chat */
+            .chat-history { max-height: 40vh !important; }
+            .chat-bubble { max-width: 95% !important; font-size: 0.88rem !important; padding: 0.7rem !important; }
+            .ui.action.input.fluid.big .ui.button { padding: 0.6em 0.8em !important; font-size: 0.85rem !important; }
+            #chat-input { font-size: 0.9rem !important; }
+            .terminal-panel { height: 120px !important; font-size: 0.7rem !important; }
+            .explorer-list { max-height: 30vh !important; border-right: none !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; margin-bottom: 10px !important; }
+            .editor-textarea, .preview-pane { height: 35vh !important; min-height: 200px !important; }
+            #editor-preview-container { margin-top: 10px !important; }
+            .ui.grid.stackable.three.column > .column { padding: 4px !important; }
+            .ui.definition.table { font-size: 0.78rem !important; }
+            .premium-card { padding: 0.8rem !important; border-radius: 8px !important; }
+            #scratchpad-content { height: 200px !important; font-size: 0.82rem !important; }
+        }
+
+        @media (max-width: 400px) {
+            .ui.grid.main-grid > .three.wide.column { width: 250px !important; left: -265px; }
+            .sidebar-menu .item { font-size: 0.82rem !important; padding: 10px 12px !important; }
+            .chat-history { max-height: 35vh !important; }
+            .editor-textarea, .preview-pane { height: 28vh !important; }
+        }
     </style>
 </head>
 <body>
 
     <!-- Header Section -->
-    <div class="ui inverted segment padded premium-card" style="margin: 10px 10px 0 10px; border-radius: 12px !important; padding: 1em 1.5em !important;">
+    <div class="ui inverted segment padded premium-card" style="margin: 1rem 1.5rem; border-radius: 12px !important; padding: 1em 1.5em !important; position: relative;">
+        <button id="mobile-nav-toggle" aria-label="Toggle navigation" title="Menu">
+            <i class="bars icon"></i>
+        </button>
         <div class="ui grid stackable middle aligned">
             <div class="ten wide column">
                 <h2 class="ui header inverted" style="margin: 0;">
@@ -640,31 +813,34 @@ $f3->route('GET /', function($f3) {
                     <div class="content">
                         <span style="color: var(--accent-blue); text-shadow: 0 0 15px rgba(100, 181, 246, 0.4);"><?= __('title') ?></span>
                         <div class="sub header" style="color: var(--color-text-dim); font-size: 0.95rem; margin-top: 0.3rem;">
-                            <span class="pulse-indicator"></span><?= __('subtitle') ?> <span class="ui label tiny black" style="border:1px solid rgba(0,181,173,0.3); color:var(--accent-cyan);"><?= __('version_label') ?></span>
+                            <span class="pulse-indicator"></span><?= __('subtitle') ?> <span class="ui label tiny black" style="border:1px solid rgba(0,181,173,0.3); color:var(--accent-cyan);"><?= !is_null($f3->get('WEB_VERSION')) ? $f3->get('WEB_VERSION') : 'N/A' ?></span>
                         </div>
                     </div>
                 </h2>
             </div>
             <!-- Dynamic Telemetry Badges & Lang Switcher -->
             <div class="six wide column right aligned">
-                <div class="ui label black basic" style="border-color: rgba(100, 181, 246, 0.2);">
+                <div class="ui inverted label black basic" style="border-color: rgba(100, 181, 246, 0.2);">
                     <i class="microchip icon teal" id="telemetry-cpu-icon"></i> <span id="badge-cpu" style="color: var(--color-text);"><?= __('cpu_label') ?>: --%</span>
                 </div>
-                <div class="ui label black basic" style="border-color: rgba(100, 181, 246, 0.2);">
+                <div class="ui inverted label black basic" style="border-color: rgba(100, 181, 246, 0.2);">
                     <i class="tasks icon blue" id="telemetry-mem-icon"></i> <span id="badge-mem" style="color: var(--color-text);"><?= __('ram_label') ?>: --%</span>
                 </div>
-                <div class="ui label black basic" style="border-color: rgba(100, 181, 246, 0.2); display: none;" id="badge-bat-container">
+                <div class="ui inverted label black basic" style="border-color: rgba(100, 181, 246, 0.2); display: none;" id="badge-bat-container">
                     <i class="battery half icon green" id="telemetry-bat-icon"></i> <span id="badge-bat" style="color: var(--color-text);"><?= __('bat_label') ?>: --%</span>
                 </div>
 
                 <!-- Premium Language Selector Buttons -->
-                <div class="ui mini buttons inverted" style="margin-left: 10px; border: 1px solid rgba(255,255,255,0.08);">
+                <div class="ui mini buttons inverted" style="margin-left: 10px; margin-top: 10px; border: 1px solid rgba(255,255,255,0.08);">
                     <a href="?lang=en" class="ui button mini <?= $f3->get('ACTIVE_LANG') === 'en' ? 'active teal' : 'black' ?>">EN</a>
                     <a href="?lang=fr" class="ui button mini <?= $f3->get('ACTIVE_LANG') === 'fr' ? 'active teal' : 'black' ?>">FR</a>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Sidebar overlay backdrop (mobile only) -->
+    <div id="sidebar-overlay"></div>
 
     <!-- Main Workspace Container -->
     <div class="ui grid main-grid" style="margin: 0 10px !important;">
@@ -687,8 +863,9 @@ $f3->route('GET /', function($f3) {
                 <!-- Active AI Profile Status -->
                 <div class="item" style="position: absolute; bottom: 10px; left: 0; right: 0; margin: 0 10px; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px;">
                     <div style="font-size: 0.8rem; color: var(--color-text-dim); text-transform: uppercase; margin-bottom: 5px;"><?= __('active_engine_profile') ?></div>
-                    <div style="font-weight: bold; color: var(--accent-cyan); word-break: break-all;" id="sidebar-model">...</div>
-                    <div style="font-size: 0.85rem; margin-top: 5px; color: var(--color-text);" id="sidebar-provider"><?= __('backend_label') ?>: ...</div>
+                    <div style="font-size: 0.85rem; margin-top: 5px; color: var(--color-text);" id="sidebar-backend"><?= __('backend_label') ?>: ...</div>
+                    <div style="font-size: 0.85rem; margin-top: 5px; color: var(--color-text);" id="sidebar-provider"><?= __('provider_label') ?>: ...</div>
+                    <div style="font-size: 0.85rem; margin-top: 5px; color: var(--color-text);"><?= __('model_label') ?>: <span style="font-weight: bold; color: var(--accent-cyan); word-break: break-all;" id="sidebar-model">...</span></div>
                     <div style="font-size: 0.8rem; margin-top: 5px; color: #2ecc71; display: none;" id="sidebar-credits-container">
                         <?= __('credits_label') ?>: <span id="sidebar-credits" style="font-weight: bold;">--</span>
                     </div>
@@ -925,6 +1102,38 @@ $f3->route('GET /', function($f3) {
                     } else if (tabPath === 'tab-telemetry') {
                         refreshTelemetryHUD();
                     }
+                }
+            });
+
+            // =================================================================
+            // MOBILE HAMBURGER MENU TOGGLE
+            // =================================================================
+            const $sidebar = $('.ui.grid.main-grid > .three.wide.column');
+            const $overlay = $('#sidebar-overlay');
+            const $toggle = $('#mobile-nav-toggle');
+
+            function openSidebar() {
+                $sidebar.addClass('open');
+                $overlay.fadeIn(200);
+                $toggle.find('i').removeClass('bars').addClass('times');
+            }
+            function closeSidebar() {
+                $sidebar.removeClass('open');
+                $overlay.fadeOut(200);
+                $toggle.find('i').removeClass('times').addClass('bars');
+            }
+
+            $toggle.on('click', function(e) {
+                e.stopPropagation();
+                $sidebar.hasClass('open') ? closeSidebar() : openSidebar();
+            });
+
+            $overlay.on('click', closeSidebar);
+
+            // Close sidebar when a tab is clicked (mobile)
+            $sidebar.find('.item[data-tab]').on('click', function() {
+                if ($(window).width() <= 767) {
+                    closeSidebar();
                 }
             });
 
@@ -1303,6 +1512,10 @@ $f3->route('GET /', function($f3) {
 
             function updateGlobalTelemetry() {
                 $.getJSON('api/telemetry', function(data) {
+                    console.group('Telemetry');
+                    console.log(data);
+                    console.groupEnd();
+
                     // Update global UI labels
                     $('#badge-cpu').text('<?= __("cpu_label") ?>: ' + (data.cpu.load[0] * 10).toFixed(0) + '%');
                     $('#badge-mem').text('<?= __("ram_label") ?>: ' + data.memory.percentage + '%');
@@ -1310,13 +1523,45 @@ $f3->route('GET /', function($f3) {
                     if (data.battery && data.battery.percentage) {
                         $('#badge-bat-container').show();
                         $('#badge-bat').text('<?= __("bat_label") ?>: ' + data.battery.percentage + '% (' + data.battery.status + ')');
+                        $('#telemetry-bat-icon').removeClass('empty low quarter half three full red orange yellow olive green');
+                        if (data.battery.percentage < 10) {
+                            $('#telemetry-bat-icon')
+                                .addClass('empty')
+                                .addClass('red');
+                        }
+                        else if (data.battery.percentage < 20) {
+                            $('#telemetry-bat-icon')
+                                .addClass('low')
+                                .addClass('red');
+                        }
+                        else if (data.battery.percentage < 40) {
+                            $('#telemetry-bat-icon')
+                                .addClass('quarter')
+                                .addClass('orange');
+                        }
+                        else if (data.battery.percentage < 60) {
+                            $('#telemetry-bat-icon')
+                                .addClass('half')
+                                .addClass('yellow');
+                        }
+                        else if (data.battery.percentage < 80) {
+                            $('#telemetry-bat-icon')
+                                .addClass('three')
+                                .addClass('olive');
+                        }
+                        else if (data.battery.percentage >= 80) {
+                            $('#telemetry-bat-icon')
+                                .addClass('full')
+                                .addClass('green');
+                        }
                     } else {
                         $('#badge-bat-container').hide();
                     }
 
                     // Sidebar AI Profile Card
+                    $('#sidebar-backend').text('<?= __("backend_label") ?>: ' + data.ai.backend.toUpperCase());
+                    $('#sidebar-provider').text('<?= __("provider_label") ?>: ' + data.ai.provider.toUpperCase());
                     $('#sidebar-model').text(data.ai.model);
-                    $('#sidebar-provider').text('<?= __("backend_label") ?>: ' + data.ai.backend.toUpperCase() + ' (' + data.ai.provider.toUpperCase() + ')');
 
                     if (data.ai.credits !== null) {
                         $('#sidebar-credits-container').show();

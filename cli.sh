@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.2.5
+# Version: 1.3.0
 # ==============================================================================
 
 # Options
@@ -97,6 +97,7 @@ run_chat() {
         fi
         set_chat_model      # Update corresponding chat model for new provider
         set_vision_model    # Update corresponding vision model for new provider
+        set_state           # Update new state
         set_system_prompt   # Update system prompt with new active model
       ;;
       "/model") log_warn "Missing command arguments. Usage: /model <command>" ;;
@@ -105,6 +106,7 @@ run_chat() {
         local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
         log_step "New active model: ${CLR_B_WHITE}${active_model}${ANSI_RESET}"
         set_vision_model    # Update corresponding vision model
+        set_state           # Update new state
         set_system_prompt   # Update system prompt with new active model
       ;;
       "/load") log_warn "Missing command arguments. Usage: /load <file>" ;;

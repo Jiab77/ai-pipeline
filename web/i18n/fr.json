@@ -1,5 +1,5 @@
 {
-    "title": "Centre de Commande Jarvis",
+    "title": "A.I.D.E Web",
     "subtitle": "Tableau de Bord OS IA Souverain",
     "version_label": "v0.0.0",
     "cpu_label": "CPU",
@@ -11,6 +11,8 @@
     "tab_scratchpad": "Brouillon (Scratchpad)",
     "active_engine_profile": "Profil de Moteur Actif",
     "backend_label": "Backend",
+    "provider_label": "Fournisseur",
+    "model_label": "Modèle",
     "credits_label": "Crédits",
     "welcome_message": "Bonjour Jiab77 ! Je suis pleinement opérationnel et connecté au pipeline souverain. Comment puis-je t'assister aujourd'hui dans ton cockpit de développement et de sécurité ? 🚀",
     "chat_placeholder": "Saisis ton instruction ici (Appuie sur Entrée ou clique sur Envoyer)...",

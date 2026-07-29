@@ -485,8 +485,8 @@ This pipeline is forged under deep iteration and synergistic design:
 
 <a href="https://www.star-history.com/?repos=Jiab77%2Fai-pipeline&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&theme=dark&legend=top-left&sealed_token=qQAw7HLhN03pbDKvAcLxYnS1iKd4pUEbLZO35YAN1wwxMKYiex8uRGgI_VlFodR4PSphzOKCI1lO_9p37_1x_sjJavsjd0P2eCWHtEYy-2XR-b1PibJcew" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&legend=top-left&sealed_token=qQAw7HLhN03pbDKvAcLxYnS1iKd4pUEbLZO35YAN1wwxMKYiex8uRGgI_VlFodR4PSphzOKCI1lO_9p37_1x_sjJavsjd0P2eCWHtEYy-2XR-b1PibJcew" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&legend=top-left&sealed_token=qQAw7HLhN03pbDKvAcLxYnS1iKd4pUEbLZO35YAN1wwxMKYiex8uRGgI_VlFodR4PSphzOKCI1lO_9p37_1x_sjJavsjd0P2eCWHtEYy-2XR-b1PibJcew" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&theme=dark&legend=top-left&sealed_token=z9Uw-Wfp4u1bqDTo9Mme3kg77cBmscyD7Z1_qyrkJhqzzZMPCFDfqlbApxZ6WvmLjIA7wXcL9zGwYAsqut2Bz5BCXwGrh_VObqMJe08O-eAE5Izc3vPoRQ" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&legend=top-left&sealed_token=z9Uw-Wfp4u1bqDTo9Mme3kg77cBmscyD7Z1_qyrkJhqzzZMPCFDfqlbApxZ6WvmLjIA7wXcL9zGwYAsqut2Bz5BCXwGrh_VObqMJe08O-eAE5Izc3vPoRQ" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Jiab77/ai-pipeline&type=date&legend=top-left&sealed_token=z9Uw-Wfp4u1bqDTo9Mme3kg77cBmscyD7Z1_qyrkJhqzzZMPCFDfqlbApxZ6WvmLjIA7wXcL9zGwYAsqut2Bz5BCXwGrh_VObqMJe08O-eAE5Izc3vPoRQ" />
  </picture>
 </a>

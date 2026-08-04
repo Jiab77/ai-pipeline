@@ -6,9 +6,11 @@ node_modules
 
 # Folders that must never be published
 archive/
+backup/
 data*/
 models/
 keys/
+skills/
 tools/web-browse/tests/
 tests/
 

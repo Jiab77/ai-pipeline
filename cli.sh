@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.3.0
+# Version: 1.4.0
 # ==============================================================================
 
 # Options
@@ -67,6 +67,7 @@ run_chat() {
         echo -e "  ${CLR_B_GREEN}/replay${ANSI_RESET}                   • Resend the last message"
         echo -e "  ${CLR_B_GREEN}/provider <name>${ANSI_RESET}          • Change active provider"
         echo -e "  ${CLR_B_GREEN}/model <name>${ANSI_RESET}             • Change active model"
+        echo -e "  ${CLR_B_GREEN}/launch <app> [path]${ANSI_RESET}      • Launch app with prepared environment variables"
         echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}              • Load file in the chat context"
         echo -e "  ${CLR_B_GREEN}/run <cmd>${ANSI_RESET}                • Execute a shell command locally in the session"
         echo -e "  ${CLR_B_GREEN}/unload${ANSI_RESET}                   • Unload previously loaded file from the chat context"
@@ -106,8 +107,16 @@ run_chat() {
         local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
         log_step "New active model: ${CLR_B_WHITE}${active_model}${ANSI_RESET}"
         set_vision_model    # Update corresponding vision model
-        set_state           # Update new state
         set_system_prompt   # Update system prompt with new active model
+        set_state           # Update new state
+      ;;
+      "/launch") log_warn "Missing command arguments. Usage: /launch <app> [path]" ;;
+      "/launch "*)
+        local launch_args="${USER_MSG#"/launch "}"
+        local user_app ; user_app=$(cut -d " " -f1 <<< "$launch_args")
+        local user_path ; user_path=$(cut -d " " -f2 <<< "$launch_args")
+        [[ $user_path == "$user_app" ]] && user_path=$(pwd)
+        launch_ext_app "$user_app" "$user_path"   # Does the app should exit here?
       ;;
       "/load") log_warn "Missing command arguments. Usage: /load <file>" ;;
       "/load "*)

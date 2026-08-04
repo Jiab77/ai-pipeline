@@ -29,6 +29,26 @@
       "zdr": false
     }
   },
+  "huggingface": {
+    "name": "Hugging Face",
+    "url": "https://router.huggingface.co/v1/chat/completions",
+    "keys": "https://huggingface.co/settings/tokens",
+    "default": {
+      "model": "moonshotai/Kimi-K3",
+      "vision": true,
+      "zdr": false
+    }
+  },
+  "kimi": {
+    "name": "Moonshot AI",
+    "url": "https://api.moonshot.ai/v1/chat/completions",
+    "keys": "https://platform.kimi.ai/console/api-keys",
+    "default": {
+      "model": "kimi-k3",
+      "vision": true,
+      "zdr": false
+    }
+  },
   "mammouth": {
     "name": "Mammouth AI",
     "url": "https://api.mammouth.ai/v1/chat/completions",
@@ -105,6 +125,26 @@
     "keys": "https://vercel.com/docs/ai-gateway",
     "default": {
       "model": "google/gemini-2.5-flash",
+      "vision": true,
+      "zdr": false
+    }
+  },
+  "zai_plan": {
+    "name": "Z.AI (Coding Plan)",
+    "url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+    "keys": "https://z.ai/manage-apikey/apikey-list",
+    "default": {
+      "model": "glm-5.2",
+      "vision": true,
+      "zdr": false
+    }
+  },
+  "zai": {
+    "name": "Z.AI (API)",
+    "url": "https://api.z.ai/api/paas/v4/chat/completions",
+    "keys": "https://z.ai/manage-apikey/apikey-list",
+    "default": {
+      "model": "glm-5.2",
       "vision": true,
       "zdr": false
     }

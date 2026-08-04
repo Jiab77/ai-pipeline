@@ -321,7 +321,7 @@
                 },
                 "direction": {
                   "type": "string",
-                  "description": "Scroll direction: 'down' or 'bottom' (for scroll action)"
+                  "description": "Scroll direction: 'up', 'down', 'top' or 'bottom' (for scroll action)"
                 }
               },
               "required": ["type"]

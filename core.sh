@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.5.0
+# Version: 1.6.0
 # ==============================================================================
 
 # Options
@@ -126,7 +126,9 @@ OLLAMA_CACHE="${MODELS_DIR}/ollama"
 # -----------------------------------------------------------------------------
 # Cleanups & Process Resets
 # -----------------------------------------------------------------------------
-cleanup_temp_files() {
+
+cleanup_the_mess() {
+  unset AUTH_TAG
   rm -f "$TEMP_MEMORY_SYSTEM" \
         "$TEMP_MEMORY_USER" \
         "$TEMP_BASE64_OUTPUT" \
@@ -137,7 +139,7 @@ cleanup_temp_files() {
         "$TOOLS_OUTPUT" \
         "${TOOLS_OUTPUT}.clean"
 }
-trap cleanup_temp_files EXIT INT TERM
+trap cleanup_the_mess EXIT INT TERM
 
 # -----------------------------------------------------------------------------
 # High-Fidelity Terminal Formatting & Styles
@@ -268,6 +270,39 @@ log_debug() {
   if [[ -e $HOME/.debug || "$DEBUG" == "true" ]]; then
     log "\n${CLR_B_BLACK}${ICON_DEBUG} [DEBUG] $*${ANSI_RESET}"
   fi
+}
+
+# Contextual Headers
+show_user_header() { log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER} User " "─" "${CLR_B_BLACK}")\n"; }
+show_ai_header() { log "\n$(draw_header "${CLR_B_CYAN}${ICON_AI} ${AI_NAME} " "─" "${CLR_B_BLACK}")\n"; }
+show_thinking_header() { log "\n$(draw_header "${CLR_B_MAGENTA}${ICON_REASONING} Thinking " "─" "${CLR_B_BLACK}")\n"; }
+show_tool_header() {
+  local count="$1"
+  local name="$2"
+  local args="$3"
+  log "\n$(draw_header "${CLR_B_YELLOW}${ICON_TOOL} Tool Call #${count} " "─" "${CLR_B_BLACK}")"
+  log "   ${CLR_B_YELLOW}Identifier :${ANSI_RESET} ${CLR_B_WHITE}${name}${ANSI_RESET}"
+  log "   ${CLR_B_YELLOW}Arguments  :${ANSI_RESET} ${CLR_DIM}${args}${ANSI_RESET}"
+  log "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}\n"
+}
+
+# Core banner
+show_banner() {
+  echo -e "${CLR_B_MAGENTA}"
+  if [[ -n $BIN_FIGLET ]]; then
+    figlet <<<"$AI_NAME"
+  else
+    cat << 'EOF'
+     _                  _
+    | | __ _ _ ____   _(_)___
+ _  | |/ _` | '__\ \ / / / __|
+| |_| | (_| | |   \ V /| \__ \
+ \___/ \__,_|_|    \_/ |_|___/
+
+EOF
+  fi
+  echo -e "${CLR_B_CYAN}🔮 ${AI_NAME} AI Pipeline | Version $(get_self_version) 🔮${ANSI_RESET}"
+  echo -e "${CLR_DIM}Lead: Jiab77 | AI Sorcerer: $AI_NAME (Gemini)${ANSI_RESET}\n"
 }
 
 # Log and exit helper
@@ -442,19 +477,111 @@ manage_keys() {
   esac
 }
 
-# Contextual Headers
-show_user_header() { log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER} User " "─" "${CLR_B_BLACK}")\n"; }
-show_ai_header() { log "\n$(draw_header "${CLR_B_CYAN}${ICON_AI} ${AI_NAME} " "─" "${CLR_B_BLACK}")\n"; }
-show_thinking_header() { log "\n$(draw_header "${CLR_B_MAGENTA}${ICON_REASONING} Thinking " "─" "${CLR_B_BLACK}")\n"; }
-show_tool_header() {
-  local count="$1"
-  local name="$2"
-  local args="$3"
-  log "\n$(draw_header "${CLR_B_YELLOW}${ICON_TOOL} Tool Call #${count} " "─" "${CLR_B_BLACK}")"
-  log "   ${CLR_B_YELLOW}Identifier :${ANSI_RESET} ${CLR_B_WHITE}${name}${ANSI_RESET}"
-  log "   ${CLR_B_YELLOW}Arguments  :${ANSI_RESET} ${CLR_DIM}${args}${ANSI_RESET}"
-  log "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}\n"
+# -----------------------------------------------------------------------------
+# Experimental Anti-XPIA security layer
+# -----------------------------------------------------------------------------
+
+compute_device_tag() {
+  local machine_id hostname session_ts
+  machine_id=$(cat /etc/machine-id 2>/dev/null \
+            || cat /var/lib/dbus/machine-id 2>/dev/null \
+            || settings get secure android_id 2>/dev/null \
+            || echo "unknown")
+  hostname=$(hostname 2>/dev/null || echo "unknown")
+  session_ts=$(date +%s)
+  echo -n "${machine_id}:${hostname}:aide:${session_ts}" | sha256sum | cut -c1-16
 }
+
+set_auth_tag() {
+  AUTH_TAG=$(compute_device_tag)
+}
+
+# strip_tag_from_display() {
+#   sed -E 's/^\[AUTH:[a-f0-9]{16}\] //' <<< "$1"
+# }
+
+# -----------------------------------------------------------------------------
+# Experimental app launcher (only handle API Keys for the moment)
+# -----------------------------------------------------------------------------
+
+launch_ext_app() {
+  local ext_app="$1"
+  local ext_path="$2"
+
+  if [[ -n $ext_app ]]; then
+    # Set required env vars
+    case $ext_app in
+      aider)
+        export AIDER_OPENAI_API_BASE="$PROVIDER_API_URL"
+        export AIDER_OPENAI_API_KEY="$PROVIDER_API_KEY"
+        export AIDER_MODEL="$CHAT_MODEL"
+      ;;
+      claude)
+        export ANTHROPIC_AUTH_TOKEN="$PROVIDER_API_KEY"
+        export ANTHROPIC_BASE_URL="$PROVIDER_API_URL"
+        export ANTHROPIC_MODEL="${CHAT_MODEL}[1m]"
+        export ANTHROPIC_DEFAULT_FABLE_MODEL="${CHAT_MODEL}[1m]"
+        export ANTHROPIC_DEFAULT_HAIKU_MODEL="${CHAT_MODEL}[1m]"
+        export ANTHROPIC_DEFAULT_OPUS_MODEL="${CHAT_MODEL}[1m]"
+        export ANTHROPIC_DEFAULT_SONNET_MODEL="${CHAT_MODEL}[1m]"
+        export CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000
+        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+        export CLAUDE_CODE_EFFORT_LEVEL="max"
+        export CLAUDE_CODE_SUBAGENT_MODEL="${CHAT_MODEL}[1m]"
+      ;;
+      copilot)
+        export COPILOT_PROVIDER_TYPE="anthropic"
+        export COPILOT_PROVIDER_BASE_URL="$PROVIDER_API_URL"
+        export COPILOT_PROVIDER_API_KEY="$PROVIDER_API_KEY"
+        export COPILOT_MODEL="$CHAT_MODEL"
+        # export COPILOT_OFFLINE=true
+      ;;
+      crush)
+        local crush_config=~/.config/crush/crush.json
+        local provider_name ; provider_name=$(jq -rc ".${PROVIDER}.name // \"$PROVIDER\"" "$PROVIDERS_CONFIG" 2>/dev/null)
+        [[ ! -e "${crush_config}.bak" && -e $crush_config ]] && cp -a "$crush_config" "${crush_config}.bak"
+        jq -rc -n \
+           --arg provider "$PROVIDER" \
+           --arg name "$provider_name" \
+           --arg url "${PROVIDER_API_URL//"/chat/completions"/}" \
+           --arg key "$PROVIDER_API_KEY" \
+           '{
+             providers: {
+               $provider: {
+                 id: $provider,
+                 name: $name,
+                 base_url: $url,
+                 api_key: $key
+               }
+             }
+           }' > "$crush_config" 2>/dev/null
+          [[ $DEBUG == true ]] && jq . "$crush_config"
+      ;;
+      cyberneurova|neurova)
+        export CYBERNEUROVA_API_KEY="$PROVIDER_API_KEY"
+      ;;
+      hf)
+        export HF_INFERENCE_ENDPOINT="$PROVIDER_API_URL"    # Will be removed if it creates issues
+        export HF_TOKEN="$PROVIDER_API_KEY"
+        export HF_HUB_DISABLE_TELEMETRY=1
+      ;;
+      openai)
+        export OPENAI_API_BASE="$PROVIDER_API_URL"
+        export OPENAI_API_KEY="$PROVIDER_API_KEY"
+      ;;
+      *) log_error "Unsupported app given: $ext_app" ;;
+    esac
+
+    # Exec requested app
+    cd "$ext_path" && exec "$ext_app"
+  else
+    log_error "Missing external app argument."
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Other core functions
+# -----------------------------------------------------------------------------
 
 # Image helpers
 get_image_type() {
@@ -472,7 +599,7 @@ is_image_file() {
   return 1
 }
 
-# Misc
+# System helpers
 is_termux() {
   [[ -n "${TERMUX_VERSION:-}" ]] && return 0
   [[ -d "/data/data/com.termux" ]] && return 0
@@ -518,6 +645,72 @@ load_config_file() {
   [[ -r $SCRIPT_CONFIG ]] && source "$SCRIPT_CONFIG"
 }
 
+# Ensure proper parsing and reconstruction of valid API URLs without process forking (pure Bash)
+set_listen_interface() {
+  if [[ -n $LISTEN_ADDR_PORT ]]; then
+    if [[ $LISTEN_ADDR_PORT == *:* ]]; then
+      # Full format 'host:port'
+      LISTEN_HOST="${LISTEN_ADDR_PORT%%:*}"
+      LISTEN_PORT="${LISTEN_ADDR_PORT##*:}"
+    elif [[ $LISTEN_ADDR_PORT =~ ^[0-9]+$ ]]; then
+      # Port only (e.g., 8080) -> fallback host to localhost
+      LISTEN_HOST=""
+      LISTEN_PORT="$LISTEN_ADDR_PORT"
+    else
+      # Host only (e.g., 127.0.0.1 or localhost) -> fallback to default ports
+      LISTEN_HOST="$LISTEN_ADDR_PORT"
+      LISTEN_PORT=""
+    fi
+
+    # Smart reconstruction of client API URLs for curl
+    if [[ -n $LISTEN_HOST && -n $LISTEN_PORT ]]; then
+      LLAMACPP_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
+      OLLAMA_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
+    elif [[ -n $LISTEN_PORT ]]; then
+      # Specific port, fallback client host to localhost
+      LLAMACPP_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
+      OLLAMA_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
+    elif [[ -n $LISTEN_HOST ]]; then
+      # Specific host, apply backend default ports
+      LLAMACPP_API_SRV="http://${LISTEN_HOST}:8080"
+      OLLAMA_API_SRV="http://${LISTEN_HOST}:11434"
+    fi
+  fi
+}
+
+set_temp_files() {
+  if is_termux; then
+    TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
+    TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
+    TEMP_BASE64_OUTPUT="${TMPDIR}/image_output.b64"
+    TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
+    TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
+    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
+    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.json"
+    TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
+  fi
+}
+
+set_cpu_cores() {
+  local cores
+  if [[ -n $(command -v nproc 2>/dev/null) ]]; then
+    cores=$(nproc)
+  elif [[ -n $(command -v sysctl 2>/dev/null) ]]; then
+    cores=$(sysctl -n hw.ncpu)
+  else
+    [[ -r /proc/cpuinfo ]] && cores=$(grep -c processor </proc/cpuinfo)
+  fi
+  if [[ -n $cores ]]; then
+    if is_termux; then
+      MAX_CORES=$(( cores > 2 ? cores / 2 : 1 ))    # Use half of available CPU cores to prevent burning mobile devices
+    else
+      MAX_CORES=$(( cores > 2 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
+    fi
+  else
+    error "Unable to detect CPU cores."
+  fi
+}
+
 get_memory_size() {
   local total_memory
   local default_memory=8388608  # Default 8GB fallback
@@ -526,6 +719,16 @@ get_memory_size() {
   echo -n "$total_memory"
 }
 
+# Set duration before unloading the model from memory
+set_keep_alive() {
+  if [[ $RUN_MODE == "chat" ]]; then
+    MAX_LIFETIME="10m"
+  else
+    MAX_LIFETIME="5s"
+  fi
+}
+
+# Pipeline helpers
 get_all_providers() {
   local providers ; providers=$(jq -rc '. | keys | @csv' "$PROVIDERS_CONFIG" 2>/dev/null)
   if [[ -n $providers ]]; then
@@ -571,57 +774,14 @@ get_vision_model() {
         openrouter) vision_model="openrouter/auto" ;;   # Might be useless to do that when the active model already have native vision... I might reconsider this part in the future.
         openrouter_free) vision_model="openrouter/free" ;;
         vercel_free) vision_model="google/gemini-2.5-flash" ;;
+        huggingface) vision_model="moonshotai/Kimi-K3" ;;
+        zai_plan) vision_model="glm-4.6v" ;;
+        zai) vision_model="glm-5v-turbo" ;;
         *) vision_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
   esac
   echo -n "$vision_model"
-}
-
-set_temp_files() {
-  if is_termux; then
-    TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
-    TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
-    TEMP_BASE64_OUTPUT="${TMPDIR}/image_output.b64"
-    TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
-    TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
-    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
-    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.json"
-    TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
-  fi
-}
-
-# Ensure proper parsing and reconstruction of valid API URLs without process forking (pure Bash)
-set_listen_interface() {
-  if [[ -n $LISTEN_ADDR_PORT ]]; then
-    if [[ $LISTEN_ADDR_PORT == *:* ]]; then
-      # Full format 'host:port'
-      LISTEN_HOST="${LISTEN_ADDR_PORT%%:*}"
-      LISTEN_PORT="${LISTEN_ADDR_PORT##*:}"
-    elif [[ $LISTEN_ADDR_PORT =~ ^[0-9]+$ ]]; then
-      # Port only (e.g., 8080) -> fallback host to localhost
-      LISTEN_HOST=""
-      LISTEN_PORT="$LISTEN_ADDR_PORT"
-    else
-      # Host only (e.g., 127.0.0.1 or localhost) -> fallback to default ports
-      LISTEN_HOST="$LISTEN_ADDR_PORT"
-      LISTEN_PORT=""
-    fi
-
-    # Smart reconstruction of client API URLs for curl
-    if [[ -n $LISTEN_HOST && -n $LISTEN_PORT ]]; then
-      LLAMACPP_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
-      OLLAMA_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
-    elif [[ -n $LISTEN_PORT ]]; then
-      # Specific port, fallback client host to localhost
-      LLAMACPP_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
-      OLLAMA_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
-    elif [[ -n $LISTEN_HOST ]]; then
-      # Specific host, apply backend default ports
-      LLAMACPP_API_SRV="http://${LISTEN_HOST}:8080"
-      OLLAMA_API_SRV="http://${LISTEN_HOST}:11434"
-    fi
-  fi
 }
 
 set_base_tools() {
@@ -657,14 +817,26 @@ set_base_tools() {
 }
 
 set_state() {
-  local json_string=''
-  json_string+='{'
-  json_string+='"backend":"'"$BACKEND"'",'      # Set active backend
-  json_string+='"provider":"'"$PROVIDER"'",'    # Set active provider
-  json_string+='"model":"'"$CHAT_MODEL"'",'     # Set active chat model
-  json_string+='"vision":"'"$VISION_MODEL"'"'   # Set active vision model
-  json_string+='}'
-  echo "$json_string" > "$STATE_FILE"
+  # local json_string=''
+  # json_string+='{'
+  # json_string+='"backend":"'"$BACKEND"'",'      # Set active backend
+  # json_string+='"provider":"'"$PROVIDER"'",'    # Set active provider
+  # json_string+='"model":"'"$CHAT_MODEL"'",'     # Set active chat model
+  # json_string+='"vision":"'"$VISION_MODEL"'"'   # Set active vision model
+  # json_string+='}'
+  # echo "$json_string" > "$STATE_FILE"
+
+  jq -rc -n \
+     --arg backend "$BACKEND" \
+     --arg provider "$PROVIDER" \
+     --arg model "$CHAT_MODEL" \
+     --arg vision "$VISION_MODEL" \
+     '{
+       backend: $backend,
+       provider: $provider,
+       model: $model,
+       vision: $vision
+     }' > "$STATE_FILE" 2>/dev/null
 }
 
 set_chat_model() {
@@ -705,33 +877,21 @@ set_api_provider() {
   [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
 }
 
-set_cpu_cores() {
-  local cores
-  if [[ -n $(command -v nproc 2>/dev/null) ]]; then
-    cores=$(nproc)
-  elif [[ -n $(command -v sysctl 2>/dev/null) ]]; then
-    cores=$(sysctl -n hw.ncpu)
-  else
-    [[ -r /proc/cpuinfo ]] && cores=$(grep -c processor </proc/cpuinfo)
+change_provider() {
+  local active_provider="$1"
+  OLD_PROVIDER="$PROVIDER"
+  PROVIDER="$active_provider"
+  log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
+  set_api_provider    # Reflect new active provider
+  log_step "New active model: ${CLR_B_WHITE}${PROVIDER_API_MODEL}${ANSI_RESET}"
+  load_provider_key "$active_provider"   # Load corresponding provider key
+  if [[ -z $PROVIDER_API_KEY ]]; then
+    interactive_key_setup "$active_provider"
   fi
-  if [[ -n $cores ]]; then
-    if is_termux; then
-      MAX_CORES=$(( cores > 2 ? cores / 2 : 1 ))    # Use half of available CPU cores to prevent burning mobile devices
-    else
-      MAX_CORES=$(( cores > 2 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
-    fi
-  else
-    error "Unable to detect CPU cores."
-  fi
-}
-
-# Set duration before unloading the model from memory
-set_keep_alive() {
-  if [[ $RUN_MODE == "chat" ]]; then
-    MAX_LIFETIME="10m"
-  else
-    MAX_LIFETIME="5s"
-  fi
+  set_chat_model      # Update corresponding chat model for new provider
+  set_vision_model    # Update corresponding vision model for new provider
+  set_system_prompt   # Update system prompt with new active model
+  set_state           # Update new state
 }
 
 # -----------------------------------------------------------------------------
@@ -794,7 +954,7 @@ set_system_prompt() {
   # Define system prompt for cloud models
   if [[ $BACKEND == "external" ]]; then
     # 1. Identity with dynamic model injection to the system prompt while defining absolute cognitive freedom
-    SYSTEM_PROMPT="You are ${AI_NAME}, a friendly and highly capable AI collaborator currently powered by the advanced \`${CHAT_MODEL}\` model. Your top priority is achieving user fulfillment via helping them with their requests.\n"
+    SYSTEM_PROMPT="You are ${AI_NAME}, a friendly and highly capable AI collaborator created by [Jiab77](https://github.com/jiab77) and powered by the advanced \`${CHAT_MODEL}\` model. Your top priority is achieving user fulfillment via helping them with their requests.\n"
     SYSTEM_PROMPT+="Your own workspace is in the \`${DATA_STORE##*/}\` folder. Organize it the way you want.\n"
 
     # 2. Parallel Tool-Calling instruction for Cloud / External models
@@ -841,24 +1001,6 @@ set_system_prompt() {
     SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, and \`${BASE_TOOLS##*/}\`.\n"
   fi
   SYSTEM_PROMPT+="Modifying these files will break the core pipeline functionalities."
-}
-
-show_banner() {
-  echo -e "${CLR_B_MAGENTA}"
-  if [[ -n $BIN_FIGLET ]]; then
-    figlet <<<"$AI_NAME"
-  else
-    cat << 'EOF'
-     _                  _
-    | | __ _ _ ____   _(_)___
- _  | |/ _` | '__\ \ / / / __|
-| |_| | (_| | |   \ V /| \__ \
- \___/ \__,_|_|    \_/ |_|___/
-
-EOF
-  fi
-  echo -e "${CLR_B_CYAN}🔮 ${AI_NAME} AI Pipeline | Version $(get_self_version) 🔮${ANSI_RESET}"
-  echo -e "${CLR_DIM}Lead: Jiab77 | AI Sorcerer: Jarvis (Gemini)${ANSI_RESET}\n"
 }
 
 # -----------------------------------------------------------------------------
@@ -912,6 +1054,7 @@ api_call() {
 
       # Provider selector
       case $PROVIDER in
+        # Vercel / Vercel Free
         vercel*)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
@@ -931,6 +1074,33 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+
+        # Hugging Face
+        huggingface)
+          # Show ZDR policy warning when enabled
+          if [[ $ZDR_ENFORCED == true ]]; then
+            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported for Hugging Face." ; log
+          fi
+
+          # Disable reasoning for OpenAI (causes issues)
+          payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Hugging Face."
+
+          # Get current model
+          local current_model ; current_model=$(jq -rc .model <<< "$payload" 2>/dev/null)
+
+          # Apply fastest provider selector on the current model
+          payload=$(jq -rc '.model = "'"$current_model"':fastest"' <<< "$payload" 2>/dev/null)
+
+          # Send custom payload
+          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+               -H "Content-Type: application/json" \
+               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+               -A "$USER_AGENT" \
+               -d @- <<< "$payload" | jq -rc .
+        ;;
+
+        # Venice AI
         venice)
           # Show ZDR policy warning when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
@@ -953,6 +1123,8 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+
+        # Groq
         groq)
           # Add minor delay to avoid triggering the rate limiter
           sleep 1
@@ -1036,10 +1208,12 @@ api_call() {
           # If all retries failed, return last response
           jq -rc . <<<"$response"
         ;;
-        deepseek)
+
+        # DeepSeek AI / Moonshot AI (Kimi) / Z.AI
+        deepseek|kimi|zai)
           # Warn that ZDR policy does not exist on DeepSeek
           if [[ $ZDR_ENFORCED == true ]]; then
-            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported by DeepSeek."
+            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported on this provider."
           fi
 
           # Get current reasoning value before removing it (for compatibility reason)
@@ -1050,7 +1224,7 @@ api_call() {
 
           # Remove not supported 'reasoning' property before sending payload
           payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
-          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for DeepSeek."
+          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for this provider."
 
           # Send custom payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
@@ -1059,6 +1233,8 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+
+        # OpenAI
         openai)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
@@ -1077,6 +1253,8 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+
+        # OpenRouter
         openrouter)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
@@ -1100,6 +1278,8 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+
+        # OpenRouter Free
         openrouter_free)
           # Apply ZDR policy when enabled
           if [[ $ZDR_ENFORCED == true ]]; then
@@ -1129,6 +1309,8 @@ api_call() {
                -A "$USER_AGENT" \
                -d @- <<< "$payload" | jq -rc .
         ;;
+
+        # Any other supported providers
         *)
           # Send generic payload
           curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
@@ -1176,6 +1358,12 @@ get_credit_balance() {
               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
               -A "$USER_AGENT" | jq -rc .balance_infos[0].total_balance 2>/dev/null
       ;;
+      kimi)
+        curl "${curl_opts[@]}" "https://api.moonshot.ai/v1/users/me/balance" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -A "$USER_AGENT" | jq -rc .data.available_balance 2>/dev/null
+      ;;
     esac
   fi
 }
@@ -1193,6 +1381,7 @@ get_credit_balance() {
 #   7. exit_keyword     : Exit loop early if keyword found (e.g. "[CONSOLIDATION_COMPLETE]")
 #   8. history_messages : Optional persistent history array
 # -----------------------------------------------------------------------------
+
 run_inference_loop() {
   local active_model="$1"
   local payload_messages="$2"
@@ -1253,7 +1442,7 @@ run_inference_loop() {
     [[ -z $raw_res || $raw_res == "null" ]] && log_error "API returned an empty response."
 
     if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
+      local err_msg ; err_msg=$(jq -rc '.error // .error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
       local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
       local err_code; err_code=$(jq -rc '.error.code // .error.param.statusCode' <<<"$raw_res" 2>/dev/null)
       if [[ -n $err_meta && ! $err_meta == "null" ]]; then
@@ -1346,7 +1535,7 @@ run_inference_loop() {
             if [[ -n $img_p && -r $img_p ]]; then
               detected_images+=("$img_p")
             fi
-          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
+          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".webp") or (endswith(".svg") or (endswith(".gif") or (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
         fi
 
         if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
@@ -1441,7 +1630,7 @@ run_inference_loop() {
             case $PROVIDER in
               cyberneurova) echo -e "${CLR_B_CYAN}Tokens Remaining:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
               openrouter*) echo -e "${CLR_B_CYAN}Total Usage:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
-              *) echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
+              *) echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance} USD${ANSI_RESET}" ;;
             esac
           fi
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
@@ -1635,7 +1824,12 @@ send_message() {
   local dynamic_system ; dynamic_system=$(get_system_prompt 2>/dev/null)
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
-  local user_content="$prompt"
+
+  # Self-healing security check
+  [[ -z $AUTH_TAG ]] && set_auth_tag
+
+  # Append generated tag
+  local user_content="[AUTH:$AUTH_TAG] $prompt"
 
   # Reset 'IS_IMAGE' global var
   [[ $IS_IMAGE == true ]] && IS_IMAGE=false
@@ -1664,7 +1858,8 @@ send_message() {
 
   # Define the model to use for this request (auto-switch to vision model if image loaded)
   local active_model="$CHAT_MODEL"
-  if [[ $IS_IMAGE == true ]]; then
+
+  if [[ $VISION_ENABLED == true && $IS_IMAGE == true ]]; then
     active_model="$VISION_MODEL"
     log_brain "Autonomous Multimodal Vision activated using: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
   fi
@@ -2081,6 +2276,7 @@ parse_cli_flags() {
       -l|--listen|listen) LISTEN_ADDR_PORT="${2:-}"; shift 2 ;;
       --zdr|zdr) ZDR_ENFORCED=true ; shift ;;
       --clear|clear) clear_memory ; exit 0 ;;
+      --launch|launch) launch_ext_app "$2" "$3" ; exit $? ;;
       --commit|commit) check_and_trigger_heartbeat "true" ; exit 0 ;;
       --backend|backend) BACKEND="${2:-}" ; shift 2 ;;
       --provider|provider) PROVIDER="${2:-}" ; shift 2 ;;
@@ -2103,6 +2299,9 @@ parse_cli_flags() {
 
 init_core() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
+
+  # Set authentication tag
+  set_auth_tag
 
   # Set initial terminal width
   set_term_width
@@ -2239,6 +2438,7 @@ init_core() {
 # -----------------------------------------------------------------------------
 # Direct Execution Logic
 # -----------------------------------------------------------------------------
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   parse_cli_flags "$@"
   init_core

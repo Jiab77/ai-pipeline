@@ -1,14 +1,18 @@
+<div align="center">
+
 # 🚀 A.I.D.E CLI — AI Driven Environment
 
-> Sovereign Bash-First Cognitive Runtime.
+### Sovereign Bash-First Cognitive Runtime.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2011%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.5.0-blue.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2015%20external%20providers-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.6.0-blue.svg)]()
+
+</div>
 
 > A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory.
-
+>
 > **A.I.D.E CLI** is not just another LLM wrapper. It is a lightweight but deeply capable agent runtime built around a practical equilibrium between **Bash** (orchestration, live browser automation), and **PHP** (local web UX) — proving that modern agentic systems do not have to be trapped inside the usual Python-heavy stack.
 
 ---
@@ -186,9 +190,9 @@ When an inquiry is made in **Pipeline Mode**, the **Intent Router** classifies i
 
 | File | Description |
 | :--- | :--- |
-| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.5.0)**: Agnostic4, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
-| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.3.0)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, `/provider`, and `/model`), and isolates model reasoning streams. |
-| [`tools.sh`](tools.sh) | **Execution Runner (v0.4.3)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
+| [`core.sh`](core.sh) | **Sovereign Cognitive Core (v1.6.0)**: Agnostic4, non-interactive engine and library. Manages dynamic Markdown-based memory bootstrapping, enforces OPSEC transports/Tor/ZDR routing, and orchestrates the **Sovereign Key Chest** (ChaCha20 + PBKDF2). |
+| [`cli.sh`](cli.sh) | **Interactive Terminal Client (v1.4.0)**: Dedicated user-interactive terminal portal. Sources `core.sh`, handles persistent session chat loops, multi-line user inputs, slash commands (including `/keys`, `/replay`, `/provider`, and `/model`), and isolates model reasoning streams. |
+| [`tools.sh`](tools.sh) | **Execution Runner (v0.5.0)**: Highly optimized zero-subshell tool handler. Bridges `tools.json` schemas to real host actions, eliminates the `wc -l` subprocess fork in `read_file`, and enforces practical runtime safeguards. |
 | [`showcast.sh`](tools/showcast.sh) | **Showcast script based on `asciinema` (v0.0.0)**: Allow recording demo from the pipeline. |
 | [`web-fetch.sh`](tools/web-fetch.sh) | **Smart Web Crawler Engine (v0.4.2)**: Domain-specific fetch engine returning clean Markdown with zero Node.js dependency. |
 | [`web-browse.sh`](tools/web-browse.sh) | **Stateless Browser Automation (v0.1.0)**: Pure Bash one-shot Chrome DevTools Protocol (CDP) engine with zero Node.js dependencies, SOCKS5 proxying, form interaction, screenshots, and PDFs. |
@@ -220,6 +224,7 @@ During the chat session, you can invoke control actions using slash prefixes:
 | `/draw [ratio] [prompt]` | Generates visual assets (experimental stub - coming soon!). |
 | `/provider <name>` | Change the active provider during the chat session. |
 | `/model <name>` | Change the active model during the chat session. |
+| `/launch <app> [path]` | Launch app with prepared environment. |
 | `/load <file>` | Loads a text or image file into the active chat session. |
 | `/unload` | Unloads the previously loaded file from the active chat session context. |
 | `/run <cmd>` | Executes standard shell commands directly from within the chat loop. |
@@ -255,6 +260,7 @@ You can configure the active engine inside `core.sh` by modifying the `BACKEND` 
 - **Configuration file**: managed through `config/providers.json`.
 - **Default Active Providers**:
   - **Groq**: `https://api.groq.com/openai/v1/chat/completions`
+  - **Hugging Face**: `https://router.huggingface.co/v1/chat/completions`
   - **Vercel AI Gateway (Free + Paid)**: `https://ai-gateway.vercel.sh/v1/chat/completions`
   - **Venice AI**: `https://api.venice.ai/api/v1/chat/completions`
   - **OpenAI**: `https://api.openai.com/v1/chat/completions`
@@ -263,9 +269,12 @@ You can configure the active engine inside `core.sh` by modifying the `BACKEND` 
   - **Mammouth AI**: `https://api.mammouth.ai/v1/chat/completions`
   - **CyberNeurova**: `https://api.cyberneurova.ai/v1/chat/completions`
   - **DeepSeek**: `https://api.deepseek.com/chat/completions`
+  - **Moonshot AI**: `https://api.moonshot.ai/v1/chat/completions`
+  - **Z.AI (API)**: `https://api.z.ai/api/paas/v4/chat/completions`
+  - **Z.AI (Coding Plan)**: `https://api.z.ai/api/coding/paas/v4/chat/completions`
 - **Default Active Model**: `google/gemini-3.5-flash` (Vercel/OpenRouter) -- See default model in `[providers.json](config/providers.json)`.
 - **Features**: dynamic config loading, provider-aware payload mutation, reasoning fallbacks, tool schemas, and secure Tor integration.
-  - 🔒 **DeepSeek ZDR Limitation**: DeepSeek does not support Zero Data Retention. No server-side privacy shield is available for this provider.
+  - 🔒 **DeepSeek / Moonshot AI / Hugging Face / Z.AI ZDR Limitation**: DeepSeek, Moonshot AI, Hugging Face and Z.AI does not support Zero Data Retention. No server-side privacy shield is available for these providers.
   - 🔒 **Venice AI ZDR Limitation**: Venice AI does not support server-side ZDR injection. When using Venice, manually disable telemetry in `Settings → General → Disable Telemetry Collection` to approximate zero-data-retention.
   - 🔒 **OpenRouter Free-Tier Vision Trade-off**: Free multimodal vision on OpenRouter cannot be combined with `data_collection: "deny"` (zero prompt-training). To keep free vision functional, **image requests drop the `deny` shield** (prompt training may apply to images only); all text/tool turns keep `deny`. Paid OpenRouter (`openrouter/auto`) and Vercel (`disallowPromptTraining: true`) preserve the shield across all modalities.
 
@@ -472,7 +481,7 @@ This pipeline is forged under deep iteration and synergistic design:
 
 ## ⚖️ License & Project Status
 
-- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.5.0).
+- **Project Phase**: Core Engine Stabilized, Hardened & Production-Ready (v1.6.0).
 - **Next Roadmap Milestones (v2.0.0 - A.I.D.E. Web & CLI Modernization)**:
   - 🌐 **A.I.D.E. Web**: local-first responsive web dashboard served by `web/server.php`
   - 🎨 **Visual UI Modernization (`charmbracelet/gum`)**: richer CLI interactions with graceful fallbacks

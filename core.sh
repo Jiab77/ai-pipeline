@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.6.0
+# Version: 1.7.0
 # ==============================================================================
 
 # Options
@@ -81,7 +81,8 @@ TEMP_BASE64_OUTPUT="/tmp/image_output.b64"
 TEMP_TOOLS_OUTPUT="/tmp/tools_output.json"
 TEMP_PAYLOAD_ASSISTANT="/tmp/payload_assistant.json"
 TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
-TEMP_PAYLOAD_SYSTEM="/tmp/payload_system.json"
+TEMP_PAYLOAD_SYSTEM="/tmp/payload_system.txt"
+TEMP_STATE_FILE="${CONFIG_DIR}/temp_state.json"
 
 # Sovereign Personality & Identity
 AI_NAME="Jarvis"
@@ -136,6 +137,7 @@ cleanup_the_mess() {
         "$TEMP_PAYLOAD_ASSISTANT" \
         "$TEMP_PAYLOAD_MESSAGES" \
         "$TEMP_PAYLOAD_SYSTEM" \
+        "$TEMP_STATE_FILE" \
         "$TOOLS_OUTPUT" \
         "${TOOLS_OUTPUT}.clean"
 }
@@ -496,9 +498,14 @@ set_auth_tag() {
   AUTH_TAG=$(compute_device_tag)
 }
 
-# strip_tag_from_display() {
-#   sed -E 's/^\[AUTH:[a-f0-9]{16}\] //' <<< "$1"
-# }
+strip_tag_from_display() {
+  # Redact any [AUTH:hex] tag echoed by the LLM (defense-in-depth).
+  # The tag is input-path only by design, but the LLM can mimic/echo it in its output.
+  # Substitution (not removal) preserves surrounding markdown syntax
+  # (backticks, bold, italic) — no orphan `` or **** left behind.
+  # 'g' = all occurrences.
+  sed -E 's/\[AUTH:[a-f0-9]{16}\]/[REDACTED]/g' <<< "$1"
+}
 
 # -----------------------------------------------------------------------------
 # Experimental app launcher (only handle API Keys for the moment)
@@ -686,7 +693,7 @@ set_temp_files() {
     TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
     TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
     TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
-    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.json"
+    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
     TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
   fi
 }
@@ -817,15 +824,6 @@ set_base_tools() {
 }
 
 set_state() {
-  # local json_string=''
-  # json_string+='{'
-  # json_string+='"backend":"'"$BACKEND"'",'      # Set active backend
-  # json_string+='"provider":"'"$PROVIDER"'",'    # Set active provider
-  # json_string+='"model":"'"$CHAT_MODEL"'",'     # Set active chat model
-  # json_string+='"vision":"'"$VISION_MODEL"'"'   # Set active vision model
-  # json_string+='}'
-  # echo "$json_string" > "$STATE_FILE"
-
   jq -rc -n \
      --arg backend "$BACKEND" \
      --arg provider "$PROVIDER" \
@@ -837,6 +835,19 @@ set_state() {
        model: $model,
        vision: $vision
      }' > "$STATE_FILE" 2>/dev/null
+}
+
+set_temp_state() {
+  cp "$STATE_FILE" "$TEMP_STATE_FILE"
+}
+
+restore_temp_state() {
+  if [[ -r $TEMP_STATE_FILE ]]; then
+    local saved_provider ; saved_provider=$(jq -rc .provider "$TEMP_STATE_FILE")
+    log ; log_brain "Reverting to initial provider: ${CLR_B_YELLOW}${saved_provider}${ANSI_RESET}" ; log
+    change_provider "$saved_provider"
+    rm -f "$TEMP_STATE_FILE"
+  fi
 }
 
 set_chat_model() {
@@ -856,19 +867,35 @@ set_vision_model() {
   # fi
 }
 
+handle_vision_request() {
+  # Case 1: Native provider vision -> nothing to do
+  [[ $VISION_ENABLED == true ]] && return 0
+
+  # Case 2: No fallback provider configured -> fail
+  if [[ -z $FALLBACK_PROVIDER ]]; then
+    log_warn "No vision fallback configured. Set one with /fallback <provider>."
+    return 1
+  fi
+
+  # Case 3: Fallback provider configured -> backup current state and switch provider temporarily
+  set_temp_state ; change_provider "$FALLBACK_PROVIDER"
+  return 0
+}
+
 set_api_provider() {
   local provider_data provider_zdr provider_vision
+  local target_provider ; target_provider="${1:-$PROVIDER}"
 
   [[ ! -r "$PROVIDERS_CONFIG" ]] && error "Unable to read providers config file: $PROVIDERS_CONFIG"
 
   # Read both values in a single jq process call using tab-delimited parsing
-  provider_data=$(jq -rc --arg p "$PROVIDER" '.[$p] | select(. != null) | "\(.url)\t\(.default.model)\t\(.default.zdr)\t\(.default.vision)"' "$PROVIDERS_CONFIG" 2>/dev/null)
-  [[ -z $provider_data ]] && error "Unsupported provider defined: $PROVIDER"
+  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.default.model)\t\(.default.zdr)\t\(.default.vision)"' "$PROVIDERS_CONFIG" 2>/dev/null)
+  [[ -z $provider_data ]] && error "Unsupported provider defined: $target_provider"
 
   IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_API_MODEL provider_zdr provider_vision <<< "$provider_data"
 
-  [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $PROVIDER"
-  [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $PROVIDER"
+  [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $target_provider"
+  [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $target_provider"
 
   # Set model vision capability based on the provider config
   VISION_ENABLED=$provider_vision
@@ -877,9 +904,71 @@ set_api_provider() {
   [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
 }
 
+generate_self_architecture() {
+  local arch_file="${DATA_STORE}/${AI_NAME}.md"
+  [[ -e "$arch_file" ]] && return   # Already generated, skip
+
+  # Generate self description file
+  cat > "$arch_file" <<EOF
+# 🏗️ ${AI_NAME}.md — This Is Your Brain
+
+Generated at bootstrap by \`generate_self_architecture()\`.
+**Version:** $(get_self_version)
+**Active backend:** ${BACKEND}
+**Active provider:** ${PROVIDER:-"Local"}
+**Active fallback:** ${FALLBACK_PROVIDER:-"None"}
+**Active model:** ${CHAT_MODEL}
+**Platform:** $(is_termux && echo "Termux/Android" || echo "Desktop")
+**Providers available:** $(jq -rc 'keys | length' "${CONFIG_DIR}/providers.json")
+
+## Your Core Files
+- \`${CORE_LIB##*/}\` — Cognitive engine (API calls, memory, providers, AUTH tag)
+- \`${SCRIPT_FILE}\` — Interface layer (slash commands, /provider, /launch, /fallback)
+- \`${TOOLS_HANDLER##*/}\` — Tool execution layer (web_fetch, web_browse, edit_file, etc.)
+
+## Your Identity
+- **AUTH tag** comes from \`compute_device_tag()\` in ${CORE_LIB##*/} line $(grep -n "^compute_device_tag" "$CORE_LIB" | cut -d: -f1)
+- The tag changes **per session** — includes UNIX timestamp in the hash
+- On Termux: uses \`settings get secure android_id\` (fallback chain)
+- On desktop: uses \`/etc/machine-id\` or \`/var/lib/dbus/machine-id\`
+
+## Key Functions
+| Function | File | Line | Purpose |
+|---|---|---|---|
+| \`compute_device_tag()\` | ${CORE_LIB##*/} | $(grep -n "^compute_device_tag" "$CORE_LIB" | cut -d: -f1) | Generates session-unique AUTH tag |
+| \`change_provider()\` | ${CORE_LIB##*/} | $(grep -n "^change_provider" "$CORE_LIB" | cut -d: -f1) | Switches active provider + model |
+| \`set_auth_tag()\` | ${CORE_LIB##*/} | $(grep -n "^set_auth_tag" "$CORE_LIB" | cut -d: -f1) | Sets AUTH_TAG for anti-XPIA |
+
+## Your Providers
+**Total:** $(jq -rc 'keys | length' "${CONFIG_DIR}/providers.json")
+**List:** $(jq -rc 'keys | join(", ")' "${CONFIG_DIR}/providers.json")
+**Config file:** \`${CONFIG_DIR##*/}/providers.json\`
+
+## Your Constraints
+- **Rules** (\`${CONFIG_DIR##*/}/rules.md\`) — Non-negotiable safety boundaries
+- **Deny-by-default** — Actions require human consent
+- **Workspace containment** — No system directory exploration
+- **Anti-XPIA** — \`compute_device_tag()\` + \`wrap_external_content()\`
+
+## Your Memory
+- **Persistent:** \`${DATA_STORE##*/}/memory/*.md\` — survives session restarts
+- **Transient:** \`${DATA_STORE##*/}/messages.json\` — conversation context (pruned on heartbeat)
+
+## To Understand Yourself
+1. \`read_file ${CORE_LIB##*/}\` — Your full cognitive engine source code
+2. \`git log --oneline\` — Your version history
+3. \`grep_search pattern ${CORE_LIB##*/}\` — Find any function or variable
+4. \`read_file ${AI_NAME}.md\` — Re-read this file
+
+## Self-Check Rule
+> **Before making any claim about your version, environment, provider state,
+> or pipeline internals, verify by reading the relevant source files or
+> running \`git log\`. Do not rely on memory alone. Verify, then respond.**
+EOF
+}
+
 change_provider() {
   local active_provider="$1"
-  OLD_PROVIDER="$PROVIDER"
   PROVIDER="$active_provider"
   log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
   set_api_provider    # Reflect new active provider
@@ -996,9 +1085,9 @@ set_system_prompt() {
   # Sets important rules
   [[ -n $CORE_LIB && -r $CORE_LIB ]] && CORE_FILE="${CORE_LIB##*/}"
   if [[ -n $CORE_FILE ]]; then
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${TOOLS_HANDLER##*/}\`, and \`${BASE_TOOLS##*/}\`.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
   else
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, and \`${BASE_TOOLS##*/}\`.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
   fi
   SYSTEM_PROMPT+="Modifying these files will break the core pipeline functionalities."
 }
@@ -1210,7 +1299,7 @@ api_call() {
         ;;
 
         # DeepSeek AI / Moonshot AI (Kimi) / Z.AI
-        deepseek|kimi|zai)
+        deepseek|kimi|zai*)
           # Warn that ZDR policy does not exist on DeepSeek
           if [[ $ZDR_ENFORCED == true ]]; then
             log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported on this provider."
@@ -1465,6 +1554,10 @@ run_inference_loop() {
     usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
     balance=$(get_credit_balance)
 
+    # Avoid leaking the 'AUTH_TAG' on display side
+    [[ -n $content && ! $content == "null" ]] && content=$(strip_tag_from_display "$content")
+    [[ -n $reasoning && ! $reasoning == "null" ]] && reasoning=$(strip_tag_from_display "$reasoning")
+
     # Handling model resolving
     [[ -n $resolved_model && ! $resolved_model == "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
@@ -1535,7 +1628,7 @@ run_inference_loop() {
             if [[ -n $img_p && -r $img_p ]]; then
               detected_images+=("$img_p")
             fi
-          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".webp") or (endswith(".svg") or (endswith(".gif") or (endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' "$TOOLS_OUTPUT" 2>/dev/null)
+          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".webp") or endswith(".svg") or endswith(".gif") or endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' <(tail -n+5 "$TOOLS_OUTPUT") 2>/dev/null)
         fi
 
         if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
@@ -1565,7 +1658,16 @@ run_inference_loop() {
       done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
 
       # Inject visual feedback if any images were generated
-      if [[ $VISION_ENABLED == true && (( ${#detected_images[@]} -gt 0 )) ]]; then
+      if [[ (( ${#detected_images[@]} -gt 0 )) ]]; then
+        if [[ -n $FALLBACK_PROVIDER ]]; then
+          log_brain "Image detected. Calling fallback provider: ${CLR_B_YELLOW}${FALLBACK_PROVIDER}${ANSI_RESET}" ; log
+        fi
+        if ! handle_vision_request; then
+          log_warn "Image cannot be processed without vision capability. Message aborted."
+          return 1
+        fi
+        active_model="$VISION_MODEL"    # Set new model based on main provider or defined fallback provider
+        log ; log_brain "Autonomous Multimodal Vision activated using: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
         for img_path in "${detected_images[@]}"; do
           local mime_type ; mime_type=$(get_image_type "$img_path")
           local filename ; filename="${img_path##*/}"
@@ -1642,12 +1744,17 @@ run_inference_loop() {
         break
       fi
 
+      # Leave the while loop
       break
     fi
   done
   if [[ "$output_stream" == "stderr" ]]; then
     echo "$final_content"
   fi
+
+  # Restore original provider if a vision fallback was used
+  [[ -n $FALLBACK_PROVIDER && (( ${#detected_images[@]} -gt 0 )) ]] && restore_temp_state
+
   return $loop_errors
 }
 
@@ -1821,7 +1928,7 @@ check_and_trigger_heartbeat() {
 send_message() {
   local prompt="$1"
   local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
-  local dynamic_system ; dynamic_system=$(get_system_prompt 2>/dev/null)
+  local dynamic_system
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
 
@@ -1859,10 +1966,17 @@ send_message() {
   # Define the model to use for this request (auto-switch to vision model if image loaded)
   local active_model="$CHAT_MODEL"
 
-  if [[ $VISION_ENABLED == true && $IS_IMAGE == true ]]; then
-    active_model="$VISION_MODEL"
+  if [[ $IS_IMAGE == true ]]; then
+    if ! handle_vision_request; then
+      log_warn "Image cannot be processed without vision capability. Message aborted."
+      return 1
+    fi
+    active_model="$VISION_MODEL"    # Set new model based on main provider or defined fallback provider
     log_brain "Autonomous Multimodal Vision activated using: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
   fi
+
+  # Set dynamic based on current active model
+  dynamic_system=$(get_system_prompt 2>/dev/null)
 
   # Create PAYLOAD_MESSAGES (which contains system prompt, previous history, and the current user query with file context)
   if [[ $IS_IMAGE == true ]]; then
@@ -1905,9 +2019,13 @@ send_message() {
   # Call the unified inference loop
   run_inference_loop "$active_model" "$PAYLOAD_MESSAGES" "all" "true" "stdout" "true" "" "$ALL_MESSAGES"
 
+  # Restore original provider if a vision fallback was used
+  [[ -n $FALLBACK_PROVIDER && $IS_IMAGE == true ]] && restore_temp_state
+
   # Reset 'IS_IMAGE' global var before heartbeat gets triggered
   [[ $IS_IMAGE == true ]] && IS_IMAGE=false
 
+  # Trigger memory consolidation when necessary
   check_and_trigger_heartbeat
 }
 
@@ -1971,6 +2089,10 @@ run_one_shot_pipeline() {
   log_section "PIPELINE MODE ACTIVATED"
   log_info "Active Backend: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
   [[ $BACKEND == "external" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
+  if [[ -n $FALLBACK_PROVIDER ]]; then
+    local fallback_upper ; fallback_upper=$(to_upper "$FALLBACK_PROVIDER")
+    log_info "Active Fallback: ${CLR_B_YELLOW}${fallback_upper}${ANSI_RESET}"
+  fi
 
   # Context
   if [[ -n $INPUT_FILE2 && -r $INPUT_FILE && -r $INPUT_FILE2 ]]; then
@@ -2225,6 +2347,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}-l, --listen <host:port>${ANSI_RESET}   Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}--backend <type>${ANSI_RESET}           Set AI backend (ollama, llamacpp, external)
   ${CLR_B_GREEN}--provider <type>${ANSI_RESET}          Set AI external provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}--fallback <provider>${ANSI_RESET}      Set AI fallback provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
   ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, web)
   ${CLR_B_GREEN}--chat${ANSI_RESET}                     Start interactive conversational chat mode
@@ -2240,6 +2363,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}listen <host:port>${ANSI_RESET}         Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}backend <type>${ANSI_RESET}             Set AI backend (ollama, llamacpp, external)
   ${CLR_B_GREEN}provider <type>${ANSI_RESET}            Set AI external provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}fallback <provider>${ANSI_RESET}        Set AI fallback provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
   ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server
   ${CLR_B_GREEN}chat${ANSI_RESET}                       Start interactive conversational chat mode
@@ -2280,6 +2404,7 @@ parse_cli_flags() {
       --commit|commit) check_and_trigger_heartbeat "true" ; exit 0 ;;
       --backend|backend) BACKEND="${2:-}" ; shift 2 ;;
       --provider|provider) PROVIDER="${2:-}" ; shift 2 ;;
+      --fallback|fallback) FALLBACK_PROVIDER="${2:-}" ; shift 2 ;;
       --model|model) USER_MODEL="${2:-}" ; shift 2 ;;
       --chat|chat) RUN_MODE="chat" ; shift ;;
       --multi|multi) RUN_MODE="multi" ; shift ;;
@@ -2299,6 +2424,9 @@ parse_cli_flags() {
 
 init_core() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
+
+  # Clean stale temp state from crashed sessions
+  [[ -e $TEMP_STATE_FILE ]] && rm -f "$TEMP_STATE_FILE"
 
   # Set authentication tag
   set_auth_tag
@@ -2341,6 +2469,9 @@ init_core() {
 
   # Set system prompt based on defined models
   set_system_prompt
+
+  # Generate self architecture file
+  generate_self_architecture
 
   [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
 

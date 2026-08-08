@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.4.0
+# Version: 1.5.0
 # ==============================================================================
 
 # Options
@@ -46,6 +46,10 @@ run_chat() {
   log_info "Initializing chat context..."
   log_info "Active Backend: ${CLR_B_YELLOW}${backend_upper}${ANSI_RESET}"
   [[ $BACKEND == "external" ]] && log_info "Active Provider: ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET}"
+  if [[ -n $FALLBACK_PROVIDER ]]; then
+    local fallback_upper ; fallback_upper=$(to_upper "$FALLBACK_PROVIDER")
+    log_info "Active Fallback: ${CLR_B_YELLOW}${fallback_upper}${ANSI_RESET}"
+  fi
   log_info "Active Model: ${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET}"
   log_info "Conversation online. Type ${CLR_B_GREEN}/help${ANSI_RESET} to view commands."
 
@@ -65,6 +69,7 @@ run_chat() {
         echo -e "  ${CLR_B_GREEN}/draw [ratio] [prompt]${ANSI_RESET}    • Generate images"
         echo -e "  ${CLR_B_GREEN}/keys${ANSI_RESET}                     • Manage your encrypted cloud provider API keys"
         echo -e "  ${CLR_B_GREEN}/replay${ANSI_RESET}                   • Resend the last message"
+        echo -e "  ${CLR_B_GREEN}/fallback <name>${ANSI_RESET}          • Set fallback provider"
         echo -e "  ${CLR_B_GREEN}/provider <name>${ANSI_RESET}          • Change active provider"
         echo -e "  ${CLR_B_GREEN}/model <name>${ANSI_RESET}             • Change active model"
         echo -e "  ${CLR_B_GREEN}/launch <app> [path]${ANSI_RESET}      • Launch app with prepared environment variables"
@@ -84,24 +89,30 @@ run_chat() {
           send_message "$LAST_USER_MSG"
         fi
       ;;
-      "/provider") log_warn "Missing command arguments. Usage: /provider <command>" ;;
+      "/fallback")
+        if [[ -n $FALLBACK_PROVIDER ]]; then
+          log_step "Current fallback provider: ${CLR_B_WHITE}${FALLBACK_PROVIDER}${ANSI_RESET}"
+        else
+          log_step "No fallback provider currently defined.${ANSI_RESET}"
+        fi
+      ;;
+      "/fallback "*)
+        local fallback_value="${USER_MSG#"/fallback "}"
+        if [[ $fallback_value == "off" || $fallback_value == "OFF" ]]; then
+          unset FALLBACK_PROVIDER
+        else
+          FALLBACK_PROVIDER="$fallback_value"
+          log_step "New fallback provider: ${CLR_B_WHITE}${fallback_value}${ANSI_RESET}"
+        fi
+      ;;
+      "/provider") log_warn "Missing command arguments. Usage: /provider <name>" ;;
       "/provider "*)
         unset USER_MODEL          # Remove initially defined model
         unset PROVIDER_API_KEY    # Remove previous provider API key
-        local active_provider="${USER_MSG#"/provider "}" ; PROVIDER="$active_provider"
-        log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
-        set_api_provider    # Reflect new active provider
-        log_step "New active model: ${CLR_B_WHITE}${PROVIDER_API_MODEL}${ANSI_RESET}"
-        load_provider_key   # Load corresponding provider key
-        if [[ -z $PROVIDER_API_KEY ]]; then
-          interactive_key_setup "$active_provider"
-        fi
-        set_chat_model      # Update corresponding chat model for new provider
-        set_vision_model    # Update corresponding vision model for new provider
-        set_state           # Update new state
-        set_system_prompt   # Update system prompt with new active model
+        local active_provider="${USER_MSG#"/provider "}"
+        change_provider "$active_provider"
       ;;
-      "/model") log_warn "Missing command arguments. Usage: /model <command>" ;;
+      "/model") log_warn "Missing command arguments. Usage: /model <name>" ;;
       "/model "*)
         unset USER_MODEL    # Remove initially defined model
         local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"

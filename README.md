@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2015%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.7.0-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.7.1-blue.svg)]()
 
 </div>
 
@@ -83,7 +83,7 @@
 
 ## 🔄 Inter-Provider Vision Fallback
 
-The pipeline runs on text-only models by default. When an image appears, it auto-switches to a vision-capable provider, processes the image, then switches back. Two triggers, one mechanism:
+When the pipeline is configured to run on text-only models and an image appears, it auto-switches to a vision-capable provider, processes the image, then switches back. Two triggers, one mechanism:
 
 ### Flow A — Manual Image (`/load`)
 
@@ -495,7 +495,7 @@ DeepSeek, Groq, Hugging Face, Moonshot AI (Kimi), Z.AI, OpenAI, OpenRouter, Open
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](core.sh) | v1.7.0 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`core.sh`](core.sh) | v1.7.1 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
 | [`cli.sh`](cli.sh) | v1.5.0 | Interactive terminal client — slash commands, session loop, reasoning display |
 | [`tools.sh`](tools.sh) | v0.6.0 | Tool execution bridge — 11 tools, anti-XPIA wrapping, protected-files guard |
 | [`showcast.sh`](tools/showcast.sh) | v0.0.0 | `asciinema` demo recorder |
@@ -531,11 +531,11 @@ data/memory/
 ## 👥 Credits
 
 - **Lead Developer / Architect**: **Jiab77**
-- **AI Sorcerer & Co-Creator**: **Jarvis** (Gemini / DeepSeek / Kimi K3 / GLM-5.2)$$
+- **AI Sorcerer & Co-Creator**: **Jarvis** (Gemini / DeepSeek / Kimi K3 / GLM-5.2)
 
 ## ⚖️ License & Roadmap
 
-MIT License. **v1.7.0 — Stable & Production-Ready.**
+MIT License. **v1.7.1 — Stable & Production-Ready.**
 
 Roadmap:
 

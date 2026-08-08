@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.7.0
+# Version: 1.7.1
 # ==============================================================================
 
 # Options
@@ -906,7 +906,7 @@ set_api_provider() {
 
 generate_self_architecture() {
   local arch_file="${DATA_STORE}/${AI_NAME}.md"
-  [[ -e "$arch_file" ]] && return   # Already generated, skip
+  # [[ -e "$arch_file" ]] && return   # Already generated, skip
 
   # Generate self description file
   cat > "$arch_file" <<EOF
@@ -977,10 +977,11 @@ change_provider() {
   if [[ -z $PROVIDER_API_KEY ]]; then
     interactive_key_setup "$active_provider"
   fi
-  set_chat_model      # Update corresponding chat model for new provider
-  set_vision_model    # Update corresponding vision model for new provider
-  set_system_prompt   # Update system prompt with new active model
-  set_state           # Update new state
+  set_chat_model                # Update corresponding chat model for new provider
+  set_vision_model              # Update corresponding vision model for new provider
+  set_system_prompt             # Update system prompt with new active model
+  set_state                     # Update new state
+  generate_self_architecture    # Update new architecture / identity document
 }
 
 # -----------------------------------------------------------------------------
@@ -1628,7 +1629,8 @@ run_inference_loop() {
             if [[ -n $img_p && -r $img_p ]]; then
               detected_images+=("$img_p")
             fi
-          done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".webp") or endswith(".svg") or endswith(".gif") or endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' <(tail -n+5 "$TOOLS_OUTPUT") 2>/dev/null)
+          # done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".webp") or endswith(".svg") or endswith(".gif") or endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' <(tail -n+5 "$TOOLS_OUTPUT") 2>/dev/null)
+          done < <(grep -oE '[^[:space:]"]+\.(png|jpg|jpeg|webp|svg|gif)\b' "$TOOLS_OUTPUT" | sort -u)
         fi
 
         if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
@@ -1658,7 +1660,10 @@ run_inference_loop() {
       done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
 
       # Inject visual feedback if any images were generated
-      if [[ (( ${#detected_images[@]} -gt 0 )) ]]; then
+      # '$save_to_history' as been added to gate to avoid triggering the fallback sequence
+      # during the heartbeat process (memory consolidation). During this process, '$save_to_history'
+      # is set to 'false' instead of 'true' during normal chat process.
+      if [[ $save_to_history == "true" && (( ${#detected_images[@]} -gt 0 )) ]]; then
         if [[ -n $FALLBACK_PROVIDER ]]; then
           log_brain "Image detected. Calling fallback provider: ${CLR_B_YELLOW}${FALLBACK_PROVIDER}${ANSI_RESET}" ; log
         fi

@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.7.1
+# Version: 1.7.2
 # ==============================================================================
 
 # Options
@@ -173,6 +173,7 @@ CLR_BLUE="[34m"
 CLR_MAGENTA="[35m"
 CLR_CYAN="[36m"
 CLR_WHITE="[37m"
+CLR_DIM="$ANSI_DIM"
 
 # Emojis & Icons
 ICON_INFO="ℹ️ "
@@ -2342,6 +2343,9 @@ print_help() {
   # Get all supported providers
   local ALL_PROVIDERS ; ALL_PROVIDERS=$(get_all_providers)
 
+  # Get term with before rendering help screen
+  set_term_width
+
   show_banner
   cat <<EOF
 ${ANSI_BOLD}${CLR_B_CYAN}USAGE:${ANSI_RESET}
@@ -2351,7 +2355,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}-h, --help${ANSI_RESET}                 Show this help screen and exit
   ${CLR_B_GREEN}-l, --listen <host:port>${ANSI_RESET}   Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}--backend <type>${ANSI_RESET}           Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}--provider <type>${ANSI_RESET}          Set AI external provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}--provider <name>${ANSI_RESET}          Set AI external provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}--fallback <provider>${ANSI_RESET}      Set AI fallback provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
   ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, web)
@@ -2367,7 +2371,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}help${ANSI_RESET}                       Show this help screen and exit
   ${CLR_B_GREEN}listen <host:port>${ANSI_RESET}         Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}backend <type>${ANSI_RESET}             Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}provider <type>${ANSI_RESET}            Set AI external provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}provider <name>${ANSI_RESET}            Set AI external provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}fallback <provider>${ANSI_RESET}        Set AI fallback provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
   ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server

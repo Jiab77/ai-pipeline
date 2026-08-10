@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2015%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.7.1-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.7.2-blue.svg)]()
 
 </div>
 
@@ -25,13 +25,10 @@
   - [Flow A — Manual Image (`/load`)](#flow-a--manual-image-load)
   - [Flow B — Tool-Generated Image](#flow-b--tool-generated-image)
 - [🚀 Quick Start](#-quick-start)
-  - [1. Install dependencies](#1-install-dependencies)
-  - [2. Clone the repo](#2-clone-the-repo)
-  - [3. Launch](#3-launch)
-    - [As server](#as-server)
-    - [As client](#as-client)
-  - [4. Set up your cloud providers keys](#4-set-up-your-cloud-providers-keys)
+  - [⚡ Method A — One-liner (fast)](#-method-a--one-liner-fast)
+  - [🔐 Method B — Manual (paranoid-friendly 😄)](#-method-b--manual-paranoid-friendly-)
 - [⚙️ Extended Configuration](#️-extended-configuration)
+  - [Example: Change AI name](#example-change-ai-name)
   - [Example: Bigger models for 32 GB RAM](#example-bigger-models-for-32-gb-ram)
   - [What you can override](#what-you-can-override)
 - [🧠 Dynamic System Prompt](#-dynamic-system-prompt)
@@ -55,14 +52,14 @@
                                            │
                                            ▼
                       ┌─────────────────────────────────────────┐
-                      │              core.sh                    │
+                      │                 core.sh                 │
                       │       (Sovereign Cognitive Core)        │
                       └────────────────────┬────────────────────┘
                                            │
                     ┌──────────────────────┴──────────────────────┐
                     ▼                                             ▼
           ┌────────────────────┐                        ┌──────────────────┐
-          │    cli.sh          │                        │  web/server.php  │
+          │       cli.sh       │                        │  web/server.php  │
           │ (Interactive CLI)  │                        │  (A.I.D.E. Web)  │
           ├────────────────────┤                        ├──────────────────┤
           │ - Sourcing library │                        │ - SSE Streaming  │
@@ -157,11 +154,11 @@ restore_temp_state() → DEEPSEEK    ← like nothing happened
                         │  │    ▼                │ │      ▼
                         │  │  break (final)      │ │  handle_vision_request()
                         │  │                     │ │      │
-                        │  │  ▲                  │ │      ▼
-                        │  │  │                  │ │  set_temp_state()
-                        │  │  │                  │ │  change_provider("zai")
-                        │  │  │                  │ │      │
-                        │  │  └── loop ──────────┼─┼──► Z.AI glm-5v-turbo
+                        │  │    ▲                │ │      ▼
+                        │  │    │                │ │  set_temp_state()
+                        │  │    │                │ │  change_provider("zai")
+                        │  │    │                │ │      │
+                        │  │    └── loop ────────┼─┼──► Z.AI glm-5v-turbo
                         │  │                     │ │      │
                         │  └─────────────────────┘ │      │ describes image
                         │                          │      │
@@ -223,8 +220,11 @@ restore_temp_state() → DEEPSEEK    ← like nothing happened
 
 ## 🚀 Quick Start
 
-### 1. Install dependencies
+### ⚡ Method A — One-liner (fast)
+
 ```bash
+# 1. Install dependencies (required for both methods)
+
 # Debian/Ubuntu
 sudo apt install -y curl jq sed tor glow openssl websocat && cargo install htmlq
 
@@ -236,34 +236,41 @@ sudo pacman -Syu curl jq sed tor glow openssl websocat && paru -S htmlq
 
 # Termux
 pkg install curl jq sed glow openssl websocat android-tools && cargo-binstall htmlq
+
+# 2. Install the pipeline (clone + global 'aide' command)
+curl -sSL https://raw.githubusercontent.com/jiab77/ai-pipeline/main/install.sh | bash
+
+# 3. Launch
+aide help
 ```
 
-### 2. Clone the repo
+The installer clones the repo and creates a global `aide` command. To update later:
+
 ```bash
-# Clone and move to the project folder
+cd ai-pipeline && ./install.sh -u
+
+# or if you don't want to use the script
+cd ai-pipeline && git pull
+```
+
+### 🔐 Method B — Manual (paranoid-friendly 😄)
+
+For those who rightfully don't trust `curl | bash` — every step is transparent.
+
+```bash
+# 1. Install dependencies (same as Method A, see above)
+
+# 2. Clone the repo
 git clone --recursive https://github.com/jiab77/ai-pipeline.git && cd ai-pipeline
-```
 
-### 3. Launch
+# 3. Launch
 
-You can launch the pipeline in 2 modes: `server` and `client`.
-
-#### As server
-```bash
-# Configure with flags
+# As server
 ./cli.sh --server ollama         # Start 'ollama' server
 ./cli.sh --server llamacpp       # Start 'llama.cpp' server
 ./cli.sh --server web            # Start PHP 'web' server
 
-# Or with command args
-./cli.sh server ollama           # Start 'ollama' server
-./cli.sh server llamacpp         # Start 'llama.cpp' server
-./cli.sh server web              # Start PHP 'web' server
-```
-
-#### As client
-```bash
-# Configure with flags
+# As client
 ./cli.sh                          # Chat mode
 ./cli.sh --backend ollama         # Run fully offline
 ./cli.sh --provider deepseek      # Pick your cloud provider
@@ -274,11 +281,9 @@ You can launch the pipeline in 2 modes: `server` and `client`.
 ./cli.sh backend ollama                   # Run fully offline
 ./cli.sh provider deepseek                # Pick 'deepseek' as cloud provider
 ./cli.sh provider deepseek fallback zai   # Pick 'deepseek' as cloud provider and set vision fallback to 'zai' provider
-```
 
-### 4. Set up your cloud providers keys
+# 4. Set up your cloud providers keys
 
-```bash
 # From live chat session
 /keys
 
@@ -291,6 +296,13 @@ Keys are encrypted locally with ChaCha20 + PBKDF2. Never written to disk in clea
 ## ⚙️ Extended Configuration
 
 The pipeline auto-detects `config/cli.conf` (or `config/core.conf` if running `core.sh` directly) and sources it at startup. This lets you override defaults without touching the core code — perfect for tailoring local models to your hardware.
+
+### Example: Change AI name
+
+```bash
+# config/cli.conf — override defaults
+AI_NAME="Lex Luthor"    # Or whatever else you want :P
+```
 
 ### Example: Bigger models for 32 GB RAM
 
@@ -370,8 +382,11 @@ set_system_prompt()
 
 | Command | Action |
 |:---|:---|
-| `/model <name>` | Switch active model |
+| `/backend [type]` | Switch active backend |
+| `/provider [name]` | Switch active provider |
 | `/fallback [provider\|off]` | Set/disable vision fallback provider |
+| `/model [name]` | Switch active model |
+| `/launch [app]` | Launch app with prepared environment variables |
 | `/load <file>` | Load a text or image file into context |
 | `/unload` | Unload the previously loaded file |
 | `/keys` | Manage encrypted API keys |
@@ -495,9 +510,10 @@ DeepSeek, Groq, Hugging Face, Moonshot AI (Kimi), Z.AI, OpenAI, OpenRouter, Open
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](core.sh) | v1.7.1 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
-| [`cli.sh`](cli.sh) | v1.5.0 | Interactive terminal client — slash commands, session loop, reasoning display |
+| [`core.sh`](core.sh) | v1.7.2 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`cli.sh`](cli.sh) | v1.6.0 | Interactive terminal client — slash commands, session loop, reasoning display |
 | [`tools.sh`](tools.sh) | v0.6.0 | Tool execution bridge — 11 tools, anti-XPIA wrapping, protected-files guard |
+| [`install.sh`](install.sh) | v0.0.0 | Basic installer script |
 | [`showcast.sh`](tools/showcast.sh) | v0.0.0 | `asciinema` demo recorder |
 | [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.2 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
 | [`web-browse.sh`](tools/web-browse.sh) | v0.1.0 | Pure Bash CDP browser automation (desktop) |
@@ -535,7 +551,7 @@ data/memory/
 
 ## ⚖️ License & Roadmap
 
-MIT License. **v1.7.1 — Stable & Production-Ready.**
+MIT License. **v1.7.2 — Stable & Production-Ready.**
 
 Roadmap:
 

@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.5.0
+# Version: 1.6.0
 # ==============================================================================
 
 # Options
@@ -69,8 +69,9 @@ run_chat() {
         echo -e "  ${CLR_B_GREEN}/draw [ratio] [prompt]${ANSI_RESET}    • Generate images"
         echo -e "  ${CLR_B_GREEN}/keys${ANSI_RESET}                     • Manage your encrypted cloud provider API keys"
         echo -e "  ${CLR_B_GREEN}/replay${ANSI_RESET}                   • Resend the last message"
-        echo -e "  ${CLR_B_GREEN}/fallback <name>${ANSI_RESET}          • Set fallback provider"
+        echo -e "  ${CLR_B_GREEN}/backend <type>${ANSI_RESET}           • Change active backend"
         echo -e "  ${CLR_B_GREEN}/provider <name>${ANSI_RESET}          • Change active provider"
+        echo -e "  ${CLR_B_GREEN}/fallback <name>${ANSI_RESET}          • Change / set fallback provider"
         echo -e "  ${CLR_B_GREEN}/model <name>${ANSI_RESET}             • Change active model"
         echo -e "  ${CLR_B_GREEN}/launch <app> [path]${ANSI_RESET}      • Launch app with prepared environment variables"
         echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}              • Load file in the chat context"
@@ -85,16 +86,36 @@ run_chat() {
         if [[ -z $LAST_USER_MSG ]]; then
           log_warn "No previous message to replay!"
         else
-          log_step "Replaying last message: ${CLR_B_WHITE}${LAST_USER_MSG}${ANSI_RESET}"
+          log_step "Replaying last message: ${CLR_B_YELLOW}${LAST_USER_MSG}${ANSI_RESET}"
           send_message "$LAST_USER_MSG"
         fi
       ;;
+      "/backend")
+        if [[ -n $BACKEND ]]; then
+          log_step "Current backend defined: ${CLR_B_YELLOW}${BACKEND}${ANSI_RESET}"
+        else
+          log_warn "No backend defined."
+        fi
+        log_info "Supported backends: ${CLR_B_YELLOW}ollama${CLR_B_WHITE}, ${CLR_B_YELLOW}llamacpp${CLR_B_WHITE}, ${CLR_B_YELLOW}external${ANSI_RESET}"
+        log_info "Set backend with ${CLR_B_YELLOW}/backend <type>${ANSI_RESET}"
+      ;;
+      "/backend "*)
+        local backend_value="${USER_MSG#"/backend "}"
+        case $backend_value in
+          ollama|llamacpp|external)
+            BACKEND="$backend_value"
+            log_step "New backend defined: ${CLR_B_YELLOW}${backend_value}${ANSI_RESET}"
+          ;;
+          *) log_warn "Unsupported backend given: $backend_value" ;;
+        esac
+      ;;
       "/fallback")
         if [[ -n $FALLBACK_PROVIDER ]]; then
-          log_step "Current fallback provider: ${CLR_B_WHITE}${FALLBACK_PROVIDER}${ANSI_RESET}"
+          log_step "Current fallback provider: ${CLR_B_YELLOW}${FALLBACK_PROVIDER}${ANSI_RESET}"
         else
           log_step "No fallback provider currently defined.${ANSI_RESET}"
         fi
+        log_info "Set fallback provider with ${CLR_B_YELLOW}/fallback <provider>${ANSI_RESET}"
       ;;
       "/fallback "*)
         local fallback_value="${USER_MSG#"/fallback "}"
@@ -102,26 +123,50 @@ run_chat() {
           unset FALLBACK_PROVIDER
         else
           FALLBACK_PROVIDER="$fallback_value"
-          log_step "New fallback provider: ${CLR_B_WHITE}${fallback_value}${ANSI_RESET}"
+          log_step "New fallback provider: ${CLR_B_YELLOW}${fallback_value}${ANSI_RESET}"
         fi
       ;;
-      "/provider") log_warn "Missing command arguments. Usage: /provider <name>" ;;
+      "/provider")
+        if [[ -n $PROVIDER ]]; then
+          log_step "Current provider: ${CLR_B_YELLOW}${PROVIDER}${ANSI_RESET}"
+        else
+          log_step "No external provider currently defined.${ANSI_RESET}"
+        fi
+        log_info "Set new provider with ${CLR_B_YELLOW}/provider <name>${ANSI_RESET}"
+      ;;
       "/provider "*)
         unset USER_MODEL          # Remove initially defined model
         unset PROVIDER_API_KEY    # Remove previous provider API key
         local active_provider="${USER_MSG#"/provider "}"
         change_provider "$active_provider"
       ;;
-      "/model") log_warn "Missing command arguments. Usage: /model <name>" ;;
+      "/model")
+        if [[ -n $CHAT_MODEL ]]; then
+          log_step "Current model: ${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET}"
+        else
+          log_step "No model currently defined.${ANSI_RESET}"
+        fi
+        log_info "Set new model with ${CLR_B_YELLOW}/model <name>${ANSI_RESET}"
+      ;;
       "/model "*)
         unset USER_MODEL    # Remove initially defined model
         local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
-        log_step "New active model: ${CLR_B_WHITE}${active_model}${ANSI_RESET}"
+        log_step "New active model: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
         set_vision_model    # Update corresponding vision model
         set_system_prompt   # Update system prompt with new active model
         set_state           # Update new state
       ;;
-      "/launch") log_warn "Missing command arguments. Usage: /launch <app> [path]" ;;
+      "/launch")
+        local tested_apps=(aider claude copilot crush cyberneurova neurova hf openai)
+        local tested_str=""
+        local tested_index=0
+        for app in "${tested_apps[@]}"; do
+          tested_str+="${CLR_B_YELLOW}${app}${CLR_B_WHITE}" ; ((tested_index++))
+          [[ $tested_index -ne "${#tested_apps[@]}" ]] && tested_str+=", "
+        done
+        log_info "Supported applications: ${tested_str}${ANSI_RESET}"
+        log_info "To launch an application: ${CLR_B_YELLOW}/launch <app>${ANSI_RESET}"
+      ;;
       "/launch "*)
         local launch_args="${USER_MSG#"/launch "}"
         local user_app ; user_app=$(cut -d " " -f1 <<< "$launch_args")
@@ -138,7 +183,7 @@ run_chat() {
 
         if [[ -r $file ]]; then
           EXTERNAL_FILE_LOADED="$file"    # Bind to core global state
-          log_step "Loading file: ${CLR_B_WHITE}${filename}${ANSI_RESET}"
+          log_step "Loading file: ${CLR_B_YELLOW}${filename}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
           if ! is_image_file "$file"; then
             echo -e "Loaded file: ${filename}\n\n\`\`\`${fileext}\n$(head -n$max_preview_lines "$file")\n\`\`\`" | render_markdown
@@ -152,7 +197,7 @@ run_chat() {
       ;;
       "/unload")
         if [[ -n $EXTERNAL_FILE_LOADED ]]; then
-          log_step "Unloading file: ${CLR_B_WHITE}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET}"
+          log_step "Unloading file: ${CLR_B_YELLOW}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET}"
           unset EXTERNAL_FILE_LOADED
         else
           log_warn "No file currently loaded."
@@ -161,7 +206,7 @@ run_chat() {
       "/run") log_warn "Missing command arguments. Usage: /run <command>" ;;
       "/run "*)
         local cmd="${USER_MSG#"/run "}"
-        log_step "Locally executing: ${CLR_B_WHITE}${cmd}${ANSI_RESET}"
+        log_step "Locally executing: ${CLR_B_YELLOW}${cmd}${ANSI_RESET}"
         echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
         eval "$cmd"
         echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"

@@ -386,14 +386,13 @@ set_system_prompt()
 | `/provider [name]` | Switch active provider |
 | `/fallback [provider\|off]` | Set/disable vision fallback provider |
 | `/model [name]` | Switch active model |
-| `/launch [app]` | Launch app with prepared environment variables |
+| `/launch [app] [path]` | Launch app with prepared environment variables |
 | `/load <file>` | Load a text or image file into context |
 | `/unload` | Unload the previously loaded file |
 | `/keys` | Manage encrypted API keys |
 | `/clear` | Wipe active session history |
 | `/commit` | Trigger memory consolidation |
 | `/replay` | Resend last message |
-| `/launch <app> [path]` | Launch external app with pipeline credentials |
 | `/run <cmd>` | Execute shell command |
 | `/quit` | Exit |
 

@@ -484,7 +484,7 @@ set_system_prompt()
 | **`llamacpp`** | Local, high-performance, fine-grained control — `http://localhost:8080` |
 | **`external`** | Cloud providers (15), vision fallback, ZDR — Tor-routed |
 
-Switch anytime: `/provider`, `--backend`, `--provider`. Same tools, same memory, same agent loop across all three.
+Switch anytime: `/backend`, `/provider`, `/model`. Same tools, same memory, same agent loop across all three.
 
 ### Local Model Stack <!-- omit in toc -->
 
@@ -501,7 +501,23 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 
 ### Cloud Providers (15) <!-- omit in toc -->
 
-DeepSeek, Groq, Hugging Face, Moonshot AI (Kimi), Z.AI, OpenAI, OpenRouter, OpenRoute, Vercel AI Gateway, Mammouth AI, CyberNeurova, Venice AI, and more. All use the same OpenAI-compatible API. Vision fallback works across any text-only → vision-capable pair.
+| Name | URL |
+|:---|:---|
+| CyberNeurova | https://cyberneurova.com |
+| DeepSeek | https://deepseek.com |
+| Groq | https://groq.com |
+| Hugging Face | https://huggingface.co |
+| Kimi (Moonshot AI) | https://moonshot.ai |
+| Mammouth AI | https://mammouth.ai |
+| OpenAI | https://openai.com |
+| OpenRoute (CyberNeurova) | https://openroute.cyberneurova.com |
+| OpenRouter (Free / Paid) | https://openrouter.ai |
+| Venice AI | https://venice.ai |
+| Vercel AI Gateway (Free / Paid) | https://ai-gateway.vercel.sh |
+| Z.AI (API / Coding Plan) | https://z.ai |
+
+>[!NOTE]
+> All use the same OpenAI-compatible API. Vision fallback works across any text-only → vision-capable pair.
 
 </details>
 

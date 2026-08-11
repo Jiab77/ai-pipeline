@@ -278,6 +278,7 @@ git clone --recursive https://github.com/jiab77/ai-pipeline.git && cd ai-pipelin
 ./cli.sh --zdr                    # With Zero Data Retention
 
 # Or with command args
+./cli.sh server ollama                    # Start local 'ollama' server
 ./cli.sh backend ollama                   # Run fully offline
 ./cli.sh provider deepseek                # Pick 'deepseek' as cloud provider
 ./cli.sh provider deepseek fallback zai   # Pick 'deepseek' as cloud provider and set vision fallback to 'zai' provider

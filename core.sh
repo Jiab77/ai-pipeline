@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (Gemini)
 #
-# Version: 1.7.2
+# Version: 1.7.3
 # ==============================================================================
 
 # Options
@@ -59,6 +59,7 @@ CONFIG_DIR="${SCRIPT_DIR}/config"
 MODELS_DIR="${SCRIPT_DIR}/models"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
 TOOLS_HANDLER="${SCRIPT_DIR}/tools.sh"
+IMG_HANDLER="${SCRIPT_DIR}/image.sh"
 WEB_SERVER="${SCRIPT_DIR}/web/server.php"
 SCRIPT_CONFIG="${CONFIG_DIR}/${SCRIPT_NAME}.conf"
 MODELS_CONFIG="${CONFIG_DIR}/models.json"
@@ -618,6 +619,10 @@ set_console_title() {
   echo -ne "\033]0;$1\007" >&2
 }
 
+get_datetime() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
 get_self_path() {
   local FILE_PATH
   [[ -n "${BASH_SOURCE[0]}" ]] && FILE_PATH="${BASH_SOURCE[0]}"
@@ -925,6 +930,7 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 ## Your Core Files
 - \`${CORE_LIB##*/}\` — Cognitive engine (API calls, memory, providers, AUTH tag)
 - \`${SCRIPT_FILE}\` — Interface layer (slash commands, /provider, /launch, /fallback)
+- \`${IMG_HANDLER##*/}\` — Image rendering engine (TODO: Add missing description)
 - \`${TOOLS_HANDLER##*/}\` — Tool execution layer (web_fetch, web_browse, edit_file, etc.)
 
 ## Your Identity
@@ -1087,9 +1093,9 @@ set_system_prompt() {
   # Sets important rules
   [[ -n $CORE_LIB && -r $CORE_LIB ]] && CORE_FILE="${CORE_LIB##*/}"
   if [[ -n $CORE_FILE ]]; then
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${IMG_HANDLER##*/}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
   else
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${IMG_HANDLER##*/}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
   fi
   SYSTEM_PROMPT+="Modifying these files will break the core pipeline functionalities."
 }
@@ -1100,6 +1106,7 @@ set_system_prompt() {
 
 api_call() {
   local payload="$1"
+  local url="$2"
   local curl_opts=("-sSL")
 
   # Apply defined local model settings
@@ -1143,6 +1150,9 @@ api_call() {
       # Add required arguments when TOR is enabled
       [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
 
+      # Override URL when necessary
+      [[ -z $url ]] && url="$PROVIDER_API_URL"
+
       # Provider selector
       case $PROVIDER in
         # Vercel / Vercel Free
@@ -1157,7 +1167,7 @@ api_call() {
           payload=$(jq -rc '.providerOptions.gateway.disallowPromptTraining = true' <<< "$payload" 2>/dev/null)
 
           # Send custom payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -H "http-referer: ${ATTRIBUTION_REFERER}" \
@@ -1184,7 +1194,7 @@ api_call() {
           payload=$(jq -rc '.model = "'"$current_model"':fastest"' <<< "$payload" 2>/dev/null)
 
           # Send custom payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -A "$USER_AGENT" \
@@ -1208,7 +1218,7 @@ api_call() {
           payload=$(jq -rc '.parallel_tool_calls = true' <<< "$payload" 2>/dev/null)
 
           # Send custom payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -A "$USER_AGENT" \
@@ -1235,7 +1245,7 @@ api_call() {
 
           while (( attempt <= max_attempts )); do
             # Send custom payload and capture the output
-            response=$(curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+            response=$(curl "${curl_opts[@]}" "${url}" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
               -A "$USER_AGENT" \
@@ -1318,7 +1328,7 @@ api_call() {
           [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for this provider."
 
           # Send custom payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -A "$USER_AGENT" \
@@ -1338,7 +1348,7 @@ api_call() {
           [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for OpenAI."
 
           # Send custom payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -A "$USER_AGENT" \
@@ -1360,7 +1370,7 @@ api_call() {
           payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
 
           # Send custom payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
@@ -1391,7 +1401,7 @@ api_call() {
           fi
 
           # Send custom payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
@@ -1404,7 +1414,7 @@ api_call() {
         # Any other supported providers
         *)
           # Send generic payload
-          curl "${curl_opts[@]}" "${PROVIDER_API_URL}" \
+          curl "${curl_opts[@]}" "${url}" \
                -H "Content-Type: application/json" \
                -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
                -A "$USER_AGENT" \
@@ -1937,12 +1947,16 @@ send_message() {
   local dynamic_system
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
+  local timestamp
 
   # Self-healing security check
   [[ -z $AUTH_TAG ]] && set_auth_tag
 
+  # Set message timestamp
+  timestamp=$(get_datetime)
+
   # Append generated tag
-  local user_content="[AUTH:$AUTH_TAG] $prompt"
+  local user_content="[AUTH:$AUTH_TAG] $prompt ($timestamp)"
 
   # Reset 'IS_IMAGE' global var
   [[ $IS_IMAGE == true ]] && IS_IMAGE=false

@@ -1,0 +1,34 @@
+## Minimal configuration file
+
+## Tor opens a SOCKS proxy on port 9050 by default -- even if you don't
+## configure one below. Set "SOCKSPort 0" if you plan to run Tor only
+## as a relay, and not make any local application connections yourself.
+#SOCKSPort 9050 # Default: Bind to localhost:9050 for local connections.
+#SOCKSPort 192.168.0.1:9100 # Bind to this address:port too.
+
+## HTTP Proxy
+HTTPTunnelPort 9080
+
+## Logs go to stdout at level "notice" unless redirected by something
+## else, like one of the below lines. You can have as many Log lines as
+## you want.
+##
+## We advise using "notice" in most cases, since anything more verbose
+## may provide sensitive information to an attacker who obtains the logs.
+##
+## Send all messages of level 'notice' or higher to /var/log/tor/notices.log
+#Log notice file /var/log/tor/notices.log
+## Send every possible message to /var/log/tor/debug.log
+#Log debug file /var/log/tor/debug.log
+## Use the system log instead of Tor's logfiles
+Log notice syslog
+## To send all messages to stderr:
+#Log debug stderr
+
+## The port on which Tor will listen for local connections from Tor
+## controller applications, as documented in control-spec.txt.
+ControlPort 9051
+## If you enable the controlport, be sure to enable one of these
+## authentication methods, to prevent attackers from accessing it.
+#HashedControlPassword 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C
+CookieAuthentication 1

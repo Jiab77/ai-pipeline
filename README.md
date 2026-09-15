@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2016%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.8.0-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.8.1-blue.svg)]()
 
 </div>
 
@@ -739,7 +739,7 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](core.sh) | v1.8.0 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`core.sh`](core.sh) | v1.8.1 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
 | [`cli.sh`](cli.sh) | v1.7.0 | Interactive terminal client — slash commands, session loop, reasoning display |
 | [`tools.sh`](tools.sh) | v0.7.0 | Tool execution bridge — 12 tools, anti-XPIA wrapping, protected-files guard |
 | [`image.sh`](image.sh) | v0.1.0 | Image rendering engine — config-driven providers, Pollinations fallback |
@@ -789,11 +789,11 @@ data/memory/
 
 ## ⚖️ License & Roadmap
 
-MIT License. **v1.8.0 — Stable & Production-Ready.**
+MIT License. **v1.8.1 — Stable & Production-Ready.**
 
 Roadmap:
 
-- **v1.8.0 (current)**: Image generation engine — `/draw` + `create_image`, config-driven providers, new memory structure, Pollinations fallback.
+- **v1.8.1 (current)**: Image generation engine — `/draw` + `create_image`, config-driven providers, new memory structure, Pollinations fallback.
 - **v1.9.0 (next)**: `voice.sh` — STT + TTS engine (local + cloud providers) and more.
 - **v2.0.0 (horizon)**: A.I.D.E. Web dashboard, Cognitive Router & Proxy (CRP) Gateway, charmbracelet/gum UI modernization.
 

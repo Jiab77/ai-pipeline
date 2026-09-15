@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (DeepSeek)
 #
-# Version: 1.8.0
+# Version: 1.8.1
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -76,6 +76,7 @@ BIN_FIGLET=$(command -v figlet 2>/dev/null)
 BIN_SYSTEMCTL=$(command -v systemctl 2>/dev/null)
 BIN_TOR=$(command -v tor 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+TOR_CONFIG="${CONFIG_DIR}/torrc"
 IS_IMAGE=false
 
 # Keys
@@ -86,6 +87,7 @@ KEYRING_PBKDF2=1
 
 # Temporary Files (Default to /tmp, adapts dynamically on Termux)
 TOOLS_OUTPUT="/tmp/tools_output.txt"
+TOR_LOG="/tmp/tor.log"
 TEMP_MEMORY_SYSTEM="/tmp/memory_sys.txt"
 TEMP_MEMORY_USER="/tmp/memory_usr.txt"
 TEMP_BASE64_OUTPUT="/tmp/image_output.b64"
@@ -155,6 +157,7 @@ cleanup_the_mess() {
         "$TEMP_PAYLOAD_SYSTEM" \
         "$TEMP_PAYLOAD_USER" \
         "$TEMP_STATE_FILE" \
+        "$TOR_LOG" \
         "$TOOLS_OUTPUT" \
         "${TOOLS_OUTPUT}.safe" \
         "${TOOLS_OUTPUT}.clean"
@@ -487,6 +490,8 @@ set_listen_interface() {
 
 set_temp_files() {
   if is_termux; then
+    TOR_LOG="${TMPDIR}/tor.log"
+    TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
     TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
     TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
     TEMP_BASE64_OUTPUT="${TMPDIR}/image_output.b64"
@@ -496,9 +501,7 @@ set_temp_files() {
     TEMP_TOOLS_HISTORY="${TMPDIR}/tools_history.json"
     TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
     TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
-    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
     TEMP_PAYLOAD_USER="${TMPDIR}/payload_user.txt"
-    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
   fi
 }
 
@@ -587,6 +590,17 @@ detect_tor() {
   fi
 }
 
+wait_for_tor() {
+  local i
+  for i in {1..10}; do
+    if _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
+      log_success "Tor privacy tunnel established! Routing securely to $TOR_PROXY."
+      return 0
+    fi
+    sleep 1
+  done
+}
+
 check_tor() {
   log_info "Checking Tor Network proxy interface..."
   if ! _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
@@ -605,26 +619,27 @@ handle_tor() {
 
   if is_termux; then
     if [[ -n $BIN_TOR ]]; then
-      log_info "Starting Tor privacy tunnel..." ; log
-      tor &
+      log_info "Starting Tor privacy tunnel..."
+      { tor -f "$TOR_CONFIG" </dev/null &>"$TOR_LOG" & }
     else
       error "Missing required 'tor' binary. Please install it."
     fi
   else
     if [[ -n $BIN_SYSTEMCTL ]]; then
       if [[ ! $(systemctl is-active tor.service) == "active" ]]; then
-        log_info "Starting Tor privacy tunnel..." ; log
+        log_info "Starting Tor privacy tunnel..."
         sudo systemctl start tor.service
       fi
     elif [[ -n $BIN_TOR ]]; then
-      log_info "Starting Tor privacy tunnel..." ; log
-      tor &
+    # if [[ -n $BIN_TOR ]]; then
+      log_info "Starting Tor privacy tunnel..."
+      { tor -f "$TOR_CONFIG" </dev/null &>"$TOR_LOG" & }
     else
       error "Missing required 'tor' binary or service. Please install it."
     fi
   fi
 
-  check_tor
+  wait_for_tor || check_tor
 }
 
 # -----------------------------------------------------------------------------

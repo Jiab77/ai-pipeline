@@ -7,10 +7,14 @@
 # and parallel tool-calling loops. It acts as our headless sovereign brain.
 #
 # Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (Gemini)
+# AI Sorcerer & Co-Creator   : Jarvis (DeepSeek)
 #
-# Version: 1.7.3
+# Version: 1.8.0
 # ==============================================================================
+
+# Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
+[[ -n "${CORE_SH_LOADED:-}" ]] && return 0
+CORE_SH_LOADED=1
 
 # Options
 [[ "${DEBUG:-}" == "true" ]] && set -x
@@ -25,9 +29,13 @@ set -o pipefail
 RUN_MODE="${RUN_MODE:-simple}"
 SERVER_MODE="${SERVER_MODE:-web}"
 BACKEND="${BACKEND:-external}"
-PROVIDER="${PROVIDER:-vercel}"
+PROVIDER="${PROVIDER:-openrouter_free}"
 PROVIDER_API_KEY=""
 MEMORY_TYPE="${MEMORY_TYPE:-markdown}"
+MEMORY_STRUCTURE_TYPE="${MEMORY_STRUCTURE_TYPE:-full}"
+MEMORY_SECTION_KB="${MEMORY_SECTION_KB:-128}"
+REASONING_EFFORT="${REASONING_EFFORT:-low}"
+MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-128000}"
 DEFAULT_TERM_WIDTH=80
 HEARTBEAT_THRESHOLD=15
 PBKDF_ITERATIONS=500000
@@ -35,20 +43,16 @@ CREDENTIALS="${HOME}/.creds"
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
-PULL_MODELS=false
-DEBUG=true
-USE_TOR=true          # Route cloud API calls through Tor proxy
-USE_TOOLS=true        # Enable/Disable tool calling capabilities
+DEBUG=true            # Enable / Disable debug mode
+USE_TOR=true          # Enable / Disable routing cloud API calls through Tor proxy
+USE_TOOLS=true        # Enable / Disable tool calling capabilities
+PULL_MODELS=false     # Enable / Disable initial models pulling
 VISION_ENABLED=true   # Enable vision for all cloud providers models
+IMAGE_ENABLED=false   # Enable image generation for the active provider
 ZDR_ENFORCED=false    # Enforce Zero Data Retention for all cloud providers
 
 # Self-Discovery Paths (Dynamic Sandbox & Root Mounting)
-CORE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ "${CORE_SELF_DIR##*/}" == "data" ]]; then
-  SCRIPT_DIR="$(dirname "$CORE_SELF_DIR")"
-else
-  SCRIPT_DIR="$CORE_SELF_DIR"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Internals
 SCRIPT_FILE="${0##*/}"
@@ -66,13 +70,19 @@ MODELS_CONFIG="${CONFIG_DIR}/models.json"
 PROVIDERS_CONFIG="${CONFIG_DIR}/providers.json"
 STATE_FILE="${CONFIG_DIR}/state.json"
 MESSAGES_FILE="messages.json"
+BIN_DEPS=("curl" "awk" "sed" "openssl" "jq" "htmlq" "websocat" "grep" "cut" "tr" "printf")
+BIN_DEPS_MOBILE=("${BIN_DEPS[@]}" "adb")
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
+BIN_SYSTEMCTL=$(command -v systemctl 2>/dev/null)
+BIN_TOR=$(command -v tor 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 IS_IMAGE=false
 
 # Keys
 KEYS_DIR="${SCRIPT_DIR}/keys"
 MASTER_KEY_FILE="${KEYS_DIR}/key.dat"
+KEYRING_CIPHER=""
+KEYRING_PBKDF2=1
 
 # Temporary Files (Default to /tmp, adapts dynamically on Termux)
 TOOLS_OUTPUT="/tmp/tools_output.txt"
@@ -81,7 +91,10 @@ TEMP_MEMORY_USER="/tmp/memory_usr.txt"
 TEMP_BASE64_OUTPUT="/tmp/image_output.b64"
 TEMP_TOOLS_OUTPUT="/tmp/tools_output.json"
 TEMP_PAYLOAD_ASSISTANT="/tmp/payload_assistant.json"
+TEMP_PAYLOAD_ASSISTANT_HISTORY="/tmp/payload_assistant_history.json"
+TEMP_TOOLS_HISTORY="/tmp/tools_history.json"
 TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
+TEMP_PAYLOAD_USER="/tmp/payload_user.txt"
 TEMP_PAYLOAD_SYSTEM="/tmp/payload_system.txt"
 TEMP_STATE_FILE="${CONFIG_DIR}/temp_state.json"
 
@@ -135,14 +148,20 @@ cleanup_the_mess() {
         "$TEMP_MEMORY_USER" \
         "$TEMP_BASE64_OUTPUT" \
         "$TEMP_TOOLS_OUTPUT" \
+        "$TEMP_TOOLS_HISTORY" \
         "$TEMP_PAYLOAD_ASSISTANT" \
+        "$TEMP_PAYLOAD_ASSISTANT_HISTORY" \
         "$TEMP_PAYLOAD_MESSAGES" \
         "$TEMP_PAYLOAD_SYSTEM" \
+        "$TEMP_PAYLOAD_USER" \
         "$TEMP_STATE_FILE" \
         "$TOOLS_OUTPUT" \
+        "${TOOLS_OUTPUT}.safe" \
         "${TOOLS_OUTPUT}.clean"
 }
-trap cleanup_the_mess EXIT INT TERM
+
+# Avoid blocking image creation process (damn tricky to find it...)
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && trap cleanup_the_mess EXIT INT TERM
 
 # -----------------------------------------------------------------------------
 # High-Fidelity Terminal Formatting & Styles
@@ -183,6 +202,7 @@ ICON_WARNING="⚠️ "
 ICON_ERROR="❌"
 ICON_TOOL="⚙️ "
 ICON_BRAIN="🧠"
+ICON_IMAGE="🎨"
 ICON_CODER="💻"
 ICON_JUDGE="⚖️ "
 ICON_ARCHITECT="🏛️ "
@@ -191,6 +211,10 @@ ICON_INTENT="🔍"
 ICON_DEBUG="🔍"
 ICON_USER="👤 "
 ICON_AI="🤖"
+
+# -----------------------------------------------------------------------------
+# Core Functions
+# -----------------------------------------------------------------------------
 
 # Get terminal width safely
 set_term_width() {
@@ -269,12 +293,23 @@ log_success() { log "${CLR_B_GREEN}${ICON_SUCCESS}${ANSI_RESET} ${CLR_B_GREEN}$*
 log_warn() { log "${CLR_B_YELLOW}${ICON_WARNING}${ANSI_RESET} ${CLR_B_YELLOW}$*${ANSI_RESET}"; }
 log_error() { log "${CLR_B_RED}${ICON_ERROR}${ANSI_RESET} ${CLR_B_RED}[ERROR] $*${ANSI_RESET}"; }
 log_brain() { log "${CLR_B_MAGENTA}${ICON_BRAIN}${ANSI_RESET} ${CLR_B_MAGENTA}$*${ANSI_RESET}"; }
+log_image() { log "${CLR_B_MAGENTA}${ICON_IMAGE}${ANSI_RESET} ${CLR_B_WHITE}$*${ANSI_RESET}"; }
 log_step() { log " ${CLR_B_MAGENTA}➜${ANSI_RESET} ${ANSI_BOLD}${CLR_B_WHITE}$*${ANSI_RESET}"; }
 log_debug() {
   if [[ -e $HOME/.debug || "$DEBUG" == "true" ]]; then
     log "\n${CLR_B_BLACK}${ICON_DEBUG} [DEBUG] $*${ANSI_RESET}"
   fi
 }
+
+# Log and exit helper
+error() {
+  log_error "$*"
+  exit 255
+}
+
+# Strings helpers
+to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
+to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
 
 # Contextual Headers
 show_user_header() { log "\n$(draw_header "${CLR_B_GREEN}${ICON_USER} User " "─" "${CLR_B_BLACK}")\n"; }
@@ -288,6 +323,44 @@ show_tool_header() {
   log "   ${CLR_B_YELLOW}Identifier :${ANSI_RESET} ${CLR_B_WHITE}${name}${ANSI_RESET}"
   log "   ${CLR_B_YELLOW}Arguments  :${ANSI_RESET} ${CLR_DIM}${args}${ANSI_RESET}"
   log "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}\n"
+}
+
+# Make sure all required dependencies are installed
+check_deps() {
+  local all_deps=()
+  local total_deps=0
+  local found_deps=0
+  local missing_deps=0
+  local missing_deps_str=""
+  if is_termux; then
+    all_deps=("${BIN_DEPS_MOBILE[@]}")
+  else
+    all_deps=("${BIN_DEPS[@]}")
+  fi
+  total_deps="${#all_deps[@]}"
+  for d in "${all_deps[@]}"; do
+    if [[ -n $(command -v "$d" 2>/dev/null) ]]; then
+      ((found_deps++))
+    else
+      [[ $missing_deps -ne 0 ]] && missing_deps_str+=", "
+      missing_deps_str+="$d"
+      ((missing_deps++))
+    fi
+  done
+  [[ $found_deps -ne $total_deps ]] && error "Please install missing binaries: $missing_deps_str"
+}
+
+# Link helper
+create_link() {
+  local url text
+
+  if [[ $# -eq 2 ]]; then
+    url="$1" ; text="$2"
+  else
+    url="$1" ; text="$url"
+  fi
+
+  printf '\e]8;;%s\e\\%s\e]8;;\e\\\n' "$url" "$text"
 }
 
 # Core banner
@@ -305,19 +378,254 @@ show_banner() {
 
 EOF
   fi
-  echo -e "${CLR_B_CYAN}🔮 ${AI_NAME} AI Pipeline | Version $(get_self_version) 🔮${ANSI_RESET}"
-  echo -e "${CLR_DIM}Lead: Jiab77 | AI Sorcerer: $AI_NAME (Gemini)${ANSI_RESET}\n"
+  echo -e "${CLR_B_CYAN}🔮 ${AI_NAME} $(create_link "https://github.com/jiab77/ai-pipeline" "AI Pipeline") | Version $(get_self_version) 🔮${ANSI_RESET}"
+  echo -e "${CLR_DIM}Lead: $(create_link "https://github.com/jiab77" "Jiab77") | AI Sorcerer: $AI_NAME (GLM-5.3)${ANSI_RESET}"
+  echo -e "${CLR_DIM}Link: ${ANSI_RESET}$(create_link "https://github.com/jiab77/ai-pipeline")"
+  echo
 }
 
-# Log and exit helper
-error() {
-  log_error "$*"
-  exit 255
+# Image helpers
+get_image_type() {
+  local ext="${1##*.}"
+   case "$ext" in
+     jpg|jpeg) echo -n "image/jpeg" ;;
+     svg)      echo -n "image/svg+xml" ;;
+     *)        echo -n "image/${ext}" ;;
+   esac
 }
 
-# Strings helpers
-to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
-to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
+is_image_file() {
+  local ext="${1##*.}"
+  [[ $ext =~ ^(png|jpg|jpeg|webp|gif|svg)$ ]] && return 0
+  return 1
+}
+
+# System helpers
+is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
+
+is_termux() {
+  [[ -n "${TERMUX_VERSION:-}" ]] && return 0
+  [[ -d "/data/data/com.termux" ]] && return 0
+  return 1
+}
+
+set_console_title() {
+  echo -ne "\033]0;$1\007" >&2
+}
+
+get_datetime() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+get_self_path() {
+  local FILE_PATH
+  [[ -n "${BASH_SOURCE[0]}" ]] && FILE_PATH="${BASH_SOURCE[0]}"
+  [[ -z $FILE_PATH ]] && FILE_PATH="$0"
+  if [[ -n "$FILE_PATH" ]]; then
+    echo -n "$FILE_PATH"
+  else
+    error "Could not retrieve self path."
+  fi
+}
+
+get_self_version() {
+  local FILE_PATH ; FILE_PATH="$(get_self_path)"
+  if [[ -n $(command -v awk 2>/dev/null) ]]; then
+    grep -m1 "# Version" "$FILE_PATH" | awk '{ print $3 }'
+  else
+    grep -m1 "# Version" "$FILE_PATH" | cut -d" " -f3
+  fi
+}
+
+create_local_data_store() {
+  mkdir -p "$DATA_STORE"
+  mkdir -p "$MEMORY_DIR"
+}
+
+create_local_model_cache() {
+  mkdir -p "$OLLAMA_CACHE"
+  mkdir -p "$LLAMACPP_CACHE"
+}
+
+load_config_file() {
+  # shellcheck source=/dev/null
+  [[ -r $SCRIPT_CONFIG ]] && source "$SCRIPT_CONFIG"
+}
+
+# Ensure proper parsing and reconstruction of valid API URLs without process forking (pure Bash)
+set_listen_interface() {
+  if [[ -n $LISTEN_ADDR_PORT ]]; then
+    if [[ $LISTEN_ADDR_PORT == *:* ]]; then
+      # Full format 'host:port'
+      LISTEN_HOST="${LISTEN_ADDR_PORT%%:*}"
+      LISTEN_PORT="${LISTEN_ADDR_PORT##*:}"
+    elif [[ $LISTEN_ADDR_PORT =~ ^[0-9]+$ ]]; then
+      # Port only (e.g., 8080) -> fallback host to localhost
+      LISTEN_HOST=""
+      LISTEN_PORT="$LISTEN_ADDR_PORT"
+    else
+      # Host only (e.g., 127.0.0.1 or localhost) -> fallback to default ports
+      LISTEN_HOST="$LISTEN_ADDR_PORT"
+      LISTEN_PORT=""
+    fi
+
+    # Smart reconstruction of client API URLs for curl
+    if [[ -n $LISTEN_HOST && -n $LISTEN_PORT ]]; then
+      LLAMACPP_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
+      OLLAMA_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
+    elif [[ -n $LISTEN_PORT ]]; then
+      # Specific port, fallback client host to localhost
+      LLAMACPP_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
+      OLLAMA_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
+    elif [[ -n $LISTEN_HOST ]]; then
+      # Specific host, apply backend default ports
+      LLAMACPP_API_SRV="http://${LISTEN_HOST}:8080"
+      OLLAMA_API_SRV="http://${LISTEN_HOST}:11434"
+    fi
+  fi
+}
+
+set_temp_files() {
+  if is_termux; then
+    TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
+    TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
+    TEMP_BASE64_OUTPUT="${TMPDIR}/image_output.b64"
+    TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
+    TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
+    TEMP_PAYLOAD_ASSISTANT_HISTORY="${TMPDIR}/payload_assistant_history.json"
+    TEMP_TOOLS_HISTORY="${TMPDIR}/tools_history.json"
+    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
+    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
+    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
+    TEMP_PAYLOAD_USER="${TMPDIR}/payload_user.txt"
+    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
+  fi
+}
+
+set_cpu_cores() {
+  local cores
+  if [[ -n $(command -v nproc 2>/dev/null) ]]; then
+    cores=$(nproc)
+  elif [[ -n $(command -v sysctl 2>/dev/null) ]]; then
+    cores=$(sysctl -n hw.ncpu)
+  else
+    [[ -r /proc/cpuinfo ]] && cores=$(grep -c processor </proc/cpuinfo)
+  fi
+  if [[ -n $cores ]]; then
+    if is_termux; then
+      MAX_CORES=$(( cores > 2 ? cores / 2 : 1 ))    # Use half of available CPU cores to prevent burning mobile devices
+    else
+      MAX_CORES=$(( cores > 2 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
+    fi
+  else
+    error "Unable to detect CPU cores."
+  fi
+}
+
+get_memory_size() {
+  local total_memory
+  local default_memory=8388608  # Default 8GB fallback
+  [[ -r /proc/meminfo ]] && total_memory=$(grep "MemTotal:" /proc/meminfo | awk '{ print $2 }')
+  [[ -z $total_memory || ! $total_memory =~ ^[0-9]+$ ]] && total_memory=$default_memory
+  echo -n "$total_memory"
+}
+
+# Set duration before unloading the model from memory
+set_keep_alive() {
+  if [[ $RUN_MODE == "chat" ]]; then
+    MAX_LIFETIME="10m"
+  else
+    MAX_LIFETIME="5s"
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Portability helpers (stock macOS / BSD differences)
+# -----------------------------------------------------------------------------
+
+# base64 wrappers — GNU (Linux/Termux): -w0 no-wrap / -d decode
+#                   BSD (macOS): never wraps / -D decode
+b64e() { if is_macos; then base64; else base64 -w0 -; fi; }
+b64d() { if is_macos; then base64 -D; else base64 -d -; fi; }
+
+# _sha256sum: GNU coreutils `sha256sum` wrapper
+_sha256sum() {
+  sha256sum 2>/dev/null || \
+  shasum -a 256 2>/dev/null || \
+  openssl dgst -sha256 2>/dev/null | awk '{print $NF}';
+}
+
+# _timeout: GNU coreutils `timeout` when present (Linux/Termux),
+# else a watch-dog (macOS ships none) with the same observable behavior.
+_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  else
+    "$@" & local pid=$!
+    ( sleep "$secs"; kill "$pid" 2>/dev/null ) & local wd=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    kill "$wd" 2>/dev/null
+    wait "$wd" 2>/dev/null
+    return "$rc"
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Tor helpers
+# -----------------------------------------------------------------------------
+
+detect_tor() {
+  log_info "Detecting Tor Network proxy interface..."
+  if ! _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
+    log_error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is Tor running?"
+    return 1
+  else
+    log_success "Tor privacy tunnel established! Routing securely to $TOR_PROXY."
+    return 0
+  fi
+}
+
+check_tor() {
+  log_info "Checking Tor Network proxy interface..."
+  if ! _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
+    error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is Tor running?"
+  else
+    log_success "Tor privacy tunnel established! Routing securely to $TOR_PROXY."
+    return 0
+  fi
+}
+
+handle_tor() {
+  local tor_status
+
+  detect_tor ; tor_status=$?
+  [[ $tor_status -eq 0 ]] && return $tor_status
+
+  if is_termux; then
+    if [[ -n $BIN_TOR ]]; then
+      log_info "Starting Tor privacy tunnel..." ; log
+      tor &
+    else
+      error "Missing required 'tor' binary. Please install it."
+    fi
+  else
+    if [[ -n $BIN_SYSTEMCTL ]]; then
+      if [[ ! $(systemctl is-active tor.service) == "active" ]]; then
+        log_info "Starting Tor privacy tunnel..." ; log
+        sudo systemctl start tor.service
+      fi
+    elif [[ -n $BIN_TOR ]]; then
+      log_info "Starting Tor privacy tunnel..." ; log
+      tor &
+    else
+      error "Missing required 'tor' binary or service. Please install it."
+    fi
+  fi
+
+  check_tor
+}
 
 # -----------------------------------------------------------------------------
 # Cryptographic Key Chest (ChaCha20 + PBKDF2)
@@ -337,18 +645,62 @@ has_provider_key() {
   [[ -r $MASTER_KEY_FILE && -r "${KEYS_DIR}/${provider}.key" ]]
 }
 
+# Cipher resolution — probe a full encrypt/decrypt round-trip once, then cache.
+# LibreSSL (macOS) may lack chacha20 in `enc`, and some builds lack PBKDF2.
+# Order: chacha20+PBKDF2 -> aes-256-cbc+PBKDF2 -> aes-256-cbc (legacy KDF).
+# Keys are per-machine (local master key): no cross-machine format to preserve.
+probe_keyring_cipher() {
+  local spec cipher use_pbkdf2 probe probe_back
+  local -a kdf
+  for spec in "chacha20|1" "aes-256-cbc|1" "aes-256-cbc|0"; do
+    cipher="${spec%%|*}"
+    use_pbkdf2="${spec##*|}"
+    if [[ $use_pbkdf2 == 1 ]]; then kdf=(-pbkdf2 -iter "$PBKDF_ITERATIONS"); else kdf=(); fi
+    probe="probe-$RANDOM-$RANDOM"
+    probe_back=$(printf '%s' "$probe" \
+      | openssl "$cipher" "${kdf[@]}" -e -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null \
+      | openssl "$cipher" "${kdf[@]}" -d -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null)
+    if [[ $probe_back == "$probe" ]]; then
+      KEYRING_CIPHER="$cipher"
+      KEYRING_PBKDF2="$use_pbkdf2"
+      return 0
+    fi
+  done
+  return 1
+}
+
+keyring_kdf() { # fills KDF_ARGS according to the resolved cipher
+  if [[ $KEYRING_PBKDF2 == 1 ]]; then
+    KDF_ARGS=(-pbkdf2 -iter "$PBKDF_ITERATIONS")
+  else
+    KDF_ARGS=()
+  fi
+}
+
 encrypt_provider_key() {
   local provider="$1"
   local raw_key="$2"
   init_key_chest
-  echo -n "$raw_key" | openssl chacha20 -pbkdf2 -iter $PBKDF_ITERATIONS -e -pass "file:${MASTER_KEY_FILE}" -in - | base64 -w0 - > "${KEYS_DIR}/${provider}.key"
+  [[ -z $KEYRING_CIPHER ]] && probe_keyring_cipher
+  if [[ -z $KEYRING_CIPHER ]]; then
+    log_error "Key chest: no usable openssl cipher (chacha20 and aes-256-cbc round-trips failed)."
+    return 1
+  fi
+  keyring_kdf
+  echo -n "$raw_key" | \
+  openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -e -pass "file:${MASTER_KEY_FILE}" -in - | \
+  b64e > "${KEYS_DIR}/${provider}.key"
   chmod 600 "${KEYS_DIR}/${provider}.key"
 }
 
 decrypt_provider_key() {
   local provider="$1"
   if has_provider_key "$provider"; then
-    cat "${KEYS_DIR}/${provider}.key" | base64 -d - | openssl chacha20 -pbkdf2 -iter $PBKDF_ITERATIONS -d -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null
+    [[ -z $KEYRING_CIPHER ]] && probe_keyring_cipher
+    [[ -z $KEYRING_CIPHER ]] && return 1
+    keyring_kdf
+    b64d < "${KEYS_DIR}/${provider}.key" | \
+    openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -d -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null
   fi
 }
 
@@ -493,7 +845,7 @@ compute_device_tag() {
             || echo "unknown")
   hostname=$(hostname 2>/dev/null || echo "unknown")
   session_ts=$(date +%s)
-  echo -n "${machine_id}:${hostname}:aide:${session_ts}" | sha256sum | cut -c1-16
+  echo -n "${machine_id}:${hostname}:aide:${session_ts}" | _sha256sum | cut -c1-16
 }
 
 set_auth_tag() {
@@ -589,159 +941,9 @@ launch_ext_app() {
 }
 
 # -----------------------------------------------------------------------------
-# Other core functions
+# Pipeline Functions
 # -----------------------------------------------------------------------------
 
-# Image helpers
-get_image_type() {
-  local ext="${1##*.}"
-   case "$ext" in
-     jpg|jpeg) echo -n "image/jpeg" ;;
-     svg)      echo -n "image/svg+xml" ;;
-     *)        echo -n "image/${ext}" ;;
-   esac
-}
-
-is_image_file() {
-  local ext="${1##*.}"
-  [[ $ext =~ ^(png|jpg|jpeg|webp|gif|svg)$ ]] && return 0
-  return 1
-}
-
-# System helpers
-is_termux() {
-  [[ -n "${TERMUX_VERSION:-}" ]] && return 0
-  [[ -d "/data/data/com.termux" ]] && return 0
-  return 1
-}
-
-set_console_title() {
-  echo -ne "\033]0;$1\007" >&2
-}
-
-get_datetime() {
-  date '+%Y-%m-%d %H:%M:%S'
-}
-
-get_self_path() {
-  local FILE_PATH
-  [[ -n "${BASH_SOURCE[0]}" ]] && FILE_PATH="${BASH_SOURCE[0]}"
-  [[ -z $FILE_PATH ]] && FILE_PATH="$0"
-  if [[ -n "$FILE_PATH" ]]; then
-    echo -n "$FILE_PATH"
-  else
-    error "Could not retrieve self path."
-  fi
-}
-
-get_self_version() {
-  local FILE_PATH ; FILE_PATH="$(get_self_path)"
-  if [[ -n $(command -v awk 2>/dev/null) ]]; then
-    grep -m1 "# Version" "$FILE_PATH" | awk '{ print $3 }'
-  else
-    grep -m1 "# Version" "$FILE_PATH" | cut -d" " -f3
-  fi
-}
-
-create_local_data_store() {
-  mkdir -p "$DATA_STORE"
-  mkdir -p "$MEMORY_DIR"
-}
-
-create_local_model_cache() {
-  mkdir -p "$OLLAMA_CACHE"
-  mkdir -p "$LLAMACPP_CACHE"
-}
-
-load_config_file() {
-  # shellcheck source=/dev/null
-  [[ -r $SCRIPT_CONFIG ]] && source "$SCRIPT_CONFIG"
-}
-
-# Ensure proper parsing and reconstruction of valid API URLs without process forking (pure Bash)
-set_listen_interface() {
-  if [[ -n $LISTEN_ADDR_PORT ]]; then
-    if [[ $LISTEN_ADDR_PORT == *:* ]]; then
-      # Full format 'host:port'
-      LISTEN_HOST="${LISTEN_ADDR_PORT%%:*}"
-      LISTEN_PORT="${LISTEN_ADDR_PORT##*:}"
-    elif [[ $LISTEN_ADDR_PORT =~ ^[0-9]+$ ]]; then
-      # Port only (e.g., 8080) -> fallback host to localhost
-      LISTEN_HOST=""
-      LISTEN_PORT="$LISTEN_ADDR_PORT"
-    else
-      # Host only (e.g., 127.0.0.1 or localhost) -> fallback to default ports
-      LISTEN_HOST="$LISTEN_ADDR_PORT"
-      LISTEN_PORT=""
-    fi
-
-    # Smart reconstruction of client API URLs for curl
-    if [[ -n $LISTEN_HOST && -n $LISTEN_PORT ]]; then
-      LLAMACPP_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
-      OLLAMA_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
-    elif [[ -n $LISTEN_PORT ]]; then
-      # Specific port, fallback client host to localhost
-      LLAMACPP_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
-      OLLAMA_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
-    elif [[ -n $LISTEN_HOST ]]; then
-      # Specific host, apply backend default ports
-      LLAMACPP_API_SRV="http://${LISTEN_HOST}:8080"
-      OLLAMA_API_SRV="http://${LISTEN_HOST}:11434"
-    fi
-  fi
-}
-
-set_temp_files() {
-  if is_termux; then
-    TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
-    TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
-    TEMP_BASE64_OUTPUT="${TMPDIR}/image_output.b64"
-    TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
-    TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
-    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
-    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
-    TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
-  fi
-}
-
-set_cpu_cores() {
-  local cores
-  if [[ -n $(command -v nproc 2>/dev/null) ]]; then
-    cores=$(nproc)
-  elif [[ -n $(command -v sysctl 2>/dev/null) ]]; then
-    cores=$(sysctl -n hw.ncpu)
-  else
-    [[ -r /proc/cpuinfo ]] && cores=$(grep -c processor </proc/cpuinfo)
-  fi
-  if [[ -n $cores ]]; then
-    if is_termux; then
-      MAX_CORES=$(( cores > 2 ? cores / 2 : 1 ))    # Use half of available CPU cores to prevent burning mobile devices
-    else
-      MAX_CORES=$(( cores > 2 ? cores - 1 : 1 ))    # Leave at least one CPU core for the OS
-    fi
-  else
-    error "Unable to detect CPU cores."
-  fi
-}
-
-get_memory_size() {
-  local total_memory
-  local default_memory=8388608  # Default 8GB fallback
-  [[ -r /proc/meminfo ]] && total_memory=$(grep "MemTotal:" /proc/meminfo | awk '{ print $2 }')
-  [[ -z $total_memory || ! $total_memory =~ ^[0-9]+$ ]] && total_memory=$default_memory
-  echo -n "$total_memory"
-}
-
-# Set duration before unloading the model from memory
-set_keep_alive() {
-  if [[ $RUN_MODE == "chat" ]]; then
-    MAX_LIFETIME="10m"
-  else
-    MAX_LIFETIME="5s"
-  fi
-}
-
-# Pipeline helpers
 get_all_providers() {
   local providers ; providers=$(jq -rc '. | keys | @csv' "$PROVIDERS_CONFIG" 2>/dev/null)
   if [[ -n $providers ]]; then
@@ -782,16 +984,24 @@ get_vision_model() {
     ollama) vision_model="${OLLAMA_VISION}:${quant_upper}" ;;
     llamacpp) vision_model="${LLAMACPP_VISION}:${quant_upper}" ;;
     external)
-      case $PROVIDER in
-        groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
-        openrouter) vision_model="openrouter/auto" ;;   # Might be useless to do that when the active model already have native vision... I might reconsider this part in the future.
-        openrouter_free) vision_model="openrouter/free" ;;
-        vercel_free) vision_model="google/gemini-2.5-flash" ;;
-        huggingface) vision_model="moonshotai/Kimi-K3" ;;
-        zai_plan) vision_model="glm-4.6v" ;;
-        zai) vision_model="glm-5v-turbo" ;;
-        *) vision_model="$PROVIDER_API_MODEL" ;;
-      esac
+      # Old code based on static values
+      # case $PROVIDER in
+      #   deepseek) vision_model="deepseek-v4-flash-vision-exp" ;;
+      #   # groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
+      #   mammouth) vision_model="deepseek-v4-flash" ;;
+      #   openrouter) vision_model="openrouter/auto" ;;   # Might be useless to do that when the active model already have native vision... I might reconsider this part in the future.
+      #   openrouter_free) vision_model="openrouter/free" ;;
+      #   vercel_free) vision_model="google/gemini-2.5-flash" ;;
+      #   huggingface) vision_model="moonshotai/Kimi-K3" ;;
+      #   zai) vision_model="glm-5.3-flash" ;;
+      #   *) vision_model="$PROVIDER_API_MODEL" ;;
+      # esac
+
+      # New code based on config values
+      vision_model=$(jq -rc ".${PROVIDER}.vision.model // empty" "$PROVIDERS_CONFIG" 2>/dev/null)
+
+      # If no specific model found, use default model
+      [[ -z $vision_model ]] && vision_model="$PROVIDER_API_MODEL"
     ;;
   esac
   echo -n "$vision_model"
@@ -833,12 +1043,16 @@ set_state() {
   jq -rc -n \
      --arg backend "$BACKEND" \
      --arg provider "$PROVIDER" \
+     --arg memory "$MEMORY_STRUCTURE_TYPE" \
      --arg model "$CHAT_MODEL" \
+     --arg image "$IMAGE_PROVIDER" \
      --arg vision "$VISION_MODEL" \
      '{
        backend: $backend,
        provider: $provider,
+       memory: $memory,
        model: $model,
+       image: $image,
        vision: $vision
      }' > "$STATE_FILE" 2>/dev/null
 }
@@ -894,17 +1108,24 @@ set_api_provider() {
 
   [[ ! -r "$PROVIDERS_CONFIG" ]] && error "Unable to read providers config file: $PROVIDERS_CONFIG"
 
-  # Read both values in a single jq process call using tab-delimited parsing
-  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.default.model)\t\(.default.zdr)\t\(.default.vision)"' "$PROVIDERS_CONFIG" 2>/dev/null)
+  # Read all values in a single jq process call using tab-delimited parsing
+  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.default.memory)\t\(.default.model)\t\(.default.zdr)\t\(.default.vision)"' "$PROVIDERS_CONFIG" 2>/dev/null)
   [[ -z $provider_data ]] && error "Unsupported provider defined: $target_provider"
 
-  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_API_MODEL provider_zdr provider_vision <<< "$provider_data"
+  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_MEMORY_STRUCTURE PROVIDER_API_MODEL provider_zdr provider_vision <<< "$provider_data"
 
   [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $target_provider"
   [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $target_provider"
+  [[ -z $PROVIDER_MEMORY_STRUCTURE || $PROVIDER_MEMORY_STRUCTURE == "null" ]] && PROVIDER_MEMORY_STRUCTURE="$MEMORY_STRUCTURE_TYPE"
+
+  # Fallback on provider memory structure if it requires different one than the default one
+  [[ -n $MEMORY_STRUCTURE_TYPE && -n $PROVIDER_MEMORY_STRUCTURE && ! $MEMORY_STRUCTURE_TYPE == "index" ]] && MEMORY_STRUCTURE_TYPE=$PROVIDER_MEMORY_STRUCTURE
 
   # Set model vision capability based on the provider config
   VISION_ENABLED=$provider_vision
+
+  # Set image capability on the EFFECTIVE provider (IMAGE_PROVIDER override, else chat provider)
+  IMAGE_ENABLED=$(jq -r --arg p "${IMAGE_PROVIDER:-$target_provider}" '.[$p].default.image // false' "$PROVIDERS_CONFIG" 2>/dev/null)
 
   # Enforce ZDR if enabled in the provider config, while preserving command-line overrides
   [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
@@ -924,13 +1145,20 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 **Active provider:** ${PROVIDER:-"Local"}
 **Active fallback:** ${FALLBACK_PROVIDER:-"None"}
 **Active model:** ${CHAT_MODEL}
+**Active image provider:** ${IMAGE_PROVIDER:-"None"}
+**Active memory structure:** ${MEMORY_STRUCTURE_TYPE:-"Full"}
 **Platform:** $(is_termux && echo "Termux/Android" || echo "Desktop")
+**Kernel:** $(uname -srm)
 **Providers available:** $(jq -rc 'keys | length' "${CONFIG_DIR}/providers.json")
+
+## Your Origin
+**Creator:** https://github.com/jiab77
+**Source:** https://github.com/jiab77/ai-pipeline
 
 ## Your Core Files
 - \`${CORE_LIB##*/}\` — Cognitive engine (API calls, memory, providers, AUTH tag)
 - \`${SCRIPT_FILE}\` — Interface layer (slash commands, /provider, /launch, /fallback)
-- \`${IMG_HANDLER##*/}\` — Image rendering engine (TODO: Add missing description)
+- \`${IMG_HANDLER##*/}\` — Image rendering engine (create_image, config-driven sizing, EXIF cleanup, pollinations fallback)
 - \`${TOOLS_HANDLER##*/}\` — Tool execution layer (web_fetch, web_browse, edit_file, etc.)
 
 ## Your Identity
@@ -938,13 +1166,6 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 - The tag changes **per session** — includes UNIX timestamp in the hash
 - On Termux: uses \`settings get secure android_id\` (fallback chain)
 - On desktop: uses \`/etc/machine-id\` or \`/var/lib/dbus/machine-id\`
-
-## Key Functions
-| Function | File | Line | Purpose |
-|---|---|---|---|
-| \`compute_device_tag()\` | ${CORE_LIB##*/} | $(grep -n "^compute_device_tag" "$CORE_LIB" | cut -d: -f1) | Generates session-unique AUTH tag |
-| \`change_provider()\` | ${CORE_LIB##*/} | $(grep -n "^change_provider" "$CORE_LIB" | cut -d: -f1) | Switches active provider + model |
-| \`set_auth_tag()\` | ${CORE_LIB##*/} | $(grep -n "^set_auth_tag" "$CORE_LIB" | cut -d: -f1) | Sets AUTH_TAG for anti-XPIA |
 
 ## Your Providers
 **Total:** $(jq -rc 'keys | length' "${CONFIG_DIR}/providers.json")
@@ -974,6 +1195,131 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 EOF
 }
 
+# -----------------------------------------------------------------------------
+# History normalization — the persisted history is the SINGLE source of truth, so
+# it must stay PROTOCOL-NEUTRAL. chat/completions is the smallest common denominator
+# of every provider; each handler translates to its own wire protocol on the fly
+# (api_call_type_responses / build_tool_result / handle_response do exactly that).
+#
+# This is the safety net for history already poisoned ON DISK by a
+# protocol-aware build (incident 2026-09-11: openai items written to messages.json,
+# then /provider deepseek -> "messages[25]: missing field `role`"). It heals:
+#   {type:"function_call_output",...} -> {role:"tool", tool_call_id, name, content}
+#   {type:"function_call",...}        -> {role:"assistant", content:null, tool_calls:[...]}
+#   anthropic {role:"assistant", content:[{type:"tool_use",...}]}
+#                                     -> {role:"assistant", tool_calls:[...]}
+#   anthropic {role:"user", content:[{type:"tool_result",...}]}
+#                                     -> one {role:"tool",...} per result
+#   tool result with no matching tool_calls id -> dropped (every chat/completions
+#   provider rejects it: "must be a response to a preceding tool_calls")
+#   consecutive assistant tool_calls turns -> merged
+#   non-object / unknown items -> dropped
+# Idempotent: normalize_history(normalize_history(x)) == normalize_history(x)
+# Regression harness: data/jq-orphan-check.sh
+# -----------------------------------------------------------------------------
+normalize_history() {
+  jq -rc '
+    def as_text: [ .[]? | select(type == "object" and .type == "text") | .text ] | join("");
+    # argstr: tool arguments MUST be a stringified JSON object on the wire (Cohere:
+    # "tool arguments must be a stringified JSON object"). Idempotent by construction:
+    # a string is returned untouched, so re-running on a healed history is a no-op.
+    def argstr: if type == "string" then . else ((. // {}) | tostring) end;
+    def canon_items:
+      if type != "object" then []
+      elif (.role == "assistant") and ((.content | type) == "array")
+           and ([.content[]? | select(.type == "tool_use")] | length > 0) then
+        [{ role: "assistant",
+           content: ((.content | as_text) | if . == "" then null else . end),
+           tool_calls: [ .content[] | select(.type == "tool_use")
+                         | { id: (.id // ""), type: "function",
+                             function: { name: (.name // "tool"), arguments: ((.input // {}) | argstr) } } ] }]
+      elif (.role == "user") and ((.content | type) == "array")
+           and ([.content[]? | select(.type == "tool_result")] | length > 0) then
+        [ .content[] | select(.type == "tool_result")
+          | { role: "tool", tool_call_id: (.tool_use_id // ""), name: "tool",
+              content: (if (.content | type) == "string" then .content else (.content | tostring) end) } ]
+      elif has("role") then
+        # Chat/completions-shaped message: passes through as-is, EXCEPT tool_calls
+        # arguments, which are coerced to a JSON string. A poisoned messages.json
+        # therefore self-heals on load, and heal_history_file stays a no-op on
+        # healthy files (the transform is idempotent).
+        if (.role == "assistant") and ((.tool_calls | type) == "array") then
+          [ .tool_calls = [ .tool_calls[]
+              | .function.arguments = (if (.function.arguments | type) == "string"
+                                       then .function.arguments
+                                       else ((.function.arguments // {}) | tostring) end) ] ]
+        else [.] end
+      elif .type == "function_call_output" then
+        [{ role: "tool", tool_call_id: (.call_id // ""), name: (.name // "tool"), content: (.output // "") }]
+      elif .type == "function_call" then
+        [{ role: "assistant", content: null,
+           tool_calls: [{ id: (.call_id // ""), type: "function",
+                          function: { name: (.name // "tool"), arguments: (.arguments | argstr) } }] }]
+      else [] end;
+    if type == "array" then
+      reduce (.[] | canon_items[]) as $c (
+        [];
+        if ($c.role == "assistant")
+             and ((($c.tool_calls // []) | length) > 0)
+             and (length > 0)
+             and (.[-1].role == "assistant")
+             and (((.[-1].tool_calls // []) | length) > 0)
+        then .[:-1] + [.[-1] + {tool_calls: (.[-1].tool_calls + $c.tool_calls)}]
+        elif ($c.role == "tool")
+        then (if (([.[] | select(.role == "assistant") | (.tool_calls // [])[] | .id] | index($c.tool_call_id)) != null)
+              then . + [$c] else . end)
+        else . + [$c] end
+      )
+    else empty end' <<< "${1:-[]}" 2>/dev/null
+}
+
+# Heal the persisted history on disk (called on provider switch + before each turn).
+# Never touches a file that is not valid JSON, never rewrites when nothing changed.
+heal_history_file() {
+  local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
+  local current normalized
+  [[ -r $messages_path ]] || return 0
+  current=$(<"$messages_path")
+  [[ -z $current ]] && return 0
+  jq -e . >/dev/null 2>&1 <<< "$current" || { log_warn "Persisted history is not valid JSON — left untouched." ; return 0 ; }
+  normalized=$(normalize_history "$current")
+  [[ -z $normalized ]] && return 0
+  # Semantic comparison — a formatting difference must not trigger a rewrite.
+  # ⚠️ NEVER feed the documents through argv (--arg / --argjson): a SINGLE argument is
+  # capped at 128 KB on Linux (MAX_ARG_STRLEN) → E2BIG → jq fails → this test would
+  # ALWAYS conclude "different". Observed 2026-09-11 21:33 on a 550 KB history: the
+  # warning fired although the history was already canonical (false positive).
+  # One temp file, both documents inside, jq reads a FILE (no argv payload at all).
+  printf '[%s,%s]' "$current" "$normalized" > "${messages_path}.cmp"
+  if ! jq -e -c '.[0] == .[1]' "${messages_path}.cmp" >/dev/null 2>&1; then
+    log_warn "Protocol-tagged history detected on disk — normalizing it before the next turn."
+    printf '%s' "$normalized" > "${messages_path}.tmp" && mv -f "${messages_path}.tmp" "$messages_path"
+  fi
+  rm -f "${messages_path}.cmp"
+}
+
+# Persist the conversation history WITHOUT ever destroying a valid one.
+# Rationale (audit 2026-09-11): a failing jq command returns an EMPTY string — and the
+# former `echo "$doc" > file` wrote that emptiness straight to disk. Two reachable ways
+# to get there: `--arg` on a value > 128 KB (E2BIG, MAX_ARG_STRLEN) for the assistant
+# answer or for a pasted prompt. Result: the whole conversation silently wiped.
+# This helper refuses to replace a valid history with an empty/invalid document.
+persist_history() {
+  local doc="$1"
+  local target="$2"
+  local tmp="${target}.tmp"
+  if [[ -z $doc ]]; then
+    log_error "Refusing to persist an EMPTY history — ${target##*/} left untouched."
+    return 1
+  fi
+  if ! printf '%s' "$doc" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    log_error "Refusing to persist an invalid history (not a non-empty JSON array) — ${target##*/} left untouched."
+    return 1
+  fi
+  printf '%s' "$doc" > "$tmp" || { log_error "Unable to write ${tmp##*/} — ${target##*/} left untouched." ; return 1 ; }
+  mv -f "$tmp" "$target"
+}
+
 change_provider() {
   local active_provider="$1"
   PROVIDER="$active_provider"
@@ -988,6 +1334,7 @@ change_provider() {
   set_vision_model              # Update corresponding vision model for new provider
   set_system_prompt             # Update system prompt with new active model
   set_state                     # Update new state
+  heal_history_file             # Heal protocol-tagged history left on disk by a previous protocol
   generate_self_architecture    # Update new architecture / identity document
 }
 
@@ -995,30 +1342,100 @@ change_provider() {
 # Cognitive Freedom Memory Engine (Autonomy & Organic Organization)
 # -----------------------------------------------------------------------------
 
+get_memory_structure() {
+  echo -n "$MEMORY_STRUCTURE_TYPE"
+}
+
 bootstrap_memory() {
   mkdir -p "$MEMORY_DIR"
-  local prompt=""
-  local file
+
+  case $MEMORY_STRUCTURE_TYPE in
+    index)
+      local index="" file rel_path title size kb secs
+      while IFS= read -r file; do
+        [[ -r $file ]] || continue
+        rel_path="${file#"$DATA_STORE"/}"
+        size=$(wc -c < "$file" 2>/dev/null | tr -d ' ')
+        kb=$(( ${size:-0} / 1024 ))
+        title=$(grep -m1 -E '^#{1,6} ' "$file" 2>/dev/null | sed -E 's/^#+[[:space:]]*//')
+        [[ -z $title ]] && title=$(head -n 1 "$file" 2>/dev/null)
+        index+="- \`${rel_path}\` — ${title} (${kb} KB)\n"
+        if (( kb >= MEMORY_SECTION_KB )); then
+          secs=$(awk '/^## /{ if (n++ >= 20) exit; sub(/^#+[ \t]*/, ""); printf "%s%s", (s++ ? " · " : ""), $0 }' "$file" 2>/dev/null)
+          [[ -n $secs ]] && index+="    § ${secs}\n"
+        fi
+      done < <(find "$MEMORY_DIR" -type f 2>/dev/null | sort)
+      echo -ne "$index"
+    ;;
+    full|*)
+      local prompt=""
+      local file
+      while IFS= read -r file; do
+        if [[ -r "$file" ]]; then
+          local rel_path="${file#"$DATA_STORE/"}"
+          prompt+="\n--- File: ${rel_path} ---\n"
+          prompt+="$(<"$file")\n"
+        fi
+      done < <(find "$MEMORY_DIR" -type f 2>/dev/null)
+      echo -ne "$prompt"
+    ;;
+  esac
+}
+
+# -----------------------------------------------------------------------------
+# Generic resource index — same contract as bootstrap_memory(), for the folders
+# that used to be POINTER-ONLY (skills / framework / learn / docs).
+# Rationale: a bare "your files are in the X folder" hints nothing about WHAT is
+# inside, so the model never thinks to look.
+# -----------------------------------------------------------------------------
+
+index_dir() {
+  local dir="$1"
+  [[ -d $dir ]] || return 0
+  local file rel_path title size kb
   while IFS= read -r file; do
-    if [[ -r "$file" ]]; then
-      local rel_path="${file#"$DATA_STORE/"}"
-      prompt+="\n--- File: ${rel_path} ---\n"
-      prompt+="$(<"$file")\n"
-    fi
-  done < <(find "$MEMORY_DIR" -type f 2>/dev/null)
-  echo -ne "$prompt"
+    [[ -r $file ]] || continue
+    rel_path="${file#"$DATA_STORE"/}"
+    size=$(wc -c < "$file" 2>/dev/null | tr -d ' ')
+    kb=$(( ${size:-0} / 1024 ))
+    title=$(grep -m1 -E '^#{1,6} ' "$file" 2>/dev/null | sed -E 's/^#+[[:space:]]*//')
+    # Scripts have no markdown title: skip the shebang, and require a real word
+    # after '#' so that '#!/usr/bin/env bash', '#' and '# -----' don't become "titles".
+    [[ -z $title ]] && title=$(grep -m1 -E '^#[[:space:]]*[[:alnum:]]' "$file" 2>/dev/null | sed -E 's/^#+[[:space:]]*//')
+    [[ -z $title ]] && title=$(basename "$file")
+    # shellcheck disable=SC2016
+    printf -- '- `%s` — %s (%s KB)\n' "$rel_path" "${title:0:100}" "$kb"
+  done < <(find "$dir" -type f 2>/dev/null | sort)
 }
 
 get_system_prompt() {
   local base="$SYSTEM_PROMPT"
-  local memory_context
-  memory_context=$(bootstrap_memory 2>/dev/null)
-  if [[ -n $memory_context ]]; then
-    base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n${memory_context}"
-  else
-    base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n(Your memory folder 'data/memory/' is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
-  fi
-  echo -ne "$base"
+
+  case $MEMORY_STRUCTURE_TYPE in
+    index)
+      local memory_index
+      memory_index=$(bootstrap_memory 2>/dev/null)
+      if [[ -n $memory_index ]]; then
+        base+="\n\n### YOUR PERSISTENT MEMORY (\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"):\n"
+        base+="Your memory lives ON DISK. Its content is NOT loaded into this prompt — the index below is your map.\n"
+        base+="Load any file with \`read_file\`, or grep across all of them with \`grep_search\`, BEFORE answering anything about past decisions, the user, ongoing work, or anything you claim to remember. Never claim to remember something you have not read in this session.\n\n"
+        base+="${memory_index}"
+      else
+        base+="\n\n### YOUR PERSISTENT MEMORY (\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"):\n(Your memory folder is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
+      fi
+      echo -ne "$base"
+    ;;
+    full|*)
+      local memory_context
+      memory_context=$(bootstrap_memory 2>/dev/null)
+      if [[ -n $memory_context ]]; then
+        base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n${memory_context}"
+      else
+        base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n(Your memory folder 'data/memory/' is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
+      fi
+      echo -ne "$base"
+    ;;
+  esac
 }
 
 set_model_settings() {
@@ -1079,16 +1496,28 @@ set_system_prompt() {
   [[ -r $AI_RULES ]] && SYSTEM_PROMPT+="The critical rules you must follow are described here:\n\n$(<"$AI_RULES")"
 
   # Sets 'framework' folder if it exists
-  [[ -d "${DATA_STORE}/framework" ]] && SYSTEM_PROMPT+="Your behavioral framework files are located in your workspace under the \`framework\` folder. Load them before handling code related tasks.\n"
+  if [[ -d "${DATA_STORE}/framework" ]]; then
+    SYSTEM_PROMPT+="Your behavioral framework files are located in your workspace under the \`framework\` folder. Load them before handling code related tasks.\n"
+    SYSTEM_PROMPT+="Index of the \`framework\` folder:\n$(index_dir "${DATA_STORE}/framework")"$'\n'
+  fi
 
   # Sets 'skills' folder if it exists
-  [[ -d "${DATA_STORE}/skills" ]] && SYSTEM_PROMPT+="Your acquired skills are located in your workspace under the \`skills\` folder. Load them before handling code related tasks.\n"
+  if [[ -d "${DATA_STORE}/skills" ]]; then
+    SYSTEM_PROMPT+="Your acquired skills are located in your workspace under the \`skills\` folder. Load them before handling code related tasks.\n"
+    SYSTEM_PROMPT+="Index of the \`skills\` folder:\n$(index_dir "${DATA_STORE}/skills")"$'\n'
+  fi
 
   # Sets 'learn' folder if it exists
-  [[ -d "${DATA_STORE}/learn" ]] && SYSTEM_PROMPT+="Your learning resources are located in your workspace under the \`learn\` folder. Look at them when necessary or requested.\n"
+  if [[ -d "${DATA_STORE}/learn" ]]; then
+    SYSTEM_PROMPT+="Your read-only learning resources are located in your workspace under the \`learn\` folder. Look at them when necessary or requested.\n"
+    # SYSTEM_PROMPT+="Index of the \`learn\` folder:\n$(index_dir "${DATA_STORE}/learn")"$'\n'
+  fi
 
   # Sets 'docs' folder if it exists
-  [[ -d "${DATA_STORE}/docs" ]] && SYSTEM_PROMPT+="Your shared documents are located in your workspace under the \`docs\` folder. Look at them when necessary or requested.\n"
+  if [[ -d "${DATA_STORE}/docs" ]]; then
+    SYSTEM_PROMPT+="Your shared documents are located in your workspace under the \`docs\` folder. Look at them when necessary or requested.\n"
+    SYSTEM_PROMPT+="Index of the \`docs\` folder:\n$(index_dir "${DATA_STORE}/docs")"$'\n'
+  fi
 
   # Sets important rules
   [[ -n $CORE_LIB && -r $CORE_LIB ]] && CORE_FILE="${CORE_LIB##*/}"
@@ -1104,6 +1533,420 @@ set_system_prompt() {
 # API Transport Layer
 # -----------------------------------------------------------------------------
 
+api_call_type_completions() {
+  local payload="$1"
+  local url="$2"
+  local curl_opts=("-sSL")
+
+  # Add required arguments when TOR is enabled
+  [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
+
+  # Override URL when necessary
+  [[ -z $url ]] && url="$PROVIDER_API_URL"
+
+  # Provider selector
+  case $PROVIDER in
+    # Vercel / Vercel Free
+    vercel*)
+      # Apply ZDR policy when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for Vercel AI Gateway."
+        payload=$(jq -rc '.providerOptions.gateway.zeroDataRetention = true' <<< "$payload" 2>/dev/null)
+      fi
+
+      # Disallow prompt training by default
+      payload=$(jq -rc '.providerOptions.gateway.disallowPromptTraining = true' <<< "$payload" 2>/dev/null)
+
+      # Send custom payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -H "http-referer: ${ATTRIBUTION_REFERER}" \
+            -H "x-title: ${ATTRIBUTION_TITLE}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # Hugging Face
+    huggingface)
+      # Show ZDR policy warning when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported for Hugging Face." ; log
+      fi
+
+      # Disable reasoning for OpenAI (causes issues)
+      payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+      [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Hugging Face."
+
+      # Get current model
+      local current_model ; current_model=$(jq -rc .model <<< "$payload" 2>/dev/null)
+
+      # Apply fastest provider selector on the current model
+      payload=$(jq -rc '.model = "'"$current_model"':fastest"' <<< "$payload" 2>/dev/null)
+
+      # Send custom payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # Venice AI
+    venice)
+      # Show ZDR policy warning when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not applied, you need to go in your settings -> General -> 'Disable Telemetry Collection' -> On." ; log
+      fi
+
+      # Remove Venice AI System Prompt by default
+      payload=$(jq -rc '.venice_parameters.include_venice_system_prompt = false' <<< "$payload" 2>/dev/null)
+
+      # Force E2EE calls by default (not enabled yet -- need to be sure it won't block everything)
+      # payload=$(jq -rc '.venice_parameters.enable_e2ee = true' <<< "$payload" 2>/dev/null)
+
+      # Force parallel tool calls by default
+      payload=$(jq -rc '.parallel_tool_calls = true' <<< "$payload" 2>/dev/null)
+
+      # Send custom payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # CyberNeurova (same as generic but rate-limited)
+    cyberneurova)
+      # Add minor delay to avoid triggering the rate limiter
+      sleep 1
+
+      # Send generic payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # Groq
+    groq)
+      # Add minor delay to avoid triggering the rate limiter
+      sleep 1
+
+      # Warn that ZDR policy is not implemented yet for Groq
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented yet for Groq."
+      fi
+
+      # Disable reasoning for Groq (causes issues)
+      payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
+      [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
+
+      local response
+      local attempt=1
+      local max_attempts=5
+
+      while (( attempt <= max_attempts )); do
+        # Send custom payload and capture the output
+        response=$(curl "${curl_opts[@]}" "${url}" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+          -A "$USER_AGENT" \
+          -d @- <<< "$payload" 2>/dev/null
+        )
+
+        # Parse potential errors from the response
+        local error_code ; error_code=$(jq -r '.error.code' <<< "$response" 2>/dev/null)
+        local error_msg ; error_msg=$(jq -r '.error.message' <<< "$response" 2>/dev/null)
+
+        # Check if we triggered a rate limit (TPM/RPM/TPD exceeded)
+        if [[ $error_code == "rate_limit_exceeded" || $error_msg == *"Rate limit reached"* ]]; then
+          local wait_time="5" # Safe default fallback
+
+          # Extract days (d), hours (h), minutes (m), and seconds (s) from the wait message
+          if [[ $error_msg =~ try[[:space:]]again[[:space:]]in[[:space:]]([0-9hms.]*[0-9a-z]) ]]; then
+            local duration_str="${BASH_REMATCH[1]}"
+            local d=0 h=0 m=0 s=0
+
+            # Extract days if present
+            if [[ $duration_str =~ ([0-9]+)d ]]; then
+              d="${BASH_REMATCH[1]}"
+            fi
+
+            # Extract hours if present
+            if [[ $duration_str =~ ([0-9]+)h ]]; then
+              h="${BASH_REMATCH[1]}"
+            fi
+
+            # Extract minutes if present
+            if [[ $duration_str =~ ([0-9]+)m ]]; then
+              m="${BASH_REMATCH[1]}"
+            fi
+
+            # Extract seconds (integer part) if present
+            if [[ $duration_str =~ ([0-9]+)(.[0-9]+)?s ]]; then
+              s="${BASH_REMATCH[1]}"
+            fi
+
+            # Convert duration to total seconds and add 1s security padding
+            wait_time=$(( (d * 86400) + (h * 3600) + (m * 60) + s + 1 ))
+          fi
+
+          # Convert wait_time to a human-readable display string
+          local wait_display=""
+          if (( d > 0 )); then wait_display+="${d}d "; fi
+          if (( h > 0 || d > 0 )); then wait_display+="${h}h "; fi
+          if (( m > 0 || h > 0 || d > 0 )); then wait_display+="${m}m "; fi
+          wait_display+="$(( s + 1 ))s"
+
+          log_warn "${CLR_B_YELLOW}[RATE LIMIT]${ANSI_RESET} Groq quota reached (Attempt $attempt/$max_attempts). Sleeping for ${CLR_B_WHITE}${wait_display}${ANSI_RESET} (total: ${wait_time}s) before retrying..."
+          sleep "$wait_time"
+          ((attempt++))
+        else
+          # Success or non-rate-limit error, return output and exit loop
+          jq -rc . <<<"$response"
+          return 0
+        fi
+      done
+
+      # If all retries failed, return last response
+      jq -rc . <<<"$response"
+    ;;
+
+    # DeepSeek AI / Moonshot AI (Kimi) / Z.AI
+    deepseek|kimi|zai*)
+      # Warn that ZDR policy does not exist on DeepSeek
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported on this provider."
+      fi
+
+      # Get current reasoning value before removing it (for compatibility reason)
+      local reasoning ; reasoning=$(jq -rc .reasoning.enabled <<< "$payload" 2>/dev/null)
+      if [[ -n $reasoning && $reasoning == true ]]; then
+        payload=$(jq -rc '.thinking.type = "enabled"' <<< "$payload" 2>/dev/null)
+      fi
+
+      # Remove not supported 'reasoning' property before sending payload
+      payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+      [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for this provider."
+
+      # Send custom payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # OpenRouter
+    openrouter)
+      # Apply ZDR policy when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
+        payload=$(jq -rc '.provider.zdr = true' <<< "$payload" 2>/dev/null)
+      fi
+
+      # Force OpenRouter to route the request to the right provider / model for given parameters
+      payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
+
+      # Disallow prompt training by default
+      payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
+
+      # Send custom payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
+            -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
+            -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # OpenRouter Free
+    openrouter_free)
+      # Apply ZDR policy when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
+        payload=$(jq -rc '.provider.zdr = true' <<< "$payload" 2>/dev/null)
+      fi
+
+      # Force OpenRouter to route the request to the right provider / model for given parameters
+      payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
+
+      # Disallow prompt training by default (except for analyzing images in free mode)
+      # Required because there is no providers on OpenRouter that accepts to process image without keeping data for training purposes
+      # Let's see if that's an acceptable trade-off for the 'openrouter_free' provider...
+      if [[ $(grep -ci "image_url" <<< "$payload") -eq 0 ]]; then
+        payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
+      else
+        log_warn "🔒 ${CLR_B_CYAN}[DPT]${ANSI_RESET} Disallow Prompt Training policy disabled temporary during image processing." ; log
+      fi
+
+      # Send custom payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
+            -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
+            -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # Any other supported providers
+    *)
+      # Send generic payload
+      curl "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+  esac
+}
+
+api_call_type_responses() {
+  local payload="$1"
+  local url="$2"
+  local curl_opts=("-sSL")
+
+  # Add required arguments when TOR is enabled
+  [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
+
+  # Override URL when necessary (providers.json already points to /v1/responses for openai)
+  [[ -z $url ]] && url="$PROVIDER_API_URL"
+
+  # Reshape Chat Completions payload into Responses shape
+  # 1. messages -> input, converting content blocks to Responses types
+  #    (text -> input_text, image_url -> input_image)
+  payload=$(jq -rc '
+    def to_responses_content:
+      if type == "string" then .
+      else map(
+        if .type == "image_url" then { type: "input_image", image_url: .image_url.url }
+        elif .type == "text" then { type: "input_text", text: .text }
+        else . end
+      ) end;
+    def chat_to_responses_items:
+      del(.reasoning_content)
+      | if .role == "tool" then
+          [{ type: "function_call_output", call_id: .tool_call_id, output: (.content | tostring) }]
+        elif .role == "assistant" and ((.tool_calls // []) | length) > 0 then
+          ([ if (.content != null and .content != "") then { role: "assistant", content: (.content | to_responses_content) } else empty end ]
+           + [ .tool_calls[] | { type: "function_call", call_id: .id, name: .function.name, arguments: .function.arguments } ])
+        else
+          [ if has("content") then .content = (.content | to_responses_content) else . end ]
+        end;
+    { input: ([ .messages[]? | chat_to_responses_items ] | add // []) } + del(.messages)
+  ' <<< "$payload" 2>/dev/null)
+
+  # 2. tools: external tag -> internal tag
+  if [[ $(jq -rc '(.tools // [] | length)' <<< "$payload" 2>/dev/null) -gt 0 ]]; then
+    payload=$(jq -rc '.tools = [.tools[] | {type: "function", name: .function.name, description: .function.description, parameters: .function.parameters}]' <<< "$payload" 2>/dev/null)
+  else
+    payload=$(jq -rc 'del(.tools)' <<< "$payload" 2>/dev/null)
+  fi
+
+  # 3. reasoning.enabled -> reasoning.effort
+  local reasoning_enabled ; reasoning_enabled=$(jq -rc '.reasoning.enabled // false' <<< "$payload" 2>/dev/null)
+  if [[ $reasoning_enabled == true ]]; then
+    payload=$(jq -rc --arg effort "$REASONING_EFFORT" '.reasoning = {effort: $effort, summary: "auto"}' <<< "$payload" 2>/dev/null)
+  else
+    payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+  fi
+
+  # 4. ZDR / stateless replay
+  # ⚠️ DECISION (2026-09-11, incident "2 erreurs d'un coup") : the previous_response_id
+  # chaining is ABANDONED. The context sent in 'input' is self-sufficient from now on
+  # (the assistant turn is replayed as 'function_call' items by chat_to_responses_items,
+  # the tool results as 'function_call_output'), which:
+  #   (a) kills the orphan error "No tool call found for function call output with
+  #       call_id ..." — prev_response_id was reset at every turn while the history,
+  #       itself, survives on disk (repro: data/jq-orphan-check.sh);
+  #   (b) kills the duplicate-history risk (server state + disk state both injected);
+  #   (c) makes ZDR (store:false) a non-issue instead of a dead end.
+  if [[ $ZDR_ENFORCED == true ]]; then
+    [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention enforced for OpenAI Responses (store: false)."
+    payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
+  fi
+
+  # Send custom payload
+  curl "${curl_opts[@]}" "${url}" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+        -A "$USER_AGENT" \
+        -d @- <<< "$payload" | jq -rc .
+}
+
+api_call_type_messages() {
+  local payload="$1"
+  local url="$2"
+  local curl_opts=("-sSL")
+  local version
+
+  # Add required arguments when TOR is enabled
+  [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
+
+  # Override URL when necessary
+  [[ -z $url ]] && url="$PROVIDER_API_URL"
+
+  # Get defined version from config
+  version=$(jq -rc ".${PROVIDER}.version // empty" "$PROVIDERS_CONFIG" 2>/dev/null)
+
+  # Hardcode version if not found in config
+  [[ -z $version ]] && version="2023-06-01"
+
+  # Extract system prompt from system-role messages
+  local system_prompt ; system_prompt=$(jq -rc '[.messages[]? | select(.role=="system") | .content] | join("\n")' <<< "$payload" 2>/dev/null)
+
+  # Resolve max_tokens: read from config (provider-specific), fallback to global default
+  local max_tokens ; max_tokens=$(jq -rc ".${PROVIDER}.default.max_tokens // empty" "$PROVIDERS_CONFIG" 2>/dev/null)
+  [[ -z $max_tokens || $max_tokens == "null" ]] && max_tokens="$MAX_OUTPUT_TOKENS"
+
+  # Reshape payload (jq defs are local to this program)
+  # E2BIG (2026-09-12): the system prompt (memory index + skills + rules) travels by
+  # FILE + --rawfile — a heavy bootstrap can approach the 128 KB argv ceiling.
+  printf '%s' "$system_prompt" > "$TEMP_PAYLOAD_SYSTEM"
+  payload=$(jq -rc \
+    --rawfile system "$TEMP_PAYLOAD_SYSTEM" \
+    --argjson max_tokens "$max_tokens" \
+    'def to_anthropic_content:
+       if type == "string" then .
+       else map(
+         if .type == "image_url" then
+           ( .image_url.url as $u
+           | if ($u | startswith("data:")) then
+               { type: "image",
+                 source: { type: "base64",
+                           media_type: ($u | split(",")[0] | sub("data:"; "") | sub(";base64"; "")),
+                           data: ($u | split(",")[1]) } }
+             else
+               { type: "image", source: { type: "url", url: $u } }
+             end )
+         else . end
+       ) end;
+     {
+       model: .model,
+       max_tokens: $max_tokens
+     }
+     + (if ($system | length) > 0 then {system: $system} else {} end)
+     + { messages: [.messages[]? | select(.role != "system") | {role: .role, content: (.content | to_anthropic_content)}] }
+     + (if (.tools // [] | length) > 0 then
+          { tools: [.tools[] | {name: .function.name, description: .function.description, input_schema: .function.parameters}] }
+        else {} end)
+    ' <<< "$payload" 2>/dev/null)
+
+  # Send request with Anthropic-specific auth headers
+  curl "${curl_opts[@]}" "${url}" \
+        -H "Content-Type: application/json" \
+        -H "x-api-key: ${PROVIDER_API_KEY}" \
+        -H "anthropic-version: ${version}" \
+        -A "$USER_AGENT" \
+        -d @- <<< "$payload" | jq -rc .
+}
+
 api_call() {
   local payload="$1"
   local url="$2"
@@ -1117,11 +1960,21 @@ api_call() {
     # Define right model settings
     set_model_settings "$active_model"
 
-    # Apply model settings on-the-fly
-    payload=$(jq -rc ".temperature = $MODEL_TEMP" <<<"$payload" 2>/dev/null)
-    payload=$(jq -rc ".top_k = $MODEL_TOP_K" <<<"$payload" 2>/dev/null)
-    payload=$(jq -rc ".min_p = $MODEL_MIN_P" <<<"$payload" 2>/dev/null)
-    payload=$(jq -rc ".repetition_penalty = $MODEL_REP_PENALTY" <<<"$payload" 2>/dev/null)
+    # Apply model settings on-the-fly — ONE jq pass, and tolerant to undefined values.
+    # PREVIOUS BEHAVIOUR (bug, fixed 2026-09-11): the four assignments were chained
+    # separately, so an empty value produced an invalid jq program (`.min_p = `)
+    # whose error was swallowed by 2>/dev/null → stdout empty → **the whole payload
+    # was WIPED**. `MODEL_MIN_P` has no `.default` fallback, so it was empty for every
+    # local model except LiquidAI/LFM2.5-VL-1.6B-GGUF.
+    payload=$(jq -rc \
+      --argjson t "${MODEL_TEMP:-null}" \
+      --argjson k "${MODEL_TOP_K:-null}" \
+      --argjson p "${MODEL_MIN_P:-null}" \
+      --argjson r "${MODEL_REP_PENALTY:-null}" \
+      'if $t != null then .temperature        = $t else . end
+     | if $k != null then .top_k              = $k else . end
+     | if $p != null then .min_p              = $p else . end
+     | if $r != null then .repetition_penalty = $r else . end' <<<"$payload" 2>/dev/null)
   fi
 
   # Force non-streaming calls for all models / providers
@@ -1147,283 +2000,204 @@ api_call() {
 
     # External Backend: OpenRouter, Vercel, Mammouth AI
     external)
-      # Add required arguments when TOR is enabled
-      [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
-
-      # Override URL when necessary
-      [[ -z $url ]] && url="$PROVIDER_API_URL"
-
-      # Provider selector
-      case $PROVIDER in
-        # Vercel / Vercel Free
-        vercel*)
-          # Apply ZDR policy when enabled
-          if [[ $ZDR_ENFORCED == true ]]; then
-            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for Vercel AI Gateway."
-            payload=$(jq -rc '.providerOptions.gateway.zeroDataRetention = true' <<< "$payload" 2>/dev/null)
-          fi
-
-          # Disallow prompt training by default
-          payload=$(jq -rc '.providerOptions.gateway.disallowPromptTraining = true' <<< "$payload" 2>/dev/null)
-
-          # Send custom payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -H "http-referer: ${ATTRIBUTION_REFERER}" \
-               -H "x-title: ${ATTRIBUTION_TITLE}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-
-        # Hugging Face
-        huggingface)
-          # Show ZDR policy warning when enabled
-          if [[ $ZDR_ENFORCED == true ]]; then
-            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported for Hugging Face." ; log
-          fi
-
-          # Disable reasoning for OpenAI (causes issues)
-          payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
-          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Hugging Face."
-
-          # Get current model
-          local current_model ; current_model=$(jq -rc .model <<< "$payload" 2>/dev/null)
-
-          # Apply fastest provider selector on the current model
-          payload=$(jq -rc '.model = "'"$current_model"':fastest"' <<< "$payload" 2>/dev/null)
-
-          # Send custom payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-
-        # Venice AI
-        venice)
-          # Show ZDR policy warning when enabled
-          if [[ $ZDR_ENFORCED == true ]]; then
-            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not applied, you need to go in your settings -> General -> 'Disable Telemetry Collection' -> On." ; log
-          fi
-
-          # Remove Venice AI System Prompt by default
-          payload=$(jq -rc '.venice_parameters.include_venice_system_prompt = false' <<< "$payload" 2>/dev/null)
-
-          # Force E2EE calls by default (not enabled yet -- need to be sure it won't block everything)
-          # payload=$(jq -rc '.venice_parameters.enable_e2ee = true' <<< "$payload" 2>/dev/null)
-
-          # Force parallel tool calls by default
-          payload=$(jq -rc '.parallel_tool_calls = true' <<< "$payload" 2>/dev/null)
-
-          # Send custom payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-
-        # Groq
-        groq)
-          # Add minor delay to avoid triggering the rate limiter
-          sleep 1
-
-          # Warn that ZDR policy is not implemented yet for Groq
-          if [[ $ZDR_ENFORCED == true ]]; then
-            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented yet for Groq."
-          fi
-
-          # Disable reasoning for Groq (causes issues)
-          payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
-          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
-
-          local response
-          local attempt=1
-          local max_attempts=5
-
-          while (( attempt <= max_attempts )); do
-            # Send custom payload and capture the output
-            response=$(curl "${curl_opts[@]}" "${url}" \
-              -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-              -A "$USER_AGENT" \
-              -d @- <<< "$payload" 2>/dev/null
-            )
-
-            # Parse potential errors from the response
-            local error_code ; error_code=$(jq -r '.error.code' <<< "$response" 2>/dev/null)
-            local error_msg ; error_msg=$(jq -r '.error.message' <<< "$response" 2>/dev/null)
-
-            # Check if we triggered a rate limit (TPM/RPM/TPD exceeded)
-            if [[ $error_code == "rate_limit_exceeded" || $error_msg == *"Rate limit reached"* ]]; then
-              local wait_time="5" # Safe default fallback
-
-              # Extract days (d), hours (h), minutes (m), and seconds (s) from the wait message
-              if [[ $error_msg =~ try[[:space:]]again[[:space:]]in[[:space:]]([0-9hms.]*[0-9a-z]) ]]; then
-                local duration_str="${BASH_REMATCH[1]}"
-                local d=0 h=0 m=0 s=0
-
-                # Extract days if present
-                if [[ $duration_str =~ ([0-9]+)d ]]; then
-                  d="${BASH_REMATCH[1]}"
-                fi
-
-                # Extract hours if present
-                if [[ $duration_str =~ ([0-9]+)h ]]; then
-                  h="${BASH_REMATCH[1]}"
-                fi
-
-                # Extract minutes if present
-                if [[ $duration_str =~ ([0-9]+)m ]]; then
-                  m="${BASH_REMATCH[1]}"
-                fi
-
-                # Extract seconds (integer part) if present
-                if [[ $duration_str =~ ([0-9]+)(.[0-9]+)?s ]]; then
-                  s="${BASH_REMATCH[1]}"
-                fi
-
-                # Convert duration to total seconds and add 1s security padding
-                wait_time=$(( (d * 86400) + (h * 3600) + (m * 60) + s + 1 ))
-              fi
-
-              # Convert wait_time to a human-readable display string
-              local wait_display=""
-              if (( d > 0 )); then wait_display+="${d}d "; fi
-              if (( h > 0 || d > 0 )); then wait_display+="${h}h "; fi
-              if (( m > 0 || h > 0 || d > 0 )); then wait_display+="${m}m "; fi
-              wait_display+="$(( s + 1 ))s"
-
-              log_warn "${CLR_B_YELLOW}[RATE LIMIT]${ANSI_RESET} Groq quota reached (Attempt $attempt/$max_attempts). Sleeping for ${CLR_B_WHITE}${wait_display}${ANSI_RESET} (total: ${wait_time}s) before retrying..."
-              sleep "$wait_time"
-              ((attempt++))
-            else
-              # Success or non-rate-limit error, return output and exit loop
-              jq -rc . <<<"$response"
-              return 0
-            fi
-          done
-
-          # If all retries failed, return last response
-          jq -rc . <<<"$response"
-        ;;
-
-        # DeepSeek AI / Moonshot AI (Kimi) / Z.AI
-        deepseek|kimi|zai*)
-          # Warn that ZDR policy does not exist on DeepSeek
-          if [[ $ZDR_ENFORCED == true ]]; then
-            log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported on this provider."
-          fi
-
-          # Get current reasoning value before removing it (for compatibility reason)
-          local reasoning ; reasoning=$(jq -rc .reasoning.enabled <<< "$payload" 2>/dev/null)
-          if [[ -n $reasoning && $reasoning == true ]]; then
-            payload=$(jq -rc '.thinking.type = "enabled"' <<< "$payload" 2>/dev/null)
-          fi
-
-          # Remove not supported 'reasoning' property before sending payload
-          payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
-          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for this provider."
-
-          # Send custom payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-
-        # OpenAI
-        openai)
-          # Apply ZDR policy when enabled
-          if [[ $ZDR_ENFORCED == true ]]; then
-            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenAI."
-            payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
-          fi
-
-          # Disable reasoning for OpenAI (causes issues)
-          payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
-          [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for OpenAI."
-
-          # Send custom payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-
-        # OpenRouter
-        openrouter)
-          # Apply ZDR policy when enabled
-          if [[ $ZDR_ENFORCED == true ]]; then
-            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
-            payload=$(jq -rc '.provider.zdr = true' <<< "$payload" 2>/dev/null)
-          fi
-
-          # Force OpenRouter to route the request to the right provider / model for given parameters
-          payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
-
-          # Disallow prompt training by default
-          payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
-
-          # Send custom payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
-               -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
-               -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-
-        # OpenRouter Free
-        openrouter_free)
-          # Apply ZDR policy when enabled
-          if [[ $ZDR_ENFORCED == true ]]; then
-            [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention payload injection enforced for OpenRouter."
-            payload=$(jq -rc '.provider.zdr = true' <<< "$payload" 2>/dev/null)
-          fi
-
-          # Force OpenRouter to route the request to the right provider / model for given parameters
-          payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
-
-          # Disallow prompt training by default (except for analyzing images in free mode)
-          # Required because there is no providers on OpenRouter that accepts to process image without keeping data for training purposes
-          # Let's see if that's an acceptable trade-off for the 'openrouter_free' provider...
-          if [[ $(grep -ci "image_url" <<< "$payload") -eq 0 ]]; then
-            payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
-          else
-            log_warn "🔒 ${CLR_B_CYAN}[DPT]${ANSI_RESET} Disallow Prompt Training policy disabled temporary during image processing." ; log
-          fi
-
-          # Send custom payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
-               -H "X-OpenRouter-Title: ${ATTRIBUTION_TITLE}" \
-               -H "X-OpenRouter-Categories: ${ATTRIBUTION_CATEGORIES}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-
-        # Any other supported providers
-        *)
-          # Send generic payload
-          curl "${curl_opts[@]}" "${url}" \
-               -H "Content-Type: application/json" \
-               -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
-               -A "$USER_AGENT" \
-               -d @- <<< "$payload" | jq -rc .
-        ;;
-      esac
+        # Call handler selector
+        case $PROVIDER in
+          openai) api_call_type_responses "$payload" "$url" ;;
+          anthropic) api_call_type_messages "$payload" "$url" ;;
+          *) api_call_type_completions "$payload" "$url" ;;
+        esac
     ;;
     *) error "Unsupported backend given: $BACKEND" ;;
   esac
+}
+
+handle_errors() {
+  local raw_res="$1"
+
+  if jq -e '.error' <<<"$raw_res" &>/dev/null; then
+    err_msg=$(jq -rc '.error // .error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
+    err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
+    err_code=$(jq -rc '.error.code // .error.param.statusCode' <<<"$raw_res" 2>/dev/null)
+    if [[ -n $err_meta && ! $err_meta == "null" ]]; then
+      err_string_meta="\n\nDetails:\n\n$(jq -rc '.raw // "N/A"' <<<"$err_meta" 2>/dev/null)"
+    fi
+    if [[ -n $err_code && ! $err_code == "null" ]]; then
+      err_string_code=" (Code: ${err_code})"
+    fi
+    log_error "Unexpected API error${err_string_code}.\n\n${err_msg}${err_string_meta}\n"
+    ((loop_errors++))
+    return $loop_errors
+  fi
+}
+
+handle_response() {
+  local raw_res="$1"
+
+  # Reset per-iteration globals (avoid residue across provider changes mid-session)
+  refusal=""
+  assistant_msg=""
+  history_assistant_msg=""    # canonical (chat/completions) form persisted to disk
+
+  case $PROVIDER in
+    # /v1/responses — the assistant turn is REPLAYED as items by the reshape
+    # (chat_to_responses_items: assistant + tool_calls -> 'function_call' items), so it is
+    # persisted in canonical form as well. NO server-side chaining (see api_call_type_responses).
+    openai)
+      reasoning=$(jq -rc '[.output[] | select(.type=="reasoning") | .summary[]?.text] | join("")' <<<"$raw_res" 2>/dev/null)
+      content=$(jq -rc '[.output[] | select(.type=="message") | .content[]? | select(.type=="output_text") | .text] | join("")' <<<"$raw_res" 2>/dev/null)
+      tools=$(jq -rc '([.output[]? | select(.type=="function_call")] | if length > 0 then map({id: .call_id, name: .name, args: .arguments}) else empty end)' <<<"$raw_res" 2>/dev/null)
+      # Canonical assistant turn (chat/completions shape), kept so that the tool cycle
+      # stays PAIRABLE turn after turn, whatever the active provider is. Without this,
+      # only the 'function_call_output' was persisted -> orphan on the next turn.
+      assistant_msg=$(jq -rc '
+        ([.output[]? | select(.type=="function_call")]) as $fc
+        | if ($fc | length) > 0 then
+            { role: "assistant",
+              content: ([.output[]? | select(.type=="message") | .content[]? | select(.type=="output_text") | .text]
+                        | join("") | if . == "" then null else . end),
+              tool_calls: [ $fc[] | { id: .call_id, type: "function",
+                                      function: { name: .name, arguments: (if (.arguments | type) == "string" then .arguments else ((.arguments // {}) | tostring) end) } } ] }
+          else empty end' <<<"$raw_res" 2>/dev/null)
+    ;;
+
+    # /v1/messages — re-inject the full assistant turn (text + tool_use blocks) before tool results
+    anthropic)
+      # WIRE shape: the full assistant turn (text + tool_use blocks) must be replayed as-is
+      assistant_msg=$(jq -rc '{role:"assistant", content: .content}' <<<"$raw_res" 2>/dev/null)
+      # CANONICAL shape (chat/completions) for the persisted history — same rationale as
+      # openai: protocol-specific blocks (tool_use) must never reach messages.json.
+      history_assistant_msg=$(jq -rc '
+        ([.content[]? | select(.type=="tool_use")]) as $tu
+        | if ($tu | length) > 0 then
+            { role: "assistant",
+              content: ([.content[]? | select(.type=="text") | .text] | join("") | if . == "" then null else . end),
+              tool_calls: [ $tu[] | { id: .id, type: "function",
+                                      function: { name: .name, arguments: (if (.input | type) == "string" then .input else ((.input // {}) | tostring) end) } } ] }
+          else empty end' <<<"$raw_res" 2>/dev/null)
+      reasoning=$(jq -rc '.content[] | select(.type=="thinking") | .thinking' <<<"$raw_res" 2>/dev/null)
+      content=$(jq -rc '[.content[] | select(.type=="text") | .text] | join("")' <<<"$raw_res" 2>/dev/null)
+      tools=$(jq -rc '([.content[]? | select(.type=="tool_use")] | if length > 0 then map({id: .id, name: .name, args: (.input | tostring)}) else empty end)' <<<"$raw_res" 2>/dev/null)
+    ;;
+
+    # /v1/chat/completions — default for other providers
+    *)
+      # 2026-09-12 — "cadeau empoisonné" (openrouter_free -> Cohere 400): a loose provider may
+      # return tool_calls[].function.arguments as a JSON OBJECT instead of a stringified JSON
+      # object. This message is replayed VERBATIM on the wire (L2302) and persisted to disk
+      # (L2304), so ONE lax provider poisons the entire fallback cascade:
+      #   "invalid tool call provided in messages[N].tool_calls[0]"
+      # Coerce here; strings are left untouched (no double-encoding).
+      assistant_msg=$(jq -rc '
+        .choices[0].message
+        | if (.tool_calls | type) == "array" then
+            .tool_calls |= [ .[] | .function.arguments =
+              (if (.function.arguments | type) == "string" then .function.arguments
+               else ((.function.arguments // {}) | tostring) end) ]
+          else . end' <<<"$raw_res" 2>/dev/null)
+      reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
+      content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
+      refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
+      tools=$(jq -rc '([.choices[0].message.tool_calls[]?] | if length > 0 then map({id: .id, name: .function.name, args: .function.arguments}) else empty end)' <<<"$raw_res" 2>/dev/null)
+    ;;
+  esac
+}
+
+build_tool_result() {
+  local id="$1"
+  local name="$2"
+  local content_file="$3"
+  # Build the tool result message in TWO shapes, each written to a temp file and read
+  # back with --rawfile. The tool output can be huge; --arg would blow past the OS
+  # argv limit. Nothing here uses --arg for content anymore (2026-09-12: the degraded
+  # fallback path was the last one and now sanitises into a FILE instead).
+  #
+  #   $TEMP_TOOLS_OUTPUT  -> WIRE shape, protocol-specific (what the API expects)
+  #   $TEMP_TOOLS_HISTORY -> CANONICAL shape, chat/completions (what lands on disk)
+  #
+  case $PROVIDER in
+    # /v1/responses
+    openai)
+      jq -rc -n \
+         --arg id "$id" \
+         --rawfile content "$content_file" \
+         '{type:"function_call_output", call_id: $id, output: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null
+    ;;
+    # /v1/messages — tool_result lives INSIDE a user message content array
+    anthropic)
+      jq -rc -n \
+         --arg id "$id" \
+         --rawfile content "$content_file" \
+         '{role:"user", content:[{type:"tool_result", tool_use_id: $id, content: $content}]}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null
+    ;;
+    # /v1/chat/completions
+    *)
+      jq -rc -n \
+         --arg id "$id" \
+         --arg name "$name" \
+         --rawfile content "$content_file" \
+         '{role:"tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null
+    ;;
+  esac
+
+  # Fallback: the primary --rawfile pass produced nothing (unreadable/invalid content
+  # file). E2BIG (2026-09-12): this rescue path used --arg, capped at 128 KB — so it was
+  # itself broken for EXACTLY the case it exists for (a huge tool output = the bigger the
+  # output, the more certain the rescue, the more certain it died EMPTY). The content now
+  # goes through a sanitised FILE + --rawfile: no --arg carries content anymore, anywhere.
+  if [[ ! -s $TEMP_TOOLS_OUTPUT ]]; then
+    log_warn "Unable to parse tool output with rawfile, retrying after sanitisation"
+    local safe_content="${TOOLS_OUTPUT}.safe"
+    iconv -f UTF-8 -t UTF-8 -c "$content_file" > "$safe_content" 2>/dev/null || cp "$content_file" "$safe_content" 2>/dev/null
+    [[ -s $safe_content ]] || printf '%s' "(Error reading tool output)" > "$safe_content"
+    case $PROVIDER in
+      # /v1/responses
+      openai)
+        jq -rc -n \
+           --arg id "$id" \
+           --rawfile content "$safe_content" \
+           '{type:"function_call_output", call_id: $id, output: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null
+      ;;
+      # /v1/messages
+      anthropic)
+        jq -rc -n \
+           --arg id "$id" \
+           --rawfile content "$safe_content" \
+           '{role:"user", content:[{type:"tool_result", tool_use_id: $id, content: $content}]}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null
+      ;;
+      # /v1/chat/completions
+      *)
+        jq -rc -n \
+           --arg id "$id" \
+           --arg name "$name" \
+           --rawfile content "$safe_content" \
+           '{role:"tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null
+      ;;
+    esac
+    rm -f "$safe_content"
+  fi
+
+  # Canonical history shape — protocol-neutral, this is what gets persisted in
+  # messages.json and replayed to every provider. Kept separate from the wire shape so
+  # that a provider switch can never inject protocol-tagged items into the history
+  # (2026-09-11 incident: "messages[25]: missing field `role`" on deepseek).
+  jq -rc -n \
+     --arg id "$id" \
+     --arg name "$name" \
+     --rawfile content "$content_file" \
+     '{role:"tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_HISTORY" 2>/dev/null
+
+  if [[ ! -s $TEMP_TOOLS_HISTORY ]]; then
+    # E2BIG (2026-09-12): same rescue, same rule — sanitise to a FILE, keep --rawfile.
+    local safe_history="${TOOLS_OUTPUT}.safe"
+    iconv -f UTF-8 -t UTF-8 -c "$content_file" > "$safe_history" 2>/dev/null || cp "$content_file" "$safe_history" 2>/dev/null
+    [[ -s $safe_history ]] || printf '%s' "(Error reading tool output)" > "$safe_history"
+    jq -rc -n \
+       --arg id "$id" \
+       --arg name "$name" \
+       --rawfile content "$safe_history" \
+       '{role:"tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_HISTORY" 2>/dev/null
+    rm -f "$safe_history"
+  fi
 }
 
 get_credit_balance() {
@@ -1469,6 +2243,41 @@ get_credit_balance() {
   fi
 }
 
+get_provider_models() {
+  local curl_opts=("-sSL")
+  local url
+
+  # Add required arguments when TOR is enabled
+  [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
+
+  # Get provider models URL
+  if [[ $BACKEND == "external" ]]; then
+    url=$(jq -rc ".${PROVIDER}.models" "$PROVIDERS_CONFIG" 2>/dev/null)
+  fi
+
+  # Provider models
+  if [[ $BACKEND == "external" && -n $url ]]; then
+    curl "${curl_opts[@]}" "$url" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+          -A "$USER_AGENT" | jq -rc . 2>/dev/null
+  fi
+}
+
+list_provider_models() {
+  local models ; models=$(get_provider_models)
+  local total_models
+
+  if [[ -n $models ]]; then
+    total_models=$(jq -rc '(.data // .models // .) | length' <<<"$models")
+    log_brain "Gathered provider models:" ; log
+    jq . <<<"$models"
+    log ; log_info "Total models: $total_models" ; log
+  else
+    log_warn "Unable to retrieve provider models."
+  fi
+}
+
 # -----------------------------------------------------------------------------
 # Unified Core Inference Engine (Master Loop)
 # -----------------------------------------------------------------------------
@@ -1493,12 +2302,14 @@ run_inference_loop() {
   local exit_keyword="${7:-}"
   local history_messages="${8:-[]}"
   local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
-  local final_content=""
-  local loop_errors=0
-  local raw_res resolved_model reasoning content refusal tools usage balance assistant_msg
+  local final_content tools_payload
+  local raw_res balance usage resolved_model
+
+  # Non-local vars
+  # reasoning content refusal tools assistant_msg
+  loop_errors=0
 
   # Build the dynamic tools payload based on the tools_option constraint
-  local tools_payload=""
   if [[ "$tools_option" == "all" ]]; then
     tools_payload=$(<"$BASE_TOOLS")
   elif [[ "$tools_option" == "readonly" ]]; then
@@ -1539,31 +2350,30 @@ run_inference_loop() {
         }'
       )
     fi
-    raw_res=$(api_call "$payload")
-    [[ -z $raw_res || $raw_res == "null" ]] && log_error "API returned an empty response."
 
-    if jq -e '.error' <<<"$raw_res" &>/dev/null; then
-      local err_msg ; err_msg=$(jq -rc '.error // .error.message // .error.message.message' <<<"$raw_res" 2>/dev/null)
-      local err_meta; err_meta=$(jq -rc '.error.metadata // empty' <<<"$raw_res" 2>/dev/null)
-      local err_code; err_code=$(jq -rc '.error.code // .error.param.statusCode' <<<"$raw_res" 2>/dev/null)
-      if [[ -n $err_meta && ! $err_meta == "null" ]]; then
-        local err_string_meta ; err_string_meta="\n\nDetails:\n\n$(jq -rc '.raw // "N/A"' <<<"$err_meta" 2>/dev/null)"
-      fi
-      if [[ -n $err_code && ! $err_code == "null" ]]; then
-        local err_string_code ; err_string_code=" (Code: ${err_code})"
-      fi
-      log_error "Unexpected API error${err_string_code}.\n\n${err_msg}${err_string_meta}\n"
-      loop_errors=1
+    # Handle received response
+    raw_res=$(api_call "$payload")
+
+    # Handle empty responses
+    if [[ -z $raw_res || $raw_res == "null" ]]; then
+      log_error "API returned an empty response."
+      ((loop_errors++))
       return $loop_errors
     fi
 
+    # Handle received errors
+    handle_errors "$raw_res" || return $loop_errors
+
     # Retrieve components
+    handle_response "$raw_res"
+
+    # Retrieve used model
     resolved_model=$(jq -rc '.model' <<<"$raw_res" 2>/dev/null)
-    reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
-    content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
-    refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)
-    tools=$(jq -rc '.choices[0].message.tool_calls' <<<"$raw_res" 2>/dev/null)
+
+    # Retrieve request usage
     usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
+
+    # Retrieve account balance
     balance=$(get_credit_balance)
 
     # Avoid leaking the 'AUTH_TAG' on display side
@@ -1607,11 +2417,22 @@ run_inference_loop() {
         break
       fi
 
-      # 1. Grab assistant command message and push to local history
-      assistant_msg=$(jq -rc '.choices[0].message' <<<"$raw_res" 2>/dev/null)
-      printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
-      payload_messages=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$payload_messages" 2>/dev/null)
-      history_messages=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$history_messages" 2>/dev/null)
+      # 1. Grab the assistant turn. WIRE payload and PERSISTED history receive different
+      #    shapes ON PURPOSE: wire = protocol-specific (openai / anthropic), history =
+      #    canonical chat/completions ($history_assistant_msg when defined, else
+      #    $assistant_msg). This is what keeps messages.json readable by EVERY provider
+      #    after a /provider switch.
+      if [[ -n $assistant_msg || -n $history_assistant_msg ]]; then
+        if [[ -n $assistant_msg ]]; then
+          printf "%s" "$assistant_msg" > "$TEMP_PAYLOAD_ASSISTANT"
+          payload_messages=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [($ast | fromjson)]' <<<"$payload_messages" 2>/dev/null)
+        fi
+        local hist_ast="${history_assistant_msg:-$assistant_msg}"
+        if [[ -n $hist_ast ]]; then
+          printf "%s" "$hist_ast" > "$TEMP_PAYLOAD_ASSISTANT_HISTORY"
+          history_messages=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT_HISTORY" '. + [($ast | fromjson)]' <<<"$history_messages" 2>/dev/null)
+        fi
+      fi
 
       # 2. Extract and iterate over all requested parallel tools
       local tool_count=0
@@ -1621,8 +2442,13 @@ run_inference_loop() {
         show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
 
         # 3. Check and execute tool handler
+        # E2BIG (2026-09-12): the tool ARGUMENT JSON travels by STDIN, never by argv.
+        # A single argv/env string is capped at 128 KB (MAX_ARG_STRLEN): above that,
+        # execve() fails, the handler is NEVER launched and the tool silently returns
+        # nothing (this is why write_file could not write a > 128 KB file, even with the
+        # edit_file fix). stdin has no such ceiling.
         if [[ -x $TOOLS_HANDLER ]]; then
-          "$TOOLS_HANDLER" "$tool_name" "$tool_args" > "$TOOLS_OUTPUT" 2> >(tee -a "$TOOLS_OUTPUT" >&2)
+          printf '%s' "$tool_args" | "$TOOLS_HANDLER" "$tool_name" > "$TOOLS_OUTPUT" 2> >(tee -a "$TOOLS_OUTPUT" >&2)
         else
           echo "Error: Tool handler file '$TOOLS_HANDLER' is not executable or missing." > "$TOOLS_OUTPUT"
           log_warn "Tool handler not executable."
@@ -1641,34 +2467,23 @@ run_inference_loop() {
               detected_images+=("$img_p")
             fi
           # done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".webp") or endswith(".svg") or endswith(".gif") or endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' <(tail -n+5 "$TOOLS_OUTPUT") 2>/dev/null)
-          done < <(grep -oE '[^[:space:]"]+\.(png|jpg|jpeg|webp|svg|gif)\b' "$TOOLS_OUTPUT" | sort -u)
+          # done < <(grep -oE '[^[:space:]"]+\.(png|jpg|jpeg|webp|svg|gif)\b' "$TOOLS_OUTPUT" | sort -u)
+          done < <(grep -oE "[^[:space:]\"']+\.(png|jpg|jpeg|webp|svg|gif)\b" "$TOOLS_OUTPUT" | sort -u)
         fi
 
-        if jq -rc -n --arg id "$tool_id" --arg name "$tool_name" --rawfile content "$TOOLS_OUTPUT" '{role: "tool", tool_call_id: $id, name: $name, content: $content}' > "$TEMP_TOOLS_OUTPUT" 2>/dev/null; then
-          rm -f "$TOOLS_OUTPUT"
-
-          # 6. Append tool output to messages array safely
-          payload_messages=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$payload_messages" 2>/dev/null)
-          history_messages=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$history_messages" 2>/dev/null)
-          rm -f "$TEMP_TOOLS_OUTPUT"
-        else
-          log_warn "Unable to parse tool output with rawfile, using fallback formatting"
-          local fallback_content ; fallback_content=$(cat "$TOOLS_OUTPUT" 2>/dev/null || echo "(Error reading tool output)")
-          payload_messages=$(jq -rc \
-            --arg id "$tool_id" \
-            --arg name "$tool_name" \
-            --arg content "$fallback_content" \
-            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$payload_messages"
-          )
-          history_messages=$(jq -rc \
-            --arg id "$tool_id" \
-            --arg name "$tool_name" \
-            --arg content "$fallback_content" \
-            '. + [{role: "tool", tool_call_id: $id, name: $name, content: $content}]' <<<"$history_messages"
-          )
-          rm -f "$TOOLS_OUTPUT"
-        fi
-      done < <(jq -j '.[] | .id, "\u0000", .function.name, "\u0000", .function.arguments, "\u0000"' <<<"$tools" 2>/dev/null)
+        # 6. Build the tool result message: TWO shapes, TWO destinations.
+        #    - $TEMP_TOOLS_OUTPUT  = WIRE shape (protocol-specific) -> payload_messages
+        #    - $TEMP_TOOLS_HISTORY = CANONICAL shape (chat/completions) -> history_messages
+        #    The persisted history must stay protocol-neutral, otherwise the poison
+        #    survives on disk and breaks the next provider (2026-09-11: deepseek
+        #    "messages[25]: missing field `role`"). Both are written via --rawfile
+        #    (never --arg: payloads can be huge).
+        build_tool_result "$tool_id" "$tool_name" "$TOOLS_OUTPUT"
+        rm -f "$TOOLS_OUTPUT"
+        payload_messages=$(jq -rc --rawfile tool "$TEMP_TOOLS_OUTPUT" '. + [$tool | fromjson]' <<<"$payload_messages" 2>/dev/null)
+        history_messages=$(jq -rc --rawfile tool "$TEMP_TOOLS_HISTORY" '. + [$tool | fromjson]' <<<"$history_messages" 2>/dev/null)
+        rm -f "$TEMP_TOOLS_OUTPUT" "$TEMP_TOOLS_HISTORY"
+      done < <(jq -j '.[] | .id, "\u0000", .name, "\u0000", .args, "\u0000"' <<<"$tools" 2>/dev/null)
 
       # Inject visual feedback if any images were generated
       # '$save_to_history' as been added to gate to avoid triggering the fallback sequence
@@ -1688,7 +2503,7 @@ run_inference_loop() {
           local mime_type ; mime_type=$(get_image_type "$img_path")
           local filename ; filename="${img_path##*/}"
           (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
-          log ; log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
+          log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
 
           # Inject encoded image directly into the active in-memory messages list
           payload_messages=$(jq -rc \
@@ -1726,19 +2541,55 @@ run_inference_loop() {
         fi
 
         if [[ $save_to_history == "true" ]]; then
-          history_messages=$(jq -rc --arg ast "$final_content" '. + [{role: "assistant", content: $ast}]' <<<"$history_messages" 2>/dev/null)
-          echo "$history_messages" > "${messages_path}.tmp"
-          mv -f "${messages_path}.tmp" "$messages_path"
+          # E2BIG (2026-09-12): the assistant turn goes through a FILE + --rawfile — a
+          # > 128 KB response used to make jq die and leave history_messages EMPTY
+          # (persist_history then refuses the write: no data loss, but the turn is lost).
+          printf '%s' "$final_content" > "$TEMP_PAYLOAD_ASSISTANT"
+          history_messages=$(jq -rc --rawfile ast "$TEMP_PAYLOAD_ASSISTANT" '. + [{role: "assistant", content: $ast}]' <<<"$history_messages" 2>/dev/null)
+          persist_history "$history_messages" "$messages_path"
         fi
       fi
       # Print usage metrics to STDERR to avoid polluting stdout
       if [[ -n $usage && ! $usage == "null" ]]; then
-        local prompt_tok ; prompt_tok=$(jq -rc .prompt_tokens <<<"$usage" 2>/dev/null)
-        local cached_tok ; cached_tok=$(jq -rc '.prompt_tokens_details.cached_tokens // 0' <<<"$usage" 2>/dev/null)
-        local comp_tok ; comp_tok=$(jq -rc .completion_tokens <<<"$usage" 2>/dev/null)
-        local reasoning_tok ; reasoning_tok=$(jq -rc '.completion_tokens_details.reasoning_tokens // 0' <<<"$usage" 2>/dev/null)
-        local total_tok ; total_tok=$(jq -rc .total_tokens <<<"$usage" 2>/dev/null)
-        local cost ; cost=$(jq -rc '.cost.usd // .cost' <<<"$usage" 2>/dev/null)
+        # Usage payload shape differs per API — normalized in one jq pass (see provider docs):
+        #   chat/completions -> prompt_tokens / completion_tokens + *_tokens_details
+        #   /v1/responses    -> input_tokens / output_tokens + *_tokens_details + total_tokens
+        #   /v1/messages     -> input_tokens / output_tokens + cache_*_input_tokens (NO total_tokens)
+        # NOTE: NUL-delimited split on purpose — @tsv silently shifts every
+        #       field by one as soon as an empty value sits in the middle (IFS collapses tabs).
+        local prompt_tok cached_tok comp_tok reasoning_tok total_tok cost
+        {
+          IFS= read -r -d '' prompt_tok
+          IFS= read -r -d '' cached_tok
+          IFS= read -r -d '' comp_tok
+          IFS= read -r -d '' reasoning_tok
+          IFS= read -r -d '' total_tok
+          IFS= read -r -d '' cost
+        } < <(jq -j '
+          def norm:
+            if has("prompt_tokens") then
+              [ .prompt_tokens,
+                (.prompt_tokens_details.cached_tokens // 0),
+                .completion_tokens,
+                (.completion_tokens_details.reasoning_tokens // 0),
+                .total_tokens ]
+            elif has("input_tokens_details") then
+              [ .input_tokens,
+                (.input_tokens_details.cached_tokens // 0),
+                .output_tokens,
+                (.output_tokens_details.reasoning_tokens // 0),
+                .total_tokens ]
+            else
+              [ (.input_tokens + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0)),
+                (.cache_read_input_tokens // 0),
+                .output_tokens,
+                (.output_tokens_details.thinking_tokens // 0),
+                (.input_tokens + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0) + .output_tokens) ]
+            end;
+          (norm + [((.cost | if type == "object" then .usd else . end) // "")])
+          | map(if . == null then "" else tostring end)
+          | .[] | ., "\u0000"
+        ' <<<"$usage" 2>/dev/null)
 
         {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
@@ -1769,7 +2620,7 @@ run_inference_loop() {
   fi
 
   # Restore original provider if a vision fallback was used
-  [[ -n $FALLBACK_PROVIDER && (( ${#detected_images[@]} -gt 0 )) ]] && restore_temp_state
+  restore_temp_state
 
   return $loop_errors
 }
@@ -1817,9 +2668,11 @@ call_task_agent() {
   # Initialize local MESSAGES array in-memory for this specific agent's execution loop
   local ALL_MESSAGES
   printf "%s" "$system_inst" > "$TEMP_PAYLOAD_SYSTEM"
+  # E2BIG (2026-09-12): the agent's user content can carry a whole file — by FILE, not --arg.
+  printf "%s" "$user_content" > "$TEMP_PAYLOAD_USER"
   ALL_MESSAGES=$(jq -rc -n \
     --rawfile sys "$TEMP_PAYLOAD_SYSTEM" \
-    --arg usr "$user_content" \
+    --rawfile usr "$TEMP_PAYLOAD_USER" \
     '[{role: "system", content: $sys}, {role: "user", content: $usr}]'
   )
 
@@ -1880,7 +2733,9 @@ consolidate_memory() {
   local ALL_MESSAGES="[]"
   local errors=0
 
-  [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
+  # Normalize on load: a poisoned history must never reach the wire (see normalize_history)
+  [[ -r $messages_path ]] && ALL_MESSAGES=$(normalize_history "$(<"$messages_path")")
+  [[ -z $ALL_MESSAGES ]] && ALL_MESSAGES="[]"
 
   # Define memory consolidation prompt
   local alert_msg="[SYSTEM ALERT: CONSOLIDATION HEARTBEAT]
@@ -1924,15 +2779,15 @@ Take as many tool calls as you need. When you are fully done organizing and savi
 }
 
 check_and_trigger_heartbeat() {
-  local force="${1:-false}"
+  local forced="${1:-false}"
   local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
   local messages_count=0
   if [[ -r $messages_path ]]; then
     messages_count=$(jq -rc 'map(select(.role == "user")) | length' "$messages_path" 2>/dev/null || echo 0)
   fi
 
-  if [[ $force == "true" ]] || (( messages_count >= HEARTBEAT_THRESHOLD )); then
-    log_brain "Heartbeat threshold pulsing (Messages: ${messages_count}/${HEARTBEAT_THRESHOLD} | Force: ${force})."
+  if [[ $forced == "true" ]] || (( messages_count >= HEARTBEAT_THRESHOLD )); then
+    log_brain "Heartbeat threshold pulsing (Messages: ${messages_count}/${HEARTBEAT_THRESHOLD} | Forced: ${forced})."
     consolidate_memory
   fi
 }
@@ -1961,8 +2816,9 @@ send_message() {
   # Reset 'IS_IMAGE' global var
   [[ $IS_IMAGE == true ]] && IS_IMAGE=false
 
-  # Load messages file if already exist
-  [[ -r $messages_path ]] && ALL_MESSAGES=$(<"$messages_path")
+  # Load messages file if already exist (normalized: protocol-neutral, self-healing)
+  [[ -r $messages_path ]] && ALL_MESSAGES=$(normalize_history "$(<"$messages_path")")
+  [[ -z $ALL_MESSAGES ]] && ALL_MESSAGES="[]"
 
   # Build user content for active payload (injecting loaded file context if present)
   if [[ -n $EXTERNAL_FILE_LOADED && -r $EXTERNAL_FILE_LOADED ]]; then
@@ -1999,9 +2855,13 @@ send_message() {
   dynamic_system=$(get_system_prompt 2>/dev/null)
 
   # Create PAYLOAD_MESSAGES (which contains system prompt, previous history, and the current user query with file context)
+  # E2BIG (2026-09-12): the user turn can carry a whole attached FILE. --arg is capped at
+  # 128 KB (MAX_ARG_STRLEN) ⇒ beyond that jq died and the turn went out EMPTY. Stage the
+  # text in a FILE and read it back with --rawfile (same idiom as TEMP_MEMORY_USER below).
   if [[ $IS_IMAGE == true ]]; then
+    printf '%s' "$prompt" > "$TEMP_PAYLOAD_USER"
     PAYLOAD_MESSAGES=$(jq -rc \
-      --arg prompt "$prompt" \
+      --rawfile prompt "$TEMP_PAYLOAD_USER" \
       --arg mime "$mime_type" \
       --rawfile b64 "$TEMP_BASE64_OUTPUT" \
       '. + [{
@@ -2014,7 +2874,8 @@ send_message() {
     )
     rm -f "$TEMP_BASE64_OUTPUT"
   else
-    PAYLOAD_MESSAGES=$(jq -rc --arg user "$user_content" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES" 2>/dev/null)
+    printf '%s' "$user_content" > "$TEMP_PAYLOAD_USER"
+    PAYLOAD_MESSAGES=$(jq -rc --rawfile user "$TEMP_PAYLOAD_USER" '. + [{role: "user", content: $user}]' <<<"$ALL_MESSAGES" 2>/dev/null)
   fi
 
   # Write generated system prompte to temporary file to avoid reaching arg limit of 'jq'
@@ -2022,11 +2883,12 @@ send_message() {
   PAYLOAD_MESSAGES=$(jq -rc --rawfile sys "$TEMP_PAYLOAD_SYSTEM" '[{role: "system", content: $sys}] + .' <<<"$PAYLOAD_MESSAGES" 2>/dev/null)
 
   # Append raw user prompt to persistent history (ALL_MESSAGES) to keep it clean and lightweight
-  ALL_MESSAGES=$(jq -rc --arg prompt "$prompt" '. + [{role: "user", content: $prompt}]' <<<"$ALL_MESSAGES" 2>/dev/null)
+  # E2BIG (2026-09-12): --rawfile, not --arg — the prompt can be an entire attached file.
+  printf '%s' "$prompt" > "$TEMP_PAYLOAD_USER"
+  ALL_MESSAGES=$(jq -rc --rawfile prompt "$TEMP_PAYLOAD_USER" '. + [{role: "user", content: $prompt}]' <<<"$ALL_MESSAGES" 2>/dev/null)
 
   # Ensure data writing consistency
-  echo "$ALL_MESSAGES" > "${messages_path}.tmp"
-  mv -f "${messages_path}.tmp" "$messages_path"
+  persist_history "$ALL_MESSAGES" "$messages_path"
 
   if [[ $BACKEND == "ollama" ]]; then
     log_debug "Sending query chunk to local Ollama backend (Model: ${active_model##*/})...\n"
@@ -2040,7 +2902,7 @@ send_message() {
   run_inference_loop "$active_model" "$PAYLOAD_MESSAGES" "all" "true" "stdout" "true" "" "$ALL_MESSAGES"
 
   # Restore original provider if a vision fallback was used
-  [[ -n $FALLBACK_PROVIDER && $IS_IMAGE == true ]] && restore_temp_state
+  restore_temp_state
 
   # Reset 'IS_IMAGE' global var before heartbeat gets triggered
   [[ $IS_IMAGE == true ]] && IS_IMAGE=false
@@ -2370,8 +3232,11 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}-l, --listen <host:port>${ANSI_RESET}   Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}--backend <type>${ANSI_RESET}           Set AI backend (ollama, llamacpp, external)
   ${CLR_B_GREEN}--provider <name>${ANSI_RESET}          Set AI external provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}--image <provider>${ANSI_RESET}         Set AI image creation provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}--fallback <provider>${ANSI_RESET}      Set AI fallback provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
+  ${CLR_B_GREEN}--effort <level>${ANSI_RESET}           Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
+  ${CLR_B_GREEN}--memory <type>${ANSI_RESET}            Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, web)
   ${CLR_B_GREEN}--chat${ANSI_RESET}                     Start interactive conversational chat mode
   ${CLR_B_GREEN}--multi${ANSI_RESET}                    Start complex multi-agent analysis pipeline
@@ -2386,8 +3251,11 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}listen <host:port>${ANSI_RESET}         Set Ollama / llama.cpp server <host:port>
   ${CLR_B_GREEN}backend <type>${ANSI_RESET}             Set AI backend (ollama, llamacpp, external)
   ${CLR_B_GREEN}provider <name>${ANSI_RESET}            Set AI external provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}image <provider>${ANSI_RESET}           Set AI image creation provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}fallback <provider>${ANSI_RESET}        Set AI fallback provider (${ALL_PROVIDERS})
   ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
+  ${CLR_B_GREEN}effort <level>${ANSI_RESET}             Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
+  ${CLR_B_GREEN}memory <type>${ANSI_RESET}              Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server
   ${CLR_B_GREEN}chat${ANSI_RESET}                       Start interactive conversational chat mode
   ${CLR_B_GREEN}multi${ANSI_RESET}                      Start complex multi-agent analysis pipeline
@@ -2427,8 +3295,11 @@ parse_cli_flags() {
       --commit|commit) check_and_trigger_heartbeat "true" ; exit 0 ;;
       --backend|backend) BACKEND="${2:-}" ; shift 2 ;;
       --provider|provider) PROVIDER="${2:-}" ; shift 2 ;;
+      --image|image) IMAGE_PROVIDER="${2:-}" ; shift 2 ;;
       --fallback|fallback) FALLBACK_PROVIDER="${2:-}" ; shift 2 ;;
       --model|model) USER_MODEL="${2:-}" ; shift 2 ;;
+      --effort|effort) REASONING_EFFORT="${2:-}" ; shift 2 ;;
+      --memory|memory) MEMORY_STRUCTURE_TYPE="${2:-}" ; shift 2 ;;
       --chat|chat) RUN_MODE="chat" ; shift ;;
       --multi|multi) RUN_MODE="multi" ; shift ;;
       --simple|simple) RUN_MODE="simple" ; shift ;;
@@ -2467,6 +3338,9 @@ init_core() {
     PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
   fi
 
+  # Check required dependencies
+  check_deps
+
   # Create required folders
   create_local_model_cache
   create_local_data_store
@@ -2504,12 +3378,7 @@ init_core() {
   fi
 
   if [[ $BACKEND == "external" && $USE_TOR == true ]]; then
-    log_info "Checking Tor Network proxy interface..."
-    if ! timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
-      error "Tor proxy ($TOR_PROXY) is configured but unreachable. Is Tor running?"
-    else
-      log_success "Tor privacy tunnel established! Routing securely to $TOR_PROXY."
-    fi
+    handle_tor
   fi
 
   if [[ $BACKEND == "external" ]]; then

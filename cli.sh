@@ -7,9 +7,9 @@
 # history, slash commands (/keys, /replay, /load), and reasoning HUD streams.
 #
 # Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (Gemini)
+# AI Sorcerer & Co-Creator   : Jarvis (GLM-5.3)
 #
-# Version: 1.6.0
+# Version: 1.7.0
 # ==============================================================================
 
 # Options
@@ -19,16 +19,28 @@
 # -----------------------------------------------------------------------------
 # Core Engine Sourcing
 # -----------------------------------------------------------------------------
-CLI_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CORE_LIB="${CLI_SELF_DIR}/core.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORE_LIB="${SCRIPT_DIR}/core.sh"
+IMG_LIB="${SCRIPT_DIR}/image.sh"
 
+# Import sovereign cognitive core library
 if [[ -r "$CORE_LIB" ]]; then
-  # Import sovereign cognitive core library
   # shellcheck source=/dev/null
   source "$CORE_LIB"
 else
   error "Sovereign Cognitive Core library not found at: ${CORE_LIB}"
 fi
+
+# Import image rendering library
+if [[ -r "$IMG_LIB" ]]; then
+  # shellcheck source=/dev/null
+  source "$IMG_LIB"
+else
+  error "Image Rendering library not found at: ${IMG_LIB}"
+fi
+
+# Set the 'trap' to the right place
+trap cleanup_the_mess EXIT INT TERM
 
 # Override default RUN_MODE to start in chat mode by default
 RUN_MODE="chat"
@@ -40,6 +52,7 @@ RUN_MODE="chat"
 run_chat() {
   local backend_upper ; backend_upper=$(to_upper "$BACKEND")
   local provider_upper ; provider_upper=$(to_upper "$PROVIDER")
+  local model_upper ; model_upper=$(to_upper "$CHAT_MODEL")
 
   set_console_title "${SCRIPT_FILE}: Interactive Chat Mode."
   show_banner
@@ -50,7 +63,14 @@ run_chat() {
     local fallback_upper ; fallback_upper=$(to_upper "$FALLBACK_PROVIDER")
     log_info "Active Fallback: ${CLR_B_YELLOW}${fallback_upper}${ANSI_RESET}"
   fi
-  log_info "Active Model: ${CLR_B_YELLOW}${CHAT_MODEL}${ANSI_RESET}"
+  log_info "Active Model: ${CLR_B_YELLOW}${model_upper}${ANSI_RESET}"
+  if [[ $IMAGE_ENABLED == true ]]; then
+    log_info "Active Image Engine: ${CLR_B_YELLOW}$(to_upper "${IMAGE_PROVIDER:-$PROVIDER}")${ANSI_RESET}"
+  else
+    log_info "Image Generation: ${CLR_B_RED}OFF${ANSI_RESET} on ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET} — pollinations fallback"
+  fi
+  log_info "Memory Structure: ${CLR_B_YELLOW}$(to_upper "$(get_memory_structure)")${ANSI_RESET}"
+
   log_info "Conversation online. Type ${CLR_B_GREEN}/help${ANSI_RESET} to view commands."
 
   while true; do
@@ -64,24 +84,79 @@ run_chat() {
       "/help")
         echo -e "\n${CLR_B_CYAN}✨ Available Commands ✨${ANSI_RESET}"
         echo -e "  ${CLR_B_GREEN}/help${ANSI_RESET}                     • Show this help menu"
+        echo -e "  ${CLR_B_GREEN}/setup${ANSI_RESET}                    • Change / set user settings"
+        echo -e "  ${CLR_B_GREEN}/mode [type]${ANSI_RESET}              • Change / set working mode"
+        echo -e "  ${CLR_B_GREEN}/backend [type]${ANSI_RESET}           • Change / set active backend"
+        echo -e "  ${CLR_B_GREEN}/provider [name]${ANSI_RESET}          • Change / set active provider"
+        echo -e "  ${CLR_B_GREEN}/fallback [name]${ANSI_RESET}          • Change / set fallback provider"
+        echo -e "  ${CLR_B_GREEN}/image [provider]${ANSI_RESET}         • Change / set image provider"
+        echo -e "  ${CLR_B_GREEN}/model [name]${ANSI_RESET}             • Change / set active model"
+        echo -e "  ${CLR_B_GREEN}/effort [level]${ANSI_RESET}           • Change / set active model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT"
+        echo -e "  ${CLR_B_GREEN}/memory [type]${ANSI_RESET}            • Change / set active memory structure (full, index) -- default: $MEMORY_STRUCTURE_TYPE"
+        echo -e "  ${CLR_B_GREEN}/models${ANSI_RESET}                   • Show available models in active provider"
+        echo -e "  ${CLR_B_GREEN}/save${ANSI_RESET}                     • Save current settings permanently"
+        echo -e "  ${CLR_B_GREEN}/reload${ANSI_RESET}                   • Reload user settings"
         echo -e "  ${CLR_B_GREEN}/clear${ANSI_RESET}                    • Clear current conversation context and memory"
         echo -e "  ${CLR_B_GREEN}/commit${ANSI_RESET}                   • Consolidate active context to permanent disk"
-        echo -e "  ${CLR_B_GREEN}/draw [ratio] [prompt]${ANSI_RESET}    • Generate images"
+        echo -e "  ${CLR_B_GREEN}/draw [prompt] [options]${ANSI_RESET}  • Generate images (--ratio, --size, --model, --provider)"
         echo -e "  ${CLR_B_GREEN}/keys${ANSI_RESET}                     • Manage your encrypted cloud provider API keys"
         echo -e "  ${CLR_B_GREEN}/replay${ANSI_RESET}                   • Resend the last message"
-        echo -e "  ${CLR_B_GREEN}/backend <type>${ANSI_RESET}           • Change active backend"
-        echo -e "  ${CLR_B_GREEN}/provider <name>${ANSI_RESET}          • Change active provider"
-        echo -e "  ${CLR_B_GREEN}/fallback <name>${ANSI_RESET}          • Change / set fallback provider"
-        echo -e "  ${CLR_B_GREEN}/model <name>${ANSI_RESET}             • Change active model"
-        echo -e "  ${CLR_B_GREEN}/launch <app> [path]${ANSI_RESET}      • Launch app with prepared environment variables"
+        echo -e "  ${CLR_B_GREEN}/launch [app] [path]${ANSI_RESET}      • Launch app with prepared environment variables"
         echo -e "  ${CLR_B_GREEN}/load <file>${ANSI_RESET}              • Load file in the chat context"
         echo -e "  ${CLR_B_GREEN}/run <cmd>${ANSI_RESET}                • Execute a shell command locally in the session"
         echo -e "  ${CLR_B_GREEN}/unload${ANSI_RESET}                   • Unload previously loaded file from the chat context"
         echo -e "  ${CLR_B_GREEN}/start${ANSI_RESET}                    • Switch active context to multi-agent pipeline"
         echo -e "  ${CLR_B_GREEN}/quit${ANSI_RESET}                     • Terminate session gracefully"
       ;;
-      # TODO: Finish the code for the '/draw' command
-      "/draw") log_warn "Coming soon. Stay tuned!" ;;
+      "/setup"|"/mode"|"/save"|"/reload")
+        log_warn "Not implemented yet, coming soon!"
+      ;;
+      "/models")
+        log ; log_info "Gathering provider models..."
+        list_provider_models
+      ;;
+      "/draw"|"/draw "*)
+        local draw_input="${USER_MSG#"/draw"}"
+        draw_input="${draw_input# }"
+        if [[ $draw_input == --* ]]; then
+          # Options only — generate_image will use its default prompt
+          # shellcheck disable=SC2086  # Intentional word-splitting into separate args
+          generate_image $draw_input
+        elif [[ $draw_input == *" --"* ]]; then
+          # Split the prompt (before the first option) from the options (after it)
+          local draw_prompt="${draw_input%% --*}"
+          local draw_flags="${draw_input#*" --"}"
+          # shellcheck disable=SC2086  # Intentional word-splitting into separate args
+          generate_image "$draw_prompt" --${draw_flags}
+        elif [[ -n $draw_input ]]; then
+          generate_image "$draw_input"
+        else
+          generate_image
+        fi
+      ;;
+      "/image")
+        local effective_image_provider="${IMAGE_PROVIDER:-$PROVIDER}"
+        local img_cap
+        img_cap=$(jq -r --arg p "$effective_image_provider" '.[$p].default.image // false' "$PROVIDERS_CONFIG" 2>/dev/null)
+        if [[ -n $IMAGE_PROVIDER ]]; then
+          log_step "Current image provider: ${CLR_B_YELLOW}${IMAGE_PROVIDER}${ANSI_RESET}"
+        else
+          log_step "No image provider defined — using active chat provider: ${CLR_B_YELLOW}${PROVIDER}${ANSI_RESET}"
+        fi
+        if [[ $img_cap == "true" ]]; then
+          log_info "Image generation: ${CLR_B_GREEN}available${ANSI_RESET} on ${CLR_B_YELLOW}${effective_image_provider}${ANSI_RESET}"
+        else
+          log_info "Image generation: ${CLR_B_YELLOW}unavailable${ANSI_RESET} on ${CLR_B_YELLOW}${effective_image_provider}${ANSI_RESET} — keyless pollinations fallback"
+        fi
+        log_info "Set image provider with ${CLR_B_YELLOW}/image <provider>${ANSI_RESET}"
+      ;;
+      "/image "*)
+        local image_value="${USER_MSG#"/image "}"
+        IMAGE_PROVIDER="$image_value"
+        IMAGE_ENABLED=$(jq -r --arg p "$IMAGE_PROVIDER" '.[$p].default.image // false' "$PROVIDERS_CONFIG" 2>/dev/null)
+        log_step "New image provider defined: ${CLR_B_YELLOW}${image_value}${ANSI_RESET}"
+        set_state
+      ;;
       "/replay")
         if [[ -z $LAST_USER_MSG ]]; then
           log_warn "No previous message to replay!"
@@ -155,6 +230,32 @@ run_chat() {
         set_vision_model    # Update corresponding vision model
         set_system_prompt   # Update system prompt with new active model
         set_state           # Update new state
+      ;;
+      "/effort")
+        if [[ -n $REASONING_EFFORT ]]; then
+          log_step "Current reasoning effort: ${CLR_B_YELLOW}${REASONING_EFFORT}${ANSI_RESET}"
+        else
+          log_step "No model reasoning effort defined.${ANSI_RESET}"
+        fi
+        log_info "Set new model reasoning effort with ${CLR_B_YELLOW}/effort <level>${ANSI_RESET}"
+      ;;
+      "/effort "*)
+        unset REASONING_EFFORT    # Remove initially defined reasoning effort
+        local active_effort="${USER_MSG#"/effort "}" ; REASONING_EFFORT="$active_effort"
+        log_step "New active model reasoning effort: ${CLR_B_YELLOW}${active_effort}${ANSI_RESET}"
+      ;;
+      "/memory")
+        if [[ -n $MEMORY_STRUCTURE_TYPE ]]; then
+          log_step "Current memory structure type: ${CLR_B_YELLOW}${MEMORY_STRUCTURE_TYPE}${ANSI_RESET}"
+        else
+          log_step "No memory structure type defined.${ANSI_RESET}"
+        fi
+        log_info "Set new memory structure type with ${CLR_B_YELLOW}/memory <type>${ANSI_RESET}"
+      ;;
+      "/memory "*)
+        unset MEMORY_STRUCTURE_TYPE    # Remove initially defined reasoning effort
+        local active_type="${USER_MSG#"/memory "}" ; MEMORY_STRUCTURE_TYPE="$active_type"
+        log_step "New active memory structure type: ${CLR_B_YELLOW}${active_type}${ANSI_RESET}"
       ;;
       "/launch")
         local tested_apps=(aider claude copilot crush cyberneurova neurova hf openai)

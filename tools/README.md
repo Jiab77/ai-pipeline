@@ -15,8 +15,8 @@ A.I.D.E. CLI (Repository Root)
 ├── tools.sh                # 🐚 Master Local Agent Tools Dispatcher (Bash - Root level!)
 │
 └── tools/                  # 🛠️ Tools Assets & Schemas Directory
-    ├── tools.json          # Premium Tool Schemas (11 tools - Cloud/Premium backends)
-    ├── tools-light.json    # Frugal Tool Schemas (6 tools - Local/SLM backends)
+    ├── tools.json          # Premium Tool Schemas (12 tools - Cloud/Premium backends)
+    ├── tools-light.json    # Frugal Tool Schemas (8 tools - Local/SLM backends)
     ├── tools-groq.json     # Groq-compatible schemas (Formatted to bypass LPU checks)
     ├── README.md           # This documentation
     ├── web-fetch.sh        # Smart crawler & static parser (Zero-NodeJS, Tor-routing capable)
@@ -33,7 +33,7 @@ To streamline imports and execution mapping across our cognitive core scripts (`
 * **Masterful Optimizations (v0.3.3)**:
   * **0-Fork `read_file`**: Reads files with sub-millisecond speeds, completely bypassing redundant processes. Uses dynamic, unbounded `awk` logic that handles files with absolute immunity to missing trailing newlines.
   * **0-Fork `edit_file`**: Evaluates and applies sorted line modifications on-the-fly without running redundant file counting forks, preserving mobile battery life and preventing CPU throttling on Android Termux.
-  * **Sovereign Boundaries**: Automatically checks paths at C-speed using in-memory Zero-Fork glob matching to prevent the AI model from reading, writing, or patching core execution scripts (`core.sh`, `cli.sh`, `tools.sh`).
+  * **Sovereign Boundaries**: Automatically checks paths at C-speed using in-memory Zero-Fork glob matching to prevent the AI model from reading, writing, or patching core execution scripts (`core.sh`, `cli.sh`, `tools.sh`, `image.sh`).
 
 ---
 
@@ -57,8 +57,8 @@ Our high-performance alternative to bloated Puppeteer runtimes. It uses a **Stat
 
 Tool schemas are declared once in JSON format and acts as the single source of truth for the entire pipeline, preventing parameter duplication.
 
-1. **`tools.json` (Premium / Cloud API)**: Full 11-tool capability-set (including database queries, filesystem edits, web browsing, and shell execution). Bound when routing to advanced cloud engines like Gemini 3.5 Flash or large local models.
-2. **`tools-light.json` (Frugal / Local SLM)**: A streamlined 6-tool schema optimized for Small Language Models (e.g., LFM 2.5 series or Qwen-Coder-3B). Completely strips system-execution parameters to fit comfortably within tight context windows.
+1. **`tools.json` (Premium / Cloud API)**: Full 12-tool capability-set (including database queries, filesystem edits, web browsing, image generation, and shell execution). Bound when routing to advanced cloud engines like Gemini 3.5 Flash or large local models.
+2. **`tools-light.json` (Frugal / Local SLM)**: A streamlined 8-tool schema optimized for Small Language Models (e.g., LFM 2.5 series or Qwen-Coder-3B). Completely strips system-execution parameters to fit comfortably within tight context windows.
 3. **`tools-groq.json` (Groq Platform)**: Custom-tuned schemas specifically tailored for Groq's strict LPU schema validation engine. Converts all native `integer` parameters (such as timeouts or max sizes) into compliant `string` types to prevent API connection dropouts.
 
 ---

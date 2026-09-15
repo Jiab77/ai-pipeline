@@ -1,30 +1,110 @@
 {
+  "anthropic": {
+    "name": "Anthropic",
+    "version": "2023-06-01",
+    "url": "https://api.anthropic.com/v1/messages",
+    "keys": "https://platform.claude.com/settings/keys",
+    "api": "https://platform.claude.com/docs/en/api/messages/create",
+    "models": "https://api.anthropic.com/v1/models",
+    "docs": {
+      "base": "https://platform.claude.com/docs",
+      "intro": "/en/get-started",
+      "models": "/en/api/models/list",
+      "files": [
+        "/en/api/http/beta/files/upload",
+        "/en/api/http/beta/files/list",
+        "/en/api/http/beta/files/download",
+        "/en/api/http/beta/files/retrieve_metadata",
+        "/en/api/http/beta/files/delete"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "claude-fable-5-1",
+      "max_tokens": 128000,
+      "image": false,
+      "vision": true,
+      "zdr": false
+    }
+  },
   "cyberneurova": {
     "name": "CyberNeurova",
     "url": "https://api.cyberneurova.ai/v1/chat/completions",
     "keys": "https://platform.cyberneurova.com/keys",
+    "api": "https://cyberneurova.com/api",
+    "models": "https://api.cyberneurova.ai/v1/models",
+    "docs": {
+      "base": "https://cyberneurova.com/docs",
+      "intro": "/getting-started",
+      "models": "/models",
+      "chat": "/chat",
+      "images": "/imagine",
+      "vision": "/vision",
+      "voice": "/voice",
+      "videos": "/imagine"
+    },
     "default": {
-      "model": "cyberneurova-glm5.2",
+      "memory": "index",
+      "model": "cyberneurova-qwen3.8",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "native",
+      "endpoint": "https://api.cyberneurova.ai/v1/images/generations",
+      "default": "artemis-img",
+      "models": {
+        "artemis-img": { "size_mode": "pixel" }
+      },
+      "output": "url"
     }
   },
   "deepseek": {
     "name": "DeepSeek",
     "url": "https://api.deepseek.com/chat/completions",
     "keys": "https://platform.deepseek.com/api_keys",
+    "models": "https://api.deepseek.com/models",
+    "docs": {
+      "base": "https://api-docs.deepseek.com/",
+      "intro": "/",
+      "models": "/quick_start/pricing",
+      "files": "/guides/files_api",
+      "chat": "/api/create-chat-completion",
+      "vision": "/guides/vision"
+    },
     "default": {
-      "model": "deepseek-v4-pro",
-      "vision": false,
+      "memory": "full",
+      "model": "deepseek-flash",
+      "image": false,
+      "vision": true,
       "zdr": false
+    },
+    "vision": {
+      "model": "deepseek-flash"
     }
   },
   "groq": {
     "name": "Groq",
     "url": "https://api.groq.com/openai/v1/chat/completions",
     "keys": "https://console.groq.com/keys",
+    "api": "https://console.groq.com/docs/api-reference",
+    "models": "https://api.groq.com/openai/v1/models",
+    "docs": {
+      "base": "https://console.groq.com/docs",
+      "intro": "/quickstart",
+      "models": "/models",
+      "chat": "/text-chat",
+      "vision": "/vision",
+      "voice": [
+        "/speech-to-text",
+        "/text-to-speech"
+      ]
+    },
     "default": {
-      "model": "openai/gpt-oss-120b",
+      "memory": "index",
+      "model": "qwen/qwen3.8-27b",
+      "image": false,
       "vision": true,
       "zdr": false
     }
@@ -33,18 +113,51 @@
     "name": "Hugging Face",
     "url": "https://router.huggingface.co/v1/chat/completions",
     "keys": "https://huggingface.co/settings/tokens",
+    "api": "https://huggingface.co/docs/inference-providers/providers/hf-inference",
+    "models": "https://huggingface.co/api/models?inference_provider=hf-inference",
+    "docs": {
+      "base": "https://huggingface.co/docs",
+      "intro": "/inference-providers/index",
+      "models": "https://huggingface.co/models?inference_provider=all",
+      "chat": "/inference-providers/tasks/chat-completion",
+      "images": "/inference-providers/tasks/text-to-image",
+      "vision": "/inference-providers/tasks/image-text-to-text",
+      "voice": "/inference-providers/tasks/automatic-speech-recognition",
+      "videos": "/inference-providers/tasks/text-to-video"
+    },
     "default": {
+      "memory": "full",
       "model": "moonshotai/Kimi-K3",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "native",
+      "endpoint": "https://router.huggingface.co/hf-inference/models",
+      "default": "stabilityai/stable-diffusion-3-medium-diffusers",
+      "models": {
+        "stabilityai/stable-diffusion-3-medium-diffusers": { "size_mode": "pixel" }
+      },
+      "output": "binary"
     }
   },
   "kimi": {
     "name": "Moonshot AI",
     "url": "https://api.moonshot.ai/v1/chat/completions",
     "keys": "https://platform.kimi.ai/console/api-keys",
+    "models": "https://api.moonshot.ai/v1/models",
+    "docs": {
+      "base": "https://platform.moonshot.ai/docs",
+      "intro": "/guide/start-using-kimi-api",
+      "models": "/models",
+      "chat": "/api/chat",
+      "vision": "/guide/use-kimi-vision-model"
+    },
     "default": {
+      "memory": "full",
       "model": "kimi-k3",
+      "image": false,
       "vision": true,
       "zdr": false
     }
@@ -53,28 +166,85 @@
     "name": "Mammouth AI",
     "url": "https://api.mammouth.ai/v1/chat/completions",
     "keys": "https://mammouth.ai/app/account/settings/api",
+    "api": "https://info.mammouth.ai/docs/api-quick-start/",
+    "models": "https://api.mammouth.ai/public/models",
+    "docs": {
+      "base": "https://info.mammouth.ai/docs",
+      "intro": "/introduction-to-mammouth",
+      "models": "https://model-explorer.mammouth.ai/"
+    },
     "default": {
-      "model": "gemini-3.5-flash",
+      "memory": "full",
+      "model": "gemini-3.7-flash",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "chat",
+      "default": "gemini-3.1-flash-image-preview",
+      "models": {
+        "gpt-image-2":                    { "size_mode": "size_string", "min": 1024, "max": 3840, "step": 16, "max_px": 8294400 },
+        "gemini-2.5-flash-image":         { "size_mode": "aspect_ratio" },
+        "gemini-3.1-flash-image-preview": { "size_mode": "aspect_ratio" },
+        "gemini-3.1-flash-lite-image":    { "size_mode": "aspect_ratio" },
+        "gemini-3-pro-image-preview":     { "size_mode": "aspect_ratio" }
+      },
+      "output": "base64"
     }
   },
   "openai": {
     "name": "OpenAI",
-    "url": "https://api.openai.com/v1/chat/completions",
+    "url": "https://api.openai.com/v1/responses",
     "keys": "https://platform.openai.com/api-keys",
+    "api": "https://developers.openai.com/api/reference/overview",
+    "models": "https://api.openai.com/v1/models",
+    "docs": {
+      "base": "https://developers.openai.com/api/docs",
+      "intro": "/quickstart",
+      "models": "/models",
+      "files": "/guides/file-inputs",
+      "chat": "/guides/text",
+      "images": "/guides/image-generation",
+      "vision": "/guides/images-vision",
+      "voice": [
+        "/guides/audio",
+        "/guides/text-to-speech"
+      ]
+    },
     "default": {
-      "model": "gpt-5.4",
+      "memory": "index",
+      "model": "gpt-6-astra",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "native",
+      "endpoint": "https://api.openai.com/v1/images/generations",
+      "default": "gpt-image-2",
+      "models": {
+        "gpt-image-1":      { "size_mode": "size_string", "min": 1024, "max": 1536, "step": 512, "max_px": 1572864 },
+        "gpt-image-1.5":    { "size_mode": "size_string", "min": 1024, "max": 1536, "step": 512, "max_px": 1572864 },
+        "gpt-image-1-mini": { "size_mode": "size_string", "min": 1024, "max": 1536, "step": 512, "max_px": 1572864 },
+        "gpt-image-2":      { "size_mode": "size_string", "min": 1024, "max": 3840, "step": 16, "max_px": 8294400 }
+      },
+      "output": "base64"
     }
   },
   "openroute": {
     "name": "OpenRoute (CyberNeurova)",
     "url": "https://openroute.cyberneurova.com/v1/chat/completions",
     "keys": "https://openroute.cyberneurova.com/account/keys",
+    "models": "https://openroute.cyberneurova.com/v1/models",
+    "docs": {
+      "base": "https://openroute.cyberneurova.com/docs",
+      "models": "https://openroute.cyberneurova.com/models"
+    },
     "default": {
-      "model": "cyberneurova/deepseek-v4",
+      "memory": "index",
+      "model": "cyberneurova/qwen3.8",
+      "image": false,
       "vision": true,
       "zdr": false
     }
@@ -83,18 +253,65 @@
     "name": "OpenRouter",
     "url": "https://openrouter.ai/api/v1/chat/completions",
     "keys": "https://openrouter.ai/keys",
+    "api": "https://openrouter.ai/docs/api_reference/overview",
+    "models": "https://openrouter.ai/api/v1/models",
+    "docs": {
+      "base": "https://openrouter.ai/docs",
+      "intro": "/quickstart",
+      "models": "/guides/overview/models",
+      "files": "/guides/features/files-api",
+      "chat": "/guides/overview/multimodal/overview",
+      "images": "/guides/overview/multimodal/image-generation",
+      "vision": "/guides/overview/multimodal/image-understanding",
+      "voice": [
+        "/guides/overview/multimodal/stt",
+        "/guides/overview/multimodal/tts"
+      ],
+      "videos": "/guides/overview/multimodal/video-generation"
+    },
     "default": {
-      "model": "google/gemini-3.5-flash",
+      "memory": "full",
+      "model": "z-ai/glm-5.3-flash",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "native",
+      "endpoint": "https://openrouter.ai/api/v1/images",
+      "default": "google/gemini-3.1-flash-image",
+      "models": {
+        "google/gemini-2.5-flash-image": { "size_mode": "aspect_ratio" },
+        "google/gemini-3.1-flash-image": { "size_mode": "aspect_ratio" },
+        "openai/gpt-image-2":            { "size_mode": "size_string", "min": 1024, "max": 3840, "step": 16, "max_px": 8294400 }
+      },
+      "output": "base64"
     }
   },
   "openrouter_free": {
     "name": "OpenRouter (Free)",
     "url": "https://openrouter.ai/api/v1/chat/completions",
     "keys": "https://openrouter.ai/keys",
+    "api": "https://openrouter.ai/docs/api_reference/overview",
+    "models": "https://openrouter.ai/api/v1/models",
+    "docs": {
+      "base": "https://openrouter.ai/docs",
+      "intro": "/quickstart",
+      "models": "/guides/overview/models",
+      "files": "/guides/features/files-api",
+      "chat": "/guides/overview/multimodal/overview",
+      "images": "/guides/overview/multimodal/image-generation",
+      "vision": "/guides/overview/multimodal/image-understanding",
+      "voice": [
+        "/guides/overview/multimodal/stt",
+        "/guides/overview/multimodal/tts"
+      ],
+      "videos": "/guides/overview/multimodal/video-generation"
+    },
     "default": {
+      "memory": "full",
       "model": "openrouter/free",
+      "image": false,
       "vision": true,
       "zdr": false
     }
@@ -103,38 +320,134 @@
     "name": "Venice AI",
     "url": "https://api.venice.ai/api/v1/chat/completions",
     "keys": "https://venice.ai/settings/api",
+    "api": "https://docs.venice.ai/api-reference/api-spec",
+    "models": "https://api.venice.ai/api/v1/models",
+    "docs": {
+      "base": "https://docs.venice.ai",
+      "intro": "/getting-started/quick-start",
+      "models": "https://api.venice.ai/api/v1/models",
+      "files": "/guides/features/file-inputs",
+      "chat": "/api-reference/endpoint/chat/completions",
+      "images": "/api-reference/endpoint/image/generations",
+      "vision": "/guides/features/vision",
+      "voice": [
+        "/guides/media/speech-to-text",
+        "/guides/media/text-to-speech"
+      ],
+      "videos": "/guides/media/video-generation"
+    },
     "default": {
-      "model": "z-ai-glm-5v-turbo",
+      "memory": "full",
+      "model": "z-ai-glm-5-3-flash",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "native",
+      "endpoint": "https://api.venice.ai/api/v1/image/generate",
+      "default": "qwen-image-2",
+      "models": {
+        "venice-sd35":  { "size_mode": "pixel" },
+        "qwen-image-2": { "size_mode": "aspect_ratio" },
+        "gpt-image-2": { "size_mode": "aspect_ratio" }
+      },
+      "output": "base64"
     }
   },
   "vercel": {
     "name": "Vercel AI Gateway",
     "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
     "keys": "https://vercel.com/docs/ai-gateway",
+    "api": "https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api",
+    "models": "https://ai-gateway.vercel.sh/v1/models",
+    "docs": {
+      "base": "https://vercel.com/docs/ai-gateway",
+      "intro": "/getting-started",
+      "models": "https://ai-gateway.vercel.sh/v1/models",
+      "files": "/sdks-and-apis/openai-chat-completions/images",
+      "chat": "/sdks-and-apis/openai-chat-completions/rest-api",
+      "images": "/sdks-and-apis/openai-chat-completions/image-generation",
+      "vision": "/sdks-and-apis/openai-chat-completions/images",
+      "voice": [
+        "/modalities/speech-to-text",
+        "/modalities/text-to-speech"
+      ],
+      "videos": [
+        "/modalities/video-generation/text-to-video",
+        "/modalities/video-generation/image-to-video"
+      ]
+    },
     "default": {
-      "model": "google/gemini-3.5-flash",
+      "memory": "full",
+      "model": "zai/glm-5.3-flash",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "chat",
+      "default": "google/gemini-3.1-flash-image",
+      "models": {
+        "google/gemini-3.1-flash-image": { "size_mode": "aspect_ratio" }
+      },
+      "output": "base64"
     }
   },
   "vercel_free": {
     "name": "Vercel AI Gateway (Free)",
     "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
     "keys": "https://vercel.com/docs/ai-gateway",
+    "api": "https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api",
+    "models": "https://ai-gateway.vercel.sh/v1/models",
+    "docs": {
+      "base": "https://vercel.com/docs/ai-gateway",
+      "intro": "/getting-started",
+      "models": "https://ai-gateway.vercel.sh/v1/models",
+      "files": "/sdks-and-apis/openai-chat-completions/images",
+      "chat": "/sdks-and-apis/openai-chat-completions/rest-api",
+      "images": "/sdks-and-apis/openai-chat-completions/image-generation",
+      "vision": "/sdks-and-apis/openai-chat-completions/images",
+      "voice": [
+        "/modalities/speech-to-text",
+        "/modalities/text-to-speech"
+      ]
+    },
     "default": {
-      "model": "google/gemini-2.5-flash",
+      "memory": "full",
+      "model": "zai/glm-5.3-flash",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "native",
+      "endpoint": "https://ai-gateway.vercel.sh/v1/images/generations",
+      "default": "spacexai/grok-imagine-image",
+      "models": {
+        "spacexai/grok-imagine-image": { "size_mode": "aspect_ratio" },
+        "bytedance/seedream-5.0-pro":  { "size_mode": "aspect_ratio" },
+        "bytedance/seedream-4.0":      { "size_mode": "aspect_ratio" }
+      },
+      "output": "base64"
     }
   },
   "zai_plan": {
     "name": "Z.AI (Coding Plan)",
     "url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
     "keys": "https://z.ai/manage-apikey/apikey-list",
+    "api": "https://docs.z.ai/api-reference/introduction",
+    "models": "https://api.z.ai/api/coding/paas/v4/models",
+    "docs": {
+      "base": "https://docs.z.ai",
+      "intro": "/devpack/overview",
+      "models": "/devpack/latest-model",
+      "chat": "/devpack/quick-start"
+    },
     "default": {
-      "model": "glm-5.2",
+      "memory": "full",
+      "model": "glm-5.3-flash",
+      "image": false,
       "vision": true,
       "zdr": false
     }
@@ -143,10 +456,37 @@
     "name": "Z.AI (API)",
     "url": "https://api.z.ai/api/paas/v4/chat/completions",
     "keys": "https://z.ai/manage-apikey/apikey-list",
+    "api": "https://docs.z.ai/guides/develop/http/introduction",
+    "models": "https://api.z.ai/api/paas/v4/models",
+    "docs": {
+      "base": "https://docs.z.ai",
+      "intro": "/guides/overview/quick-start",
+      "models": "/guides/overview/pricing",
+      "files": "/api-reference/agents/file-upload",
+      "chat": "/api-reference/llm/chat-completion",
+      "images": "/api-reference/image/generate-image",
+      "voice": "/api-reference/audio/audio-transcriptions",
+      "videos": "/api-reference/video/generate-video"
+    },
     "default": {
-      "model": "glm-5.2",
+      "memory": "full",
+      "model": "glm-5.3",
+      "image": true,
       "vision": true,
       "zdr": false
+    },
+    "image": {
+      "mode": "native",
+      "endpoint": "https://api.z.ai/api/paas/v4/images/generations",
+      "default": "glm-image",
+      "models": {
+        "glm-image":        { "size_mode": "size_string", "min": 1024, "max": 2048, "step": 32, "max_px": 4194304 },
+        "cogview-4-250304": { "size_mode": "size_string", "min": 512,  "max": 2048, "step": 16, "max_px": 2097152 }
+      },
+      "output": "url"
+    },
+    "vision": {
+      "model": "glm-5.3-flash"
     }
   }
 }

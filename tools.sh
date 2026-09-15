@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#
+# shellcheck disable=SC2001
 # ==============================================================================
 # tools.sh — Master Local Agent Tools Dispatcher
 # ==============================================================================
@@ -7,9 +7,9 @@
 # path-bound checks, zero-fork parsing, and local execution safety limits.
 #
 # Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (GLM-5.2)
+# AI Sorcerer & Co-Creator   : Jarvis (DeepSeek)
 #
-# Version: 0.6.0 (Jarvis audit — 8 fixes applied, Jiab77 reviewed)
+# Version: 0.7.0 (create_image: autonomous image generation via image.sh)
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -19,6 +19,9 @@
 #   [MIN]  web_search: added local -a for titles/raw_urls/snippets
 #   [MIN]  logging: echo -e → printf (FUNC_ARGS backslashes were interpreted)
 #   [MIN]  edit_file/apply_diff guards: same prefix removal as exec_shell_command
+#   [FEAT] create_image: JSON→flags wrapper for image.sh (anti-loop guard, keyless fallback inherited)
+#   [REFACTOR] create_image: sources core.sh + image.sh in-process — draw.sh subprocess removed, provider resolution delegated to image.sh, output survives dispatcher capture
+#   [REFACTOR] web_browse: now using hybrid mobile/desktop script
 # ------------------------------------------------------------------------------
 
 # Options
@@ -32,20 +35,67 @@ TOR_PORT=9050
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
 
+# Anti-loop guard: max autonomous image generations per rolling hour (create_image)
+MAX_IMAGE_GEN_PER_HOUR=20
+
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
-SCRIPT_DIR="$(realpath "${0%/*}")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
 WEB_BROWSE="${TOOLS_DIR}/web-browse.sh"
-WEB_BROWSE_MOBILE="${TOOLS_DIR}/web-browse-mobile.sh"
 WEB_FETCH="${TOOLS_DIR}/web-fetch.sh"
 LOG_FILE="${SCRIPT_NAME}.log"
 
 # Arguments
 FUNC_NAME="$1"
-FUNC_ARGS="$2"
+# The argument JSON can arrive two ways:
+#   1. argv  ($2)    — legacy, capped at 128 KB (MAX_ARG_STRLEN): a bigger payload
+#                      (write_file/edit_file content) makes execve() fail with E2BIG and
+#                      this script is NEVER launched — the tool silently returns nothing.
+#   2. stdin (piped) — E2BIG-safe, this is what core.sh uses now. No size ceiling.
+# Never block on an interactive terminal: read stdin only when it is a pipe/file.
+FUNC_ARGS="${2:-}"
+if [[ -z $FUNC_ARGS && ! -t 0 ]]; then
+  FUNC_ARGS=$(cat)
+fi
+
+# --- Portability helpers (stock macOS / BSD differences) ---------------------
+# Portable path canonicalization: GNU `realpath -m` first, plain `realpath`
+# next (existing paths — macOS Ventura+), then a cd+pwd -P composition.
+# macOS < Ventura ships no realpath at all -> raw-path fallback (old behavior).
+_realpath() {
+  local p="$1" r dir base
+  if command -v realpath >/dev/null 2>&1; then
+    r=$(realpath -m "$p" 2>/dev/null) && [[ -n $r ]] && { printf '%s' "$r"; return 0; }
+    r=$(realpath "$p" 2>/dev/null) && [[ -n $r ]] && { printf '%s' "$r"; return 0; }
+  fi
+  dir=$(dirname -- "$p")
+  base=$(basename -- "$p")
+  if [[ -d $dir ]]; then
+    r=$(cd "$dir" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$base")
+    [[ -n $r ]] && { printf '%s' "$r"; return 0; }
+  fi
+  printf '%s' "$p"
+}
+
+# _timeout: GNU coreutils `timeout` when present (Linux/Termux),
+# else a watch-dog (macOS ships none) with the same observable behavior.
+_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  else
+    "$@" & local pid=$!
+    ( sleep "$secs"; kill "$pid" 2>/dev/null ) & local wd=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    kill "$wd" 2>/dev/null
+    wait "$wd" 2>/dev/null
+    return "$rc"
+  fi
+}
 
 # Internal Functions
 log() {
@@ -108,8 +158,7 @@ read_file() {
   local end_val_awk="${end_line:-0}"
   if [[ $append_loc == true ]]; then
     awk -v start="$start_line" -v end="$end_val_awk" '
-        NR >= start && (end == 0 || NR <= end) { printf "%d→ %s\n", NR, $0
-}
+        NR >= start && (end == 0 || NR <= end) { printf "%d→ %s\n", NR, $0 }
     ' "$path"
   else
     awk -v start="$start_line" -v end="$end_val_awk" '
@@ -213,7 +262,7 @@ exec_shell_command() {
   [[ -z $command || $command == "null" ]] && error "The command parameter is required."
 
   # Avoid running core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $command == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $command == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $command == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $command == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
+  if [[ $command == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[iI][mM][aA][gG][eE].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
     error "Dear model, don't try to run core pipeline files, they are not made for that. Thank you."
   fi
 
@@ -249,10 +298,17 @@ write_file() {
     [[ -n $content_val && $content_val != null ]] && content=$content_val
   fi
 
-  # Avoid writing to core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $path == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to write to core pipeline files, they are not made for that. Thank you."
-  fi
+  # Avoid writing to core pipeline files while running. Resolve the target to a
+  # canonical path BEFORE guarding — relative paths, ./, ../, symlinks would
+  # otherwise bypass the anchor. Exact equality against the RUNNING pipeline's
+  # own files (identity by execution, not by name heuristic).
+  local resolved_path ; resolved_path=$(_realpath "$path")
+
+  case "$resolved_path" in
+    "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${SCRIPT_DIR}/image.sh"|"${SCRIPT_DIR}/pipeline.sh")
+      error "Dear model, don't try to write to core pipeline files, they are not made for that. Thank you."
+    ;;
+  esac
 
   mkdir -p "$(dirname "$path")"
   # BUGFIX: echo -n interprets -n/-e/-E if $content starts with them. printf '%s' is safe.
@@ -282,10 +338,15 @@ edit_file() {
 
   [[ ! -f $path ]] && error "File not found at $path"
 
-  # Avoid editing core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $path == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $path == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to edit core pipeline files, they are not made for that. Thank you."
-  fi
+  # Avoid editing core pipeline files while running. Same canonical resolution
+  # as write_file: identity by execution, not by name heuristic.
+  local resolved_path ; resolved_path=$(_realpath "$path")
+
+  case "$resolved_path" in
+    "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${SCRIPT_DIR}/image.sh"|"${SCRIPT_DIR}/pipeline.sh")
+      error "Dear model, don't try to edit core pipeline files, they are not made for that. Thank you."
+    ;;
+  esac
 
   if ! jq empty 2>/dev/null <<< "$changes"; then
     echo "Error: Invalid JSON array provided to edit_file" >&2
@@ -295,6 +356,11 @@ edit_file() {
   # Create backup to temp file
   tmp_file=$(mktemp)
   cp -p "$path" "$tmp_file"
+
+  # Staging file for the replacement content. It MUST NOT travel through argv or the
+  # environment: a single argument is capped at 128 KB (MAX_ARG_STRLEN), and beyond that
+  # execve fails with E2BIG — see the guard in each branch below.
+  local edit_content_file ; edit_content_file=$(mktemp)
 
   # Extract and stream sorted changes with null delimiters to execute exactly ONE jq process instead of (1 + 4*N) processes!
   while IFS= read -r -d '' mode && IFS= read -r -d '' line_start && IFS= read -r -d '' line_end && IFS= read -r -d '' content; do
@@ -312,30 +378,63 @@ edit_file() {
 
     case "$mode" in
       "delete")
-        awk -v start="$line_start" -v end="$line_end" 'NR < start || NR > end' "$tmp_file" > "${tmp_file}.bak"
+        # Never mv a temp over the target unless the producer SUCCEEDED: an unchecked mv
+        # installs whatever the redirection left behind (possibly an empty file).
+        if ! awk -v start="$line_start" -v end="$line_end" 'NR < start || NR > end' "$tmp_file" > "${tmp_file}.bak"; then
+          echo "Error: edit_file could not rewrite $path (mode: delete). File left untouched." >&2
+          rm -f "${tmp_file}.bak" "$edit_content_file"
+          return 1
+        fi
         mv "${tmp_file}.bak" "$tmp_file"
       ;;
       "replace")
         # BUGFIX: awk -v is interpreting escape chars in $content (\n, \\, \t, \[...)
         # This corrupt any code that contains backslashes. (regex, chemins, LaTeX).
-        # ENVIRON[] read the raw value, zero interpretation. Canonical fix.
-        AWK_REPL="$content" awk -v start="$line_start" -v end="$line_end" '
-          NR == start { print ENVIRON["AWK_REPL"]; next }
+        # getline < FILE reads the raw value, zero interpretation — same intent as the
+        # former ENVIRON[] trick, without putting the payload in the environment.
+        # BUGFIX (2026-09-11): the ENVIRON["AWK_REPL"] carriage capped the writable content
+        # at 128 KB. Past that, awk was NEVER executed, but the '>' redirection had already
+        # truncated ${tmp_file}.bak, and the unchecked mv installed the empty file over the
+        # target: silent data loss, reported with exit code 0.
+        printf '%s' "$content" > "$edit_content_file" || { echo "Error: edit_file could not stage the content for $path." >&2; return 1 ; }
+        if ! awk -v start="$line_start" -v end="$line_end" -v cf="$edit_content_file" '
+          NR == start {
+            n = 0
+            while ((getline line < cf) > 0) { print line; n++ }
+            close(cf)
+            if (n == 0) print ""          # empty content == one empty line (legacy behavior)
+            next
+          }
           NR > start && NR <= end { next }
           { print }
-        ' "$tmp_file" > "${tmp_file}.bak"
+        ' "$tmp_file" > "${tmp_file}.bak"; then
+          echo "Error: edit_file could not rewrite $path (mode: replace). File left untouched." >&2
+          rm -f "${tmp_file}.bak" "$edit_content_file"
+          return 1
+        fi
         mv "${tmp_file}.bak" "$tmp_file"
       ;;
       "append")
-        AWK_APP="$content" awk -v target="$line_end" '
+        printf '%s' "$content" > "$edit_content_file" || { echo "Error: edit_file could not stage the content for $path." >&2; return 1 ; }
+        if ! awk -v target="$line_end" -v cf="$edit_content_file" '
           { print }
-          NR == target { print ENVIRON["AWK_APP"] }
-        ' "$tmp_file" > "${tmp_file}.bak"
+          NR == target {
+            n = 0
+            while ((getline line < cf) > 0) { print line; n++ }
+            close(cf)
+            if (n == 0) print ""          # empty content == one empty line (legacy behavior)
+          }
+        ' "$tmp_file" > "${tmp_file}.bak"; then
+          echo "Error: edit_file could not rewrite $path (mode: append). File left untouched." >&2
+          rm -f "${tmp_file}.bak" "$edit_content_file"
+          return 1
+        fi
         mv "${tmp_file}.bak" "$tmp_file"
       ;;
     esac
   done < <(jq -j 'sort_by(.line_start) | reverse | .[] | .mode, "\u0000", (.line_start|tostring), "\u0000", (.line_end|tostring), "\u0000", .content, "\u0000"' <<< "$changes")
 
+  rm -f "$edit_content_file"
   mv "$tmp_file" "$path"
 }
 
@@ -343,10 +442,19 @@ edit_file() {
 apply_diff() {
   local diff_content
 
-  # Avoid patching core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
-  if [[ $FUNC_ARGS == "${PROJECT_ROOT}/"*[cC][oO][rR][eE].[sS][hH]* || $FUNC_ARGS == "${PROJECT_ROOT}/"*[cC][lL][iI].[sS][hH]* || $FUNC_ARGS == "${PROJECT_ROOT}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $FUNC_ARGS == "${PROJECT_ROOT}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
-  fi
+  # Avoid patching core pipeline files while running. Diff targets live inside
+  # JSON-escaped headers (--- a/... +++ b/...), so unescape, extract every
+  # target path and resolve it canonically before guarding.
+  local diff_path resolved_target
+  while IFS= read -r diff_path; do
+    [[ -z $diff_path ]] && continue
+    resolved_target=$(_realpath "$diff_path")
+    case "$resolved_target" in
+      "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${SCRIPT_DIR}/image.sh"|"${SCRIPT_DIR}/pipeline.sh")
+        error "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
+      ;;
+    esac
+  done < <(sed 's/\\n/\n/g' <<< "$FUNC_ARGS" | grep -E '^(---|\+\+\+|\*\*\*) ' | awk '{print $2}' | sed -E 's#^[ab]/##')
 
   # Extract the unified diff from the tool arguments
   diff_content=$(jq -r '.diff // empty' <<< "$FUNC_ARGS")
@@ -398,7 +506,7 @@ web_search() {
   encoded_query=$(jq -nrc --arg q "$query" '$q | @uri')
 
   # Outbound curl options (socks5h proxy if Tor is active in backend, else direct)
-  if timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
+  if _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
     search_url="https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion"
     curl_opts+=("-x" "$TOR_PROXY")
   fi
@@ -409,9 +517,10 @@ web_search() {
 
   # Align-extract data streams
   local -a titles raw_urls snippets
-  mapfile -t titles < <(htmlq ".result__a" --text <<< "$html_data")
-  mapfile -t raw_urls < <(htmlq ".result__a" --attribute href <<< "$html_data")
-  mapfile -t snippets < <(htmlq ".result__snippet" --text <<< "$html_data")
+  local line
+  while IFS= read -r line; do titles+=("$line");   done < <(htmlq ".result__a" --text <<< "$html_data")
+  while IFS= read -r line; do raw_urls+=("$line"); done < <(htmlq ".result__a" --attribute href <<< "$html_data")
+  while IFS= read -r line; do snippets+=("$line"); done < <(htmlq ".result__snippet" --text <<< "$html_data")
 
   # Process and interleave results with 100% zero-fork native trimming and URL decoding
   for i in "${!titles[@]}"; do
@@ -491,11 +600,60 @@ web_browse() {
   fi
 
   # Call our optimized script WITHOUT Puppeteer
-  if is_termux ; then
-    "$WEB_BROWSE_MOBILE" "$updated_args"
-  else
-    "$WEB_BROWSE" "$updated_args"
+  "$WEB_BROWSE" "$updated_args"
+}
+
+# 12. Generate an image via the image.sh engine (autonomous generation path)
+#     Maps tool-call JSON args to CLI flags and runs create_image().
+#     Provider resolution is fully delegated to image.sh load_image_config():
+#       --provider > $IMAGE_PROVIDER > config/state.json > $PROVIDER > pollinations
+#     Anti-loop guard is HERE (wrapper level): /draw stays unlimited, only the
+#     autonomous path is capped. Counting real files under data/images =
+#     crash-safe, no state file to reset.
+create_image() {
+  local prompt_val ratio_val size_val model_val provider_val resolution_val format_val
+  local gen_dir gen_count wrapper_root
+  local -a img_args
+
+  if [[ -n $FUNC_ARGS ]]; then
+    {
+      IFS= read -r -d '' prompt_val
+      IFS= read -r -d '' ratio_val
+      IFS= read -r -d '' size_val
+      IFS= read -r -d '' model_val
+      IFS= read -r -d '' provider_val
+      IFS= read -r -d '' resolution_val
+      IFS= read -r -d '' format_val
+    } < <(jq -j '.prompt, "\u0000", .ratio, "\u0000", .size, "\u0000", .model, "\u0000", .provider, "\u0000", .resolution, "\u0000", .format, "\u0000"' <<< "$FUNC_ARGS")
   fi
+
+  [[ -z $prompt_val || $prompt_val == "null" ]] && error "The prompt parameter is required."
+
+  # Import the image engine into THIS process. Order matters: image.sh calls
+  # core.sh helpers (logging, keyring, paths). Both are definitions-only when
+  # sourced (idempotent guards) — no init side effects.
+  wrapper_root="$SCRIPT_DIR"
+  # shellcheck source=/dev/null
+  source "${wrapper_root}/core.sh"
+  # shellcheck source=/dev/null
+  source "${wrapper_root}/image.sh"
+
+  # Anti-loop guard (after sourcing: DATA_STORE follows core.sh sandbox mapping)
+  gen_dir="${DATA_STORE:-${wrapper_root}/data}/images"
+  gen_count=$(find "$gen_dir" -type f -mmin -60 2>/dev/null | wc -l)
+  if (( gen_count >= MAX_IMAGE_GEN_PER_HOUR )); then
+    error "Anti-loop guard: ${gen_count} image(s) generated in the last hour (max ${MAX_IMAGE_GEN_PER_HOUR}). Stop generating and ask the user before trying again."
+  fi
+
+  img_args=("$prompt_val")
+  [[ -n $ratio_val && $ratio_val != "null" ]] && img_args+=(--ratio "$ratio_val")
+  [[ -n $size_val && $size_val != "null" ]] && img_args+=(--size "$size_val")
+  [[ -n $model_val && $model_val != "null" ]] && img_args+=(--model "$model_val")
+  [[ -n $provider_val && $provider_val != "null" ]] && img_args+=(--provider "$provider_val")
+  [[ -n $resolution_val && $resolution_val != "null" ]] && img_args+=(--resolution "$resolution_val")
+  [[ -n $format_val && $format_val != "null" ]] && img_args+=(--format "$format_val")
+
+  generate_image "${img_args[@]}"
 }
 
 # Bootstrap

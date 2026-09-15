@@ -9,7 +9,7 @@
 # Lead Developer & Architect : Jiab77
 # AI Sorcerer & Co-Creator   : Jarvis (hy3)
 #
-# Version: 0.4.2
+# Version: 0.4.3
 # ==============================================================================
 
 # Options
@@ -31,9 +31,34 @@ SCRIPT_NAME="${SCRIPT_FILE%.*}"
 LOG_FILE="${SCRIPT_NAME}.log"
 WEB_BROWSE_TOOL="${SCRIPT_DIR}/web-browse.sh"
 
+# Strings helpers
+to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
+to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
+
+# Logger function
+log() {
+  echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nArguments: $*" >> "$LOG_FILE"
+}
+
+# _timeout: GNU `timeout` when present, else a watch-dog (macOS ships none).
+_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  else
+    "$@" & local pid=$!
+    ( sleep "$secs"; kill "$pid" 2>/dev/null ) & local wd=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    kill "$wd" 2>/dev/null
+    wait "$wd" 2>/dev/null
+    return "$rc"
+  fi
+}
+
 # Proxy SOCKS5 for Tor (if active)
 IF_TOR_PROXY=""
-if timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
+if _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
   IF_TOR_PROXY="$TOR_PROXY"
 fi
 
@@ -88,15 +113,6 @@ CURL_OPTS=("-sfSL" "-A" "$USER_AGENT" "--connect-timeout" "10")
 if [[ $USE_TOR == true && -n $IF_TOR_PROXY ]]; then
   CURL_OPTS+=("-x" "$IF_TOR_PROXY")
 fi
-
-# Strings helpers
-to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
-to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
-
-# Logger function
-log() {
-  echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nArguments: $*" >> "$LOG_FILE"
-}
 
 if [[ $USE_JS == true ]]; then
   # log "JavaScript fallback option is selected but not natively needed for specific REST APIs."

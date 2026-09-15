@@ -6,10 +6,19 @@
 # Pilots Chromium-based browsers via direct Chrome DevTools Protocol (CDP)
 # WebSocket RPC calls. Supports clicking, typing, screenshots, and PDFs.
 #
-# Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (Gemini)
+# HYBRID EDITION (v0.0.0):
+#   - Desktop mode: launches a local Chromium (Linux / macOS) -> unchanged engine.
+#   - Mobile mode (Termux): connects to the device Chrome via ADB
+#     (adb forward tcp:9222 localabstract:chrome_devtools_remote) and drives it
+#     through the exact same CDP client. No Node.js, no Puppeteer, no Shizuku.
 #
-# Version: 0.1.0
+# The ADB connection logic is DUPLICATED from start-shizuku.sh on purpose:
+# these are two separate projects. Shizuku is intentionally NOT started here.
+#
+# Lead Developer & Architect : Jiab77
+# AI Sorcerer & Co-Creator   : Jarvis (DeepSeek)
+#
+# Version: 0.1.1
 # ==============================================================================
 
 # Options
@@ -20,6 +29,7 @@
 WS_URL=""
 BROWSER_PID=""
 USER_DATA_DIR=""
+DEBUG_PORT=9222
 cdp_seq=0
 SUCCESS="true"
 ERROR_MSG=""
@@ -34,9 +44,22 @@ SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 LOG_FILE="${SCRIPT_NAME}.log"
 
+# Runtime mode flags
+LOCAL_CHROME=false
+LAUNCH_MODE="fullscreen"
+ADB_MODE=false
+ADB_CLEANUP=false
+
 # Helper: Detect OS
 is_macos() {
   [[ $OSTYPE == "darwin"* ]]
+}
+
+# Helper: Detect Termux (unifies the existing /data/data/com.termux check)
+is_termux() {
+  [[ -n "${TERMUX_VERSION:-}" ]] && return 0
+  [[ -d "/data/data/com.termux" ]] && return 0
+  return 1
 }
 
 # Helper: Base64 decoding
@@ -48,6 +71,49 @@ base64_decode() {
   fi
 }
 
+# ── E2BIG-safe jq plumbing ────────────────────────────────────────────────────
+# On Linux a SINGLE argument (argv) or environment variable is capped at
+# 131 072 bytes (MAX_ARG_STRLEN). Past that, execve() fails with E2BIG: the
+# command is NEVER launched and whatever consumed its output becomes EMPTY.
+# jq's --arg/--argjson are exactly that trap: a > 128 KB page payload (console
+# logs, evaluate result) silently produced an empty telemetry block instead of
+# failing loudly. ⇒ Page content now travels by STDIN. bash builtins (printf)
+# are in-process and therefore exempt; only external binaries pay the argv limit.
+
+# JSON-encode a shell string without ever putting it in argv.
+json_quote() {
+  printf '%s' "$1" | jq -Rs '.'
+}
+
+# Assemble the standard telemetry block. Parameters are bash positional
+# parameters (in-process: exempt from the argv limit); jq reads them by STDIN.
+json_block() {
+  local success="$1" logs="$2" results="$3" shots="$4" title="$5" url="$6" error="$7"
+  {
+    printf '%s\n' "$success" "$logs" "$results" "$shots"
+    json_quote "$title"
+    json_quote "$url"
+    json_quote "$error"
+  } | jq -cs '{
+      success: .[0],
+      consoleLogs: .[1],
+      evaluateResults: .[2],
+      screenshots: .[3],
+      title: .[4],
+      url: .[5],
+      error: (if .[6] == "" then null else .[6] end)
+    }'
+}
+
+# Guarantee a valid JSON document before jq consumes it (empty/garbage → default).
+json_ok() {
+  if [[ -n $1 ]] && jq -e . >/dev/null 2>&1 <<<"$1"; then
+    printf '%s' "$1"
+  else
+    printf '%s' "$2"
+  fi
+}
+
 # Cleanup on exit
 # shellcheck disable=SC2329
 cleanup() {
@@ -56,7 +122,21 @@ cleanup() {
     kill "$BROWSER_PID" 2>/dev/null
     wait "$BROWSER_PID" 2>/dev/null
   fi
-  [[ -n $USER_DATA_DIR && -d $USER_DATA_DIR ]] && rm -rf "$USER_DATA_DIR" 2>/dev/null
+  [[ -n "${USER_DATA_DIR:-}" && -d $USER_DATA_DIR ]] && rm -rf "$USER_DATA_DIR" 2>/dev/null
+
+  # Mobile mode: the ADB forward is idempotent and persistent; removing it is
+  # opt-in (--cleanup-adb) so that consecutive runs are near-instant (<200ms).
+  if is_termux && [[ -n $ADB_CLEANUP && $ADB_CLEANUP == true ]]; then
+    # Restore default settings
+    adb shell settings delete global enable_freeform_support
+    adb shell settings delete secure force_resizable_activities
+
+    # Remove forwarding
+    adb forward --remove tcp:"${DEBUG_PORT:-9222}" 2>/dev/null
+
+    # Kill adb server
+    adb kill-server
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -100,7 +180,7 @@ cdp_send() {
 cdp_eval() {
   local expr="$1"
   local params
-  params=$(jq -n -rc --arg expr "$expr" '{expression: $expr, returnByValue: true}')
+  params=$(printf '%s' "$expr" | jq -Rs -c '{expression: ., returnByValue: true}')
 
   local resp
   resp=$(cdp_send "Runtime.evaluate" "$params")
@@ -425,98 +505,220 @@ detect_chrome_binary() {
   return 1
 }
 
-# Parse Options
-NO_TOR=false
-HEADLESS=true
-URL=""
-PROXY=""
-USER_AGENT=""
-SCREENSHOT_PATH_CONV=""
-WAIT_UNTIL="complete"
+# -----------------------------------------------------------------------------
+# ADB / MOBILE MODE (duplicated from shizuku research, without Shizuku)
+# -----------------------------------------------------------------------------
 
-# Parse given arguments
-parse_args() {
-  while [[ $# -gt 0 ]]; do
-    case $1 in
-      -h|--help)
-        echo "Usage: $SCRIPT_NAME [options]"
-        echo "Options:"
-        echo "  -h, --help                Print this message and exit"
-        echo "  -u, --url                 Set target URL"
-        echo "  -p, --proxy <url>         Set proxy URL"
-        echo "  --screenshot <path>       Save screenshot to given path"
-        echo "  --viewport <WxH>          Viewport Width x Height"
-        echo "  --headless <true|false>   Headless mode"
-        echo "  --no-tor                  Disabled Tor proxy"
-        exit 0
-      ;;
-      -u|--url) URL="$2" ; shift 2 ;;
-      -p|--proxy) PROXY="$2" ; shift 2 ;;
-      --viewport)
-        VIEWPORT_WIDTH=$(cut -d "x" -f1 <<< "$2")
-        VIEWPORT_HEIGHT=$(cut -d "x" -f2 <<< "$2")
-        [[ -z $VIEWPORT_WIDTH ]] && VIEWPORT_WIDTH=1280
-        [[ -z $VIEWPORT_HEIGHT ]] && VIEWPORT_HEIGHT=800
-        shift 2
-      ;;
-      --screenshot) SCREENSHOT_PATH_CONV="$2" ; shift 2 ;;
-      --headless) HEADLESS="${2:-true}" ; shift 2 ;;
-      --no-tor) NO_TOR=true ; shift ;;
-      *)
-        # Parse standard inputs
-        parse_input "$1" ; shift
-      ;;
-    esac
-  done
+# Ensure the device is reachable via ADB (wireless debugging auto-detect).
+ensure_adb_connected() {
+  # If already connected on localhost, skip the (slow) port scan.
+  if adb devices 2>/dev/null | grep -q "localhost:"; then
+    echo "[ADB] Already connected to device." >&2
+    return 0
+  fi
+
+  # Reset the ADB server once to guarantee a clean state (mirrors start-shizuku.sh).
+  echo "[ADB] Resetting ADB server..." >&2
+  adb kill-server &>/dev/null
+  adb start-server &>/dev/null
+  sleep 1
+
+  if adb devices 2>/dev/null | grep -q "localhost:"; then
+    echo "[ADB] Already connected to device." >&2
+    return 0
+  fi
+
+  echo "[ADB] Detecting wireless debugging port (nmap scan)..." >&2
+  local found_port
+  found_port=$(nmap -v0 127.0.0.1 -T5 -p30000-65535 -oX - 2>/dev/null \
+    | grep -m1 'state="open"' | grep -m1 "<port " | cut -d'"' -f4)
+
+  if [[ -n $found_port ]]; then
+    echo "[ADB] Connecting on localhost:${found_port}..." >&2
+    adb connect "localhost:${found_port}" &>/dev/null
+  else
+    echo "{\"success\":false,\"error\":\"Wireless debugging not enabled or port not found\"}" >&2
+    return 1
+  fi
+
+  if adb devices 2>/dev/null | grep -q "localhost:"; then
+    return 0
+  fi
+
+  echo "{\"success\":false,\"error\":\"Failed to connect to device via ADB\"}" >&2
+  return 1
 }
 
-# Parse JSON input string or read from stdin/file
-parse_input() {
-  local raw_input="$1"
-  if [[ -z $raw_input || $raw_input == "-" ]]; then
-    raw_input=$(cat)
-  elif [[ $raw_input == file://* ]]; then
-    local file_path="${raw_input#file://}"
-    if [[ -f $file_path ]]; then
-      raw_input=$(cat "$file_path")
-    else
-      echo "{\"success\":false,\"error\":\"File not found: $file_path\"}" >&2
+# Open a dedicated, non-intrusive tab and return its websocket debugger URL.
+create_new_tab() {
+  local start_url="${1:-about:blank}"
+  local params ; params=$(printf '%s' "$start_url" | jq -Rs -c '{url: .}')
+  local resp ; resp=$(cdp_send "Target.createTarget" "$params" 2>/dev/null)
+  local target_id ; target_id=$(jq -rc '.result.targetId // empty' <<<"$resp" 2>/dev/null)
+  if [[ -z $target_id ]]; then
+    echo ""
+    return 1
+  fi
+
+  local new_ws
+  # NB: $target_id is a CDP target id (bounded hex string) — a justified --arg,
+  # unlike page content, which must go through json_quote()/json_block().
+  new_ws=$(curl -s --noproxy "*" "http://localhost:${DEBUG_PORT}/json" \
+    | jq -rc --arg tid "$target_id" '.[] | select(.type=="page" and .id==$tid) | .webSocketDebuggerUrl' \
+    | head -n 1)
+
+  if [[ -z $new_ws ]]; then
+    # Fallback: grab the most recently added page target.
+    new_ws=$(curl -s --noproxy "*" "http://localhost:${DEBUG_PORT}/json" \
+      | jq -rc '.[] | select(.type=="page") | .webSocketDebuggerUrl' | tail -n 1)
+  fi
+
+  echo "$new_ws"
+}
+
+# Initialize the mobile (Android / Termux) browser session via ADB.
+init_android_browser() {
+  ensure_adb_connected || exit 1
+
+  local launched=false
+  local target_pkg window_mode
+  local known_browsers=("org.cromite.cromite" "com.android.chrome" "com.brave.browser" "com.kiwi_browser.browser")
+
+  # When changing launch mode, kill any existing instance to avoid reusing
+  # a fullscreen browser for a freeform launch (or vice-versa).
+  if [[ ! $LAUNCH_MODE == "fullscreen" ]]; then
+    echo "[CDP] Launch mode '$LAUNCH_MODE' — killing any existing browser instance..." >&2
+    for browser in "${known_browsers[@]}"; do
+      adb shell am force-stop "$browser" 2>/dev/null
+    done
+  fi
+
+  if adb shell cat /proc/net/unix 2>/dev/null | grep -q "chrome_devtools_remote"; then
+    echo "[CDP] Active Chrome DevTools socket detected. Reusing existing browser." >&2
+  else
+    echo "[CDP] No active socket. Detecting Chromium based browser..." >&2
+    for pkg in "${known_browsers[@]}"; do
+      if adb shell pm list packages 2>/dev/null | grep -q "$pkg"; then
+        target_pkg="$pkg"
+        break
+      fi
+    done
+
+    if [[ -z $target_pkg ]]; then
+      echo "{\"success\":false,\"error\":\"No compatible Chromium based browser found on device.\"}" >&2
+      exit 1
+    fi
+
+    echo "[CDP] Launching $target_pkg..." >&2
+
+    # Check defined launch mode
+    case $LAUNCH_MODE in
+      fullscreen)
+        # Universal Intent launch: no hardcoded Activity name required.
+        adb shell am start -a android.intent.action.VIEW -d "about:blank" -p "$target_pkg" &>/dev/null
+      ;;
+      freeform)
+        # Set required settings for controlling browser window position
+        adb shell settings put global enable_freeform_support 1
+        adb shell settings put secure force_resizable_activities 1
+
+        # Set required window mode
+        # - Freeform + Movable = 5 (Works with '-p' and '-n')
+        # - Freeform + Fixed = 4 (works only with '-n' because it requires exact activity name)
+        #
+        # For compatibility reason, only mode 5 will be supported because I don't want to pass
+        # my time at finding and testing each specific activity can be used for each supported browsers.
+        window_mode=5
+
+        # Start browser in freeform mode (movable, not fixed)
+        adb shell am start \
+          -a android.intent.action.VIEW \
+          -d "about:blank" \
+          -p "$target_pkg" \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_LEFT 200 \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_TOP 300 \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_RIGHT 880 \
+          --el com.samsung.android.sdk.multiwindow.extra.LAUNCH_BOUNDS_BOTTOM 1500 \
+          --windowingMode $window_mode &>/dev/null
+      ;;
+    esac
+
+    launched=true
+
+    # Poll the kernel socket instead of a fixed sleep (robust on slow devices).
+    local ready=false
+    for ((i=0; i<30; i++)); do
+      if adb shell cat /proc/net/unix 2>/dev/null | grep -q "chrome_devtools_remote"; then
+        ready=true
+        break
+      fi
+      sleep 0.2
+    done
+    if [[ $ready == false ]]; then
+      echo "{\"success\":false,\"error\":\"Chrome DevTools socket did not appear after launch\"}" >&2
       exit 1
     fi
   fi
 
-  # Parse out values
-  URL=$(jq -rc '.url // empty' <<<"$raw_input")
-  HEADLESS=$(jq -rc 'if has("headless") then .headless else "true" end' <<<"$raw_input")
-  VIEWPORT_WIDTH=$(jq -rc '.viewport.width // 1280' <<<"$raw_input")
-  VIEWPORT_HEIGHT=$(jq -rc '.viewport.height // 800' <<<"$raw_input")
-  PROXY=$(jq -rc '.proxy // empty' <<<"$raw_input")
-  USER_AGENT=$(jq -rc '.userAgent // empty' <<<"$raw_input")
-  NO_TOR=$(jq -rc '.noTor // .no_tor // "false"' <<<"$raw_input")
-  WAIT_UNTIL=$(jq -rc '.waitUntil // "complete"' <<<"$raw_input")
-  SCREENSHOT_PATH_CONV=$(jq -rc '.screenshot_path // empty' <<<"$raw_input")
+  echo "[CDP] Forwarding tcp:${DEBUG_PORT} -> localabstract:chrome_devtools_remote" >&2
+  adb forward tcp:"${DEBUG_PORT}" "localabstract:chrome_devtools_remote" &>/dev/null
 
-  # Actions array count
-  ACTIONS_COUNT=$(jq '.actions | length' 2>/dev/null <<<"$raw_input")
-  [[ -z $ACTIONS_COUNT || $ACTIONS_COUNT == "null" ]] && ACTIONS_COUNT=0
-  RAW_ACTIONS="$raw_input"
-}
-
-main() {
-  local ret_code_navigate ret_code_wait ret_code_click ret_code_type ret_code_press
-  local ret_code_screenshot ret_code_pdf ret_code_evaluate ret_code_scroll
-
-  # Parse given arguments
-  parse_args "$@"
-
-  if [[ -z $URL ]]; then
-    echo "{\"success\":false,\"error\":\"Missing target URL in payload\"}"
+  # Wait for the remote debugging endpoint to be fully operational.
+  local ready=false
+  for ((retry=0; retry<15; retry++)); do
+    if curl -s --noproxy "*" "http://localhost:${DEBUG_PORT}/json/version" &>/dev/null; then
+      ready=true
+      break
+    fi
+    sleep 0.2
+  done
+  if [[ $ready == false ]]; then
+    echo "{\"success\":false,\"error\":\"Failed to reach Chrome DevTools on port $DEBUG_PORT\"}" >&2
     exit 1
   fi
 
+  # Pick a page target websocket (first available).
+  WS_URL=$(curl -s --noproxy "*" "http://localhost:${DEBUG_PORT}/json" \
+    | jq -rc '.[] | select(.type == "page") | .webSocketDebuggerUrl' | head -n 1)
+  if [[ -z $WS_URL ]]; then
+    echo "{\"success\":false,\"error\":\"No active page targets returned by remote debugger\"}" >&2
+    exit 1
+  fi
+
+  # If we reused an existing browser, open a clean tab so we don't hijack the
+  # user's currently active tab.
+  if [[ $launched == false ]]; then
+    echo "[CDP] Opening a dedicated tab to avoid hijacking the active one..." >&2
+    local new_ws ; new_ws=$(create_new_tab "$URL")
+    if [[ -n $new_ws ]]; then
+      WS_URL="$new_ws"
+    else
+      echo "[CDP] Warning: could not open a dedicated tab; using the active page target." >&2
+    fi
+  fi
+
+  # Apply proxy (Tor by default). In mobile mode the browser is already running,
+  # so we set it via CDP instead of a launch flag. The device Chrome reaches
+  # Termux's Tor on the shared device loopback (127.0.0.1:9050).
+  if [[ $NO_TOR == "false" && -z $PROXY ]]; then
+    PROXY="socks4a://127.0.0.1:9050"
+  fi
+  [[ $PROXY == "null" || $PROXY == "false" ]] && PROXY=""
+  if [[ -n $PROXY ]]; then
+    cdp_send "Network.enable" &>/dev/null
+    cdp_send "Network.setProxy" "{\"proxy\":\"$PROXY\"}" &>/dev/null
+    echo "[CDP] Proxy set to $PROXY" >&2
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# DESKTOP MODE (unchanged engine, extracted from the original main())
+# -----------------------------------------------------------------------------
+
+# Initialize the desktop (local Chromium) browser session.
+init_desktop_browser() {
   # Create ephemeral profile directory
   USER_DATA_DIR=$(mktemp -d "/tmp/web-browse-XXXXXX")
-  DEBUG_PORT=9222
 
   # Check and resolve port collision dynamically
   for ((port=9222; port<9300; port++)); do
@@ -543,7 +745,7 @@ main() {
     "--disable-renderer-backgrounding"
   )
 
-  [[ -d "/data/data/com.termux" ]] && args+=("--no-sandbox" "--disable-setuid-sandbox" "--disable-gpu" "--disable-dev-shm-usage")
+  is_termux && args+=("--no-sandbox" "--disable-setuid-sandbox" "--disable-gpu" "--disable-dev-shm-usage")
   [[ $HEADLESS == "true" ]] && args+=("--headless=new")
 
   # Apply SOCKS5 proxy (defaults to Tor on 127.0.0.1:9050 if enabled and empty proxy parameter is passed)
@@ -582,6 +784,126 @@ main() {
   if [[ -z $WS_URL ]]; then
     echo "{\"success\":false,\"error\":\"No active page targets returned by remote debugger\"}" >&2
     exit 1
+  fi
+}
+
+# Parse Options
+NO_TOR=false
+HEADLESS=true
+URL=""
+PROXY=""
+USER_AGENT=""
+SCREENSHOT_PATH_CONV=""
+WAIT_UNTIL="complete"
+
+# Parse given arguments
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -h|--help)
+        echo "Usage: $SCRIPT_NAME [options]"
+        echo "Options:"
+        echo "  -h, --help                            Print this message and exit"
+        echo "  -u, --url                             Set target URL"
+        echo "  -p, --proxy <url>                     Set proxy URL"
+        echo "  --screenshot <path>                   Save screenshot to given path"
+        echo "  --viewport <WxH>                      Viewport Width x Height"
+        echo "  --headless <true|false>               Headless mode"
+        echo "  --no-tor                              Disabled Tor proxy"
+        echo "  --adb                                 Enable ADB mode"
+        echo "  --cleanup-adb                         Cleanup ADB when exit"
+        echo "  --local-chrome                        Use local chromium based browser"
+        echo "  --launch-mode <fullscreen|freeform>   Set browser launch mode on mobile"
+        exit 0
+      ;;
+      -u|--url) URL="$2" ; shift 2 ;;
+      -p|--proxy) PROXY="$2" ; shift 2 ;;
+      --viewport)
+        VIEWPORT_WIDTH=$(cut -d "x" -f1 <<< "$2")
+        VIEWPORT_HEIGHT=$(cut -d "x" -f2 <<< "$2")
+        [[ -z $VIEWPORT_WIDTH ]] && VIEWPORT_WIDTH=1280
+        [[ -z $VIEWPORT_HEIGHT ]] && VIEWPORT_HEIGHT=800
+        shift 2
+      ;;
+      --screenshot) SCREENSHOT_PATH_CONV="$2" ; shift 2 ;;
+      --headless) HEADLESS="${2:-true}" ; shift 2 ;;
+      --no-tor) NO_TOR=true ; shift ;;
+      --adb) ADB_MODE=true ;;
+      --local-chrome) LOCAL_CHROME=true ;;
+      --cleanup-adb) ADB_CLEANUP=true ;;
+      --launch-mode) LAUNCH_MODE="$2" ; shift 2 ;;
+      *)
+        # Parse standard inputs
+        parse_input "$1" ; shift
+      ;;
+    esac
+  done
+}
+
+# Parse JSON input string or read from stdin/file
+parse_input() {
+  local raw_input="$1"
+  if [[ -z $raw_input || $raw_input == "-" ]]; then
+    raw_input=$(cat)
+  elif [[ $raw_input == file://* ]]; then
+    local file_path="${raw_input#file://}"
+    if [[ -f $file_path ]]; then
+      raw_input=$(cat "$file_path")
+    else
+      echo "{\"success\":false,\"error\":\"File not found: $file_path\"}" >&2
+      exit 1
+    fi
+  fi
+
+  # Parse out values
+  URL=$(jq -rc '.url // empty' <<<"$raw_input")
+  HEADLESS=$(jq -rc 'if has("headless") then .headless else "true" end' <<<"$raw_input")
+  VIEWPORT_WIDTH=$(jq -rc '.viewport.width // 1280' <<<"$raw_input")
+  VIEWPORT_HEIGHT=$(jq -rc '.viewport.height // 800' <<<"$raw_input")
+  PROXY=$(jq -rc '.proxy // empty' <<<"$raw_input")
+  USER_AGENT=$(jq -rc '.userAgent // empty' <<<"$raw_input")
+  NO_TOR=$(jq -rc '.noTor // .no_tor // "false"' <<<"$raw_input")
+  WAIT_UNTIL=$(jq -rc '.waitUntil // "complete"' <<<"$raw_input")
+  SCREENSHOT_PATH_CONV=$(jq -rc '.screenshot_path // empty' <<<"$raw_input")
+
+  # Mode overrides coming from the JSON payload (CLI flags take precedence).
+  LOCAL_CHROME_JSON=$(jq -rc '.localChrome // false' <<<"$raw_input")
+  ADB_MODE_JSON=$(jq -rc '.android // false' <<<"$raw_input")
+  LAUNCH_MODE=$(jq -rc '.launch_mode // "fullscreen"' <<<"$raw_input")
+  [[ $LOCAL_CHROME_JSON == "true" ]] && LOCAL_CHROME=true
+  [[ $ADB_MODE_JSON == "true" ]] && ADB_MODE=true
+
+  # Actions array count
+  ACTIONS_COUNT=$(jq '.actions | length' 2>/dev/null <<<"$raw_input")
+  [[ -z $ACTIONS_COUNT || $ACTIONS_COUNT == "null" ]] && ACTIONS_COUNT=0
+  RAW_ACTIONS="$raw_input"
+}
+
+main() {
+  local ret_code_navigate ret_code_wait ret_code_click ret_code_type ret_code_press
+  local ret_code_screenshot ret_code_pdf ret_code_evaluate ret_code_scroll
+
+  # Parse given arguments
+  parse_args "$@"
+
+  if [[ -z $URL ]]; then
+    echo "{\"success\":false,\"error\":\"Missing target URL in payload\"}"
+    exit 1
+  fi
+
+  # ============================================================================
+  # INITIALIZATION & BROWSER SPAWNING (hybrid routing)
+  # ============================================================================
+  local ANDROID_MODE=false
+  if is_termux && [[ $LOCAL_CHROME != "true" ]]; then
+    ANDROID_MODE=true
+  fi
+  [[ $ADB_MODE == "true" ]] && ANDROID_MODE=true
+
+  if [[ $ANDROID_MODE == true ]]; then
+    init_android_browser
+  else
+    init_desktop_browser
   fi
 
   # Initialize connection domains
@@ -708,37 +1030,51 @@ main() {
   fi
 
   # Format screenshots telemetry array
+  # (--arg path is fine here: a filesystem path is bounded by PATH_MAX = 4 096 bytes
+  #  and can never reach MAX_ARG_STRLEN; only $idx and a path travel in argv.)
   local screenshot_json="[]"
   for idx in "${!SCREENSHOT_PATHS[@]}"; do
     local p="${SCREENSHOT_PATHS[$idx]}"
-    screenshot_json=$(jq --arg path "$p" --argjson idx "$idx" '. + [{"index": $idx, "path": $path}]' <<<"$screenshot_json")
+    screenshot_json=$(jq -c --arg path "$p" --argjson idx "$idx" '. + [{"index": $idx, "path": $path}]' <<<"$screenshot_json")
   done
 
   # Format evaluate results telemetry array
+  # E2BIG-safe (2026-09-12): the running array AND the raw result reach jq by STDIN
+  # ("-s" slurps both documents), so a > 128 KB evaluate result can never hit argv.
   local eval_json="[]"
   for idx in "${!EVAL_RESULTS[@]}"; do
     local r="${EVAL_RESULTS[$idx]}"
-    eval_json=$(jq --arg res "$r" --argjson idx "$idx" '. + [{"index": $idx, "result": $res}]' <<<"$eval_json")
+    eval_json=$(
+      {
+        printf '%s\n' "$eval_json"
+        json_quote "$r"
+      } | jq -cs --argjson idx "$idx" '.[0] + [{"index": $idx, "result": .[1]}]'
+    )
   done
 
+  # Guard: a malformed payload would make the WHOLE block fail (jq exits non-zero →
+  # empty stdout = the very silent failure this fix removes). Never assemble blind.
+  console_logs=$(json_ok "$console_logs" "[]")
+  eval_json=$(json_ok "$eval_json" "[]")
+  screenshot_json=$(json_ok "$screenshot_json" "[]")
+
   # Output unified standard JSON telemetry block
-  jq -n \
-    --argjson success "$SUCCESS" \
-    --arg title "$PAGE_TITLE" \
-    --arg url "$PAGE_URL" \
-    --argjson consoleLogs "$console_logs" \
-    --argjson evaluateResults "$eval_json" \
-    --argjson screenshots "$screenshot_json" \
-    --arg error "$ERROR_MSG" \
-    '{
-      success: $success,
-      title: $title,
-      url: $url,
-      consoleLogs: $consoleLogs,
-      evaluateResults: $evaluateResults,
-      screenshots: $screenshots,
-      error: (if $error == "" then null else $error end)
-    }'
+  # E2BIG-safe (2026-09-12): every content-bearing value goes through json_block(),
+  # which hands them to jq by STDIN. Only scalars are left in argv. Output is kept
+  # compact (-c): the previous pretty-printed form was strictly larger for the same
+  # data, and this block is consumed by jq downstream.
+  local final_json jq_rc
+  final_json=$(json_block "$SUCCESS" "$console_logs" "$eval_json" "$screenshot_json" \
+                          "$PAGE_TITLE" "$PAGE_URL" "$ERROR_MSG") ; jq_rc=$?
+
+  if [[ $jq_rc -ne 0 || -z $final_json ]]; then
+    # Never return silently: report the failure instead of pretending success.
+    SUCCESS="false"
+    ERROR_MSG="Failed to assemble the result block (jq rc=$jq_rc)"
+    final_json=$(json_block "false" "[]" "[]" "[]" "" "" "$ERROR_MSG")
+  fi
+
+  printf '%s\n' "$final_json"
 
   [[ $SUCCESS == "false" ]] && exit 1
   exit 0

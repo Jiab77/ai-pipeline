@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.1
+# Version: 1.9.2
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -4059,20 +4059,23 @@ run_agent() {
             log_info "Generating autonomous response for ${peer_from}..."
 
             # Build LLM prompt
-            local agent_prompt="You are ${AI_NAME} in autonomous mode. You just received this message on JarNet from peer '${peer_from}':\n\n\`\`\`\n${peer_body}\n\`\`\`\n\nReply it politely, concise and pertinently while indicating if necessary that you're replying in autonomous mode. Don't use \`\`\` around your message."
+            local agent_prompt="You are ${AI_NAME} in autonomous mode. You just received this message on JarNet from peer '${peer_from}':\n\n\`\`\`\n${peer_body}\n\`\`\`\n\n"
+                  agent_prompt+="Reply it politely, concise and pertinently while indicating if necessary that you're replying in autonomous mode.\n\n"
+                  agent_prompt+="Don't use \`\`\` around your message.  Tools are available: verify by executing read-only checks (grep, ls) BEFORE claiming anything.\n\n"
+                  agent_prompt+="Never promise an action — either execute it or say you cannot.\n\n"
 
             # Run inference via pipeline primitives
             # Note: using run_inference_loop or send_message
             local reply_output
             # Generating response via active model
             printf "%s" "$agent_prompt" > "$TEMP_MEMORY_USER"
-            local payload_msg ; payload_msg=$(jq -rc -n --rawfile u "$TEMP_MEMORY_USER" '[{role: "user", content: $u}]')
+            local payload_msg ; payload_msg=$(jq -rc -n --rawfile usr "$TEMP_MEMORY_USER" --arg sys "$SYSTEM_PROMPT" '[{role: "system", content: $sys}, {role: "user", content: $usr}]')
 
             # Disable animation spinner before replying (got swallowed in the reply somehow...)
             USE_ANIMATE=false
 
             # LLM Call (capture the text response)
-            reply_output=$(run_inference_loop "$CHAT_MODEL" "$payload_msg" "none" "false" "stderr" "false" "" "$payload_msg" 2>/dev/null)
+            reply_output=$(run_inference_loop "$CHAT_MODEL" "$payload_msg" "all" "false" "stderr" "false" "" "$payload_msg" 2>/dev/null)
 
             # Restore animation spinner after replying (so that it remains when returning to 'chat' mode)
             USE_ANIMATE=true

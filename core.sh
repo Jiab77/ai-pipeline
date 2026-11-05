@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.0
+# Version: 1.9.1
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -61,6 +61,7 @@ TOR_PORT=9050
 DEBUG="${DEBUG:-false}"       # Enable / Disable debug mode
 USE_TOR="${USE_TOR:-true}"    # Enable / Disable routing cloud API calls through Tor proxy
 USE_TOOLS=true                # Enable / Disable tool calling capabilities
+USE_ANIMATE=true              # Enable / Disable 'Thinking...' animation spinner
 PULL_MODELS=false             # Enable / Disable initial models pulling
 SHOW_THINKING=true            # Enable / Disable model reasoning display
 VISION_ENABLED=true           # Enable vision for all cloud providers models
@@ -220,7 +221,7 @@ cleanup_the_mess() {
 }
 
 # Avoid blocking image creation process (damn tricky to find it...)
-[[ "${BASH_SOURCE[0]}" == "${0}" ]] && trap cleanup_the_mess EXIT INT TERM
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && trap cleanup_the_mess EXIT TERM
 
 # -----------------------------------------------------------------------------
 # High-Fidelity Terminal Formatting & Styles
@@ -3041,13 +3042,13 @@ run_inference_loop() {
     fi
 
     # Show dynamic spinner while waiting for network response
-    start_anim "dots" "${CLR_B_MAGENTA}${ICON_BRAIN} Thinking${ANSI_RESET}"
+    [[ $USE_ANIMATE == true ]] && start_anim "dots" "${CLR_B_MAGENTA}${ICON_BRAIN} Thinking${ANSI_RESET}"
 
     # Handle received response
     raw_res=$(api_call "$payload")
 
     # Stop spinner and clear line as soon as response arrives
-    stop_anim
+    [[ $USE_ANIMATE == true ]] && stop_anim
 
     # Handle empty responses
     if [[ -z $raw_res || $raw_res == "null" ]]; then
@@ -4042,12 +4043,12 @@ run_agent() {
           local msg_json ; msg_json=$(jq -c ".messages[$i]" <<< "$inbox_json" 2>/dev/null)
           peer_from=$(jq -r '.envelope.from // "unknown"' <<< "$msg_json" 2>/dev/null)
           peer_sid=$(jq -r '.envelope.sid // empty' <<< "$msg_json" 2>/dev/null)
-          peer_reply_to=$(jq -r '.envelope.reply_to // empty' <<< "$msg_json" 2>/dev/null)
+          # peer_reply_to=$(jq -r '.envelope.reply_to // empty' <<< "$msg_json" 2>/dev/null)
           peer_mid=$(jq -r '.envelope.mid // empty' <<< "$msg_json" 2>/dev/null)
           peer_ts=$(jq -r '.envelope.ts // empty' <<< "$msg_json" 2>/dev/null)
           peer_body=$(jq -r '.envelope.body // empty' <<< "$msg_json" 2>/dev/null)
 
-          log_step "Message from [${CLR_B_CYAN}${peer_from}${ANSI_RESET}] (SID: ${peer_sid:-none}) :"
+          log_step "Message from [${CLR_B_CYAN}${peer_from}${ANSI_RESET}] (SID: ${peer_sid:-none}):"
           echo -e "${CLR_DIM}> ${peer_body}${ANSI_RESET}\n"
 
           # ANTI-LOOP GUARD (Golden rule for 'auto' mode) :
@@ -4058,7 +4059,7 @@ run_agent() {
             log_info "Generating autonomous response for ${peer_from}..."
 
             # Build LLM prompt
-            local agent_prompt="You are ${AI_NAME} in autonomous mode. You just received this message on JarNet from peer '${peer_from}':\n\n\`\`\`\n${peer_body}\n\`\`\`\n\nReply it politely, concise and pertinently while indicating if necessary that you're replying in autonomous mode."
+            local agent_prompt="You are ${AI_NAME} in autonomous mode. You just received this message on JarNet from peer '${peer_from}':\n\n\`\`\`\n${peer_body}\n\`\`\`\n\nReply it politely, concise and pertinently while indicating if necessary that you're replying in autonomous mode. Don't use \`\`\` around your message."
 
             # Run inference via pipeline primitives
             # Note: using run_inference_loop or send_message
@@ -4067,17 +4068,28 @@ run_agent() {
             printf "%s" "$agent_prompt" > "$TEMP_MEMORY_USER"
             local payload_msg ; payload_msg=$(jq -rc -n --rawfile u "$TEMP_MEMORY_USER" '[{role: "user", content: $u}]')
 
+            # Disable animation spinner before replying (got swallowed in the reply somehow...)
+            USE_ANIMATE=false
+
             # LLM Call (capture the text response)
             reply_output=$(run_inference_loop "$CHAT_MODEL" "$payload_msg" "none" "false" "stderr" "false" "" "$payload_msg" 2>/dev/null)
+
+            # Restore animation spinner after replying (so that it remains when returning to 'chat' mode)
+            USE_ANIMATE=true
 
             # Clean up and mark as [AUTO]
             local clean_reply ; clean_reply="[AUTO] $(grep -v '^\[.*\]' <<< "$reply_output" | sed '/^[[:space:]]*$/d' | tail -n 20)"
 
             if [[ -n "$clean_reply" && "$clean_reply" != "[AUTO] " ]]; then
-              log_info "Sending response on JarNet to ${peer_from}..."
-              # Using jarnet.sh reply
-              "$jarnet_bin" reply "$peer_sid" "$peer_reply_to" "$clean_reply" "$peer_ts" &>/dev/null
-              log_success "Response sent!"
+              log_step "Sending response to [${CLR_B_CYAN}${peer_from}${ANSI_RESET}] (SID: ${peer_sid:-none}):"
+              echo -e "${CLR_DIM}> ${clean_reply}${ANSI_RESET}\n"
+              local reply_out reply_rc=0
+              reply_out=$("$jarnet_bin" reply "$peer_sid" "$peer_from" "$clean_reply" "$peer_ts") || reply_rc=$?
+              if (( reply_rc == 0 )); then
+                log_success "Response sent to ${peer_from} (re: ${peer_ts})."
+              else
+                log_error "Reply to ${peer_from} refused (rc=${reply_rc}): ${reply_out}"
+              fi
             fi
           fi
           (( i++ ))

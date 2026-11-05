@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.8.0
+# Version: 0.8.1
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -1245,6 +1245,26 @@ jarnet_status() {
   "$NET_HANDLER" status
 }
 
+# 32. Wait for new JarNet messages (bounded poll, §10.5 — reason in a closed set)
+jarnet_wait() {
+  local timeout_val after_n_val
+  {
+    IFS= read -r -d '' timeout_val
+    IFS= read -r -d '' after_n_val
+  } < <(jq -j '.timeout_s, "\u0000", .after_n, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+
+  local -a args ; args=()
+  [[ -n $timeout_val && $timeout_val != "null" ]] && args+=("$timeout_val")
+  [[ -n $after_n_val && $after_n_val != "null" ]] && args+=("$after_n_val")
+
+  local rc=0
+  "$NET_HANDLER" wait "${args[@]}" || rc=$?
+  (( rc == 1 )) && exit 0
+  exit "$rc"
+}
+
 # Bootstrap
 [[ $# -eq 0 ]] && die "Missing arguments.\nUsage: ${0##*/} <function> <arguments>\n"
 
@@ -1256,7 +1276,7 @@ validate_args
 
 # Dispatcher execution
 case "$FUNC_NAME" in
-  exec_command|web_fetch|web_search|web_browse|jarnet_check)
+  exec_command|web_fetch|web_search|web_browse|jarnet_check|jarnet_wait)
     output=$("$FUNC_NAME" "$FUNC_ARGS" 2>&1)
     exit_code=$?
     source_url=$(jq -r '.url // .query // .cmd // .command // "jarnet:inbox"' <<< "$FUNC_ARGS")

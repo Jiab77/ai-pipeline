@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.1.5
+# Version: 1.1.6
 #
 # Contract: jarnet.md 1.1; wire envelope v:1
 # Conformance oracle: tests/jarnet-selftest.sh
@@ -406,9 +406,17 @@ jarn_lock_release() {
   rmdir "$dir" 2>/dev/null || true
 }
 
+# -- identity carried on the wire: callsign (derived from the address),
+#    alias only as fallback when no .addr exists yet.
+jarn_from() {
+  local a
+  a=$(jarn_onion) && jarn_callsign "$a" && return 0
+  jarn_alias
+}
+
 jarn_envelope() {  # <type> <body> [re] [reply_to] [sid]
   jq -cn \
-    --arg type "$1" --arg from "$(jarn_alias)" --arg body "$2" \
+    --arg type "$1" --arg from "$(jarn_from)" --arg body "$2" \
     --arg re "${3:-}" --arg sid "${5:-$(jarn_sid)}" --arg mid "$(jarn_mid)" \
     --arg reply_to "${4:-}" \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -803,6 +811,7 @@ jarn_wait() {  # [timeout_s=45] [after_n]
 jarn_reply() {  # <sid> <reply_to> <body> [ts-of-the-message]
   local sid="${1:?sid}" target="${2:?target}" body="${3:-}" now cnt
   target="${target%.onion}"          # human CLI tolerance, never carried (§12 a)
+  target=$(jarn_peer_addr "$target") # alias|callsign -> onion (§2), passthrough if already onion
 
   # (a) form, before any use: onion v3, 56 base32 characters, no port
   if [[ ! $target =~ ^[a-z2-7]{56}$ ]]; then

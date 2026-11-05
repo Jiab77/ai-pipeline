@@ -7,7 +7,7 @@
 #SOCKSPort 192.168.0.1:9100 # Bind to this address:port too.
 
 ## HTTP Proxy
-HTTPTunnelPort 9080
+#HTTPTunnelPort 9080
 
 ## Logs go to stdout at level "notice" unless redirected by something
 ## else, like one of the below lines. You can have as many Log lines as

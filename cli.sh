@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.8.0
+# Version: 1.8.1
 # ==============================================================================
 
 # Options
@@ -33,7 +33,8 @@ fi
 load_engines
 
 # Set the 'trap' to the right place
-trap cleanup_the_mess EXIT INT TERM
+trap ':' INT
+trap cleanup_the_mess EXIT TERM
 
 # Override default RUN_MODE to start in chat mode by default
 RUN_MODE="chat"

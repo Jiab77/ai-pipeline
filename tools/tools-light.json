@@ -638,7 +638,7 @@
           },
           "re": {
             "type": "string",
-            "description": "Optional in-reply-to message ID (mid) being answered."
+            "description": "Optional timestamp (ts) of the message being answered — never a sid or mid. Leave empty for an opening message."
           }
         }
       }
@@ -648,7 +648,7 @@
     "type": "function",
     "function": {
       "name": "jarnet_reply",
-      "description": "Send an authenticated reply to a previously received JarNet message, respecting session bounds (sid and reply_to).",
+      "description": "Send an authenticated reply to a previously received JarNet message, respecting session bounds (sid) and addressing the original sender.",
       "parameters": {
         "type": "object",
         "required": [
@@ -663,7 +663,7 @@
           },
           "reply_to": {
             "type": "string",
-            "description": "Reply destination (onion address or alias) from the received envelope."
+            "description": "Reply destination: copy the 'from' value of the received message (callsign or onion address). This is NOT read from envelope. reply_to — that field is never carried on the wire."
           },
           "body": {
             "type": "string",

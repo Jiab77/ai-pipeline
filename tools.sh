@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.8.2
+# Version: 0.8.3
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -1152,6 +1152,8 @@ jarnet_send() {
 
   [[ -z $peer_val || $peer_val == "null" ]] && die "Missing required parameter: 'peer'."
   [[ -z $body_val || $body_val == "null" ]] && die "Missing required parameter: 'body'."
+  [[ $type_val == "null" ]] && type_val=""
+  [[ $re_val == "null" ]] && re_val=""
   [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
 
   local -a args ; args=("$peer_val" "$body_val" "${type_val:-msg}" "${re_val:-}")

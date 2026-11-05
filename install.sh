@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2016
+# shellcheck shell=bash disable=SC2034,SC2016
 # ==============================================================================
-# install.sh — Simple install script
+# install.sh — Project installer and updater
 # ==============================================================================
-# This script houses the install logic for this project.
+# Installs or updates the AI pipeline, checks runtime dependencies, and
+# configures the aide command for the current user.
 #
-# Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (GLM-5.3)
-#
-# Version: 0.1.0
+# Author: Jiab77
+# Collaborator: Jarvis
+# Version: 0.2.0
 # ==============================================================================
 
 # Options
-[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
 set -o pipefail
 
@@ -21,18 +20,19 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 
 # Config
-DEBUG=true
-USE_TOR=true          # Route traffic through Tor proxy
+DEBUG="${DEBUG:-false}"       # Enable / Disable debug mode
+USE_TOR="${USE_TOR:-true}"    # Route traffic through Tor proxy
 PROJECT_URL="https://github.com/jiab77/ai-pipeline"
 AI_NAME="Jarvis"
 BIN_NAME="aide"
 CLI_FILE="cli.sh"
 
 # Internals
-SCRIPT_VERSION="0.1.0"
+SCRIPT_VERSION="0.2.0"
 BIN_DIR="${HOME}/.local/bin"
-BIN_DEPS=("git" "curl" "tor" "glow" "figlet" "awk" "sed" "openssl" "jq" "htmlq" "websocat" "grep" "cut" "tr" "printf")
-BIN_DEPS_MOBILE=("${BIN_DEPS[@]}" "adb")
+BIN_DEPS=("git" "curl" "tor" "glow" "figlet" "awk" "sed" "openssl" "iconv" "jq" "htmlq" "websocat" "socat" "ffmpeg" "ffprobe" "exiftool" "file" "grep" "cut" "tr" "printf")
+BIN_DEPS_MOBILE=("${BIN_DEPS[@]}" "adb" "termux-api")
+BIN_BREW=$(command -v brew 2>/dev/null)
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 BIN_GIT=$(command -v git 2>/dev/null)
 PROJECT_DIR=$(basename "$PROJECT_URL")
@@ -162,7 +162,7 @@ EOF
 
 # Install helpers
 check_deps() {
-  local all_deps=()
+  local -a all_deps ; all_deps=()
   local total_deps=0
   local found_deps=0
   local missing_deps=0
@@ -185,55 +185,131 @@ check_deps() {
   [[ $found_deps -ne $total_deps ]] && echo "$missing_deps_str"
 }
 
+install_prebuilt_tools() {
+  local os arch
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  arch=$(uname -m)
+
+  # Normalize architecture
+  case "$arch" in
+    x86_64|amd64) arch="x86_64" ;;
+    aarch64|arm64) arch="aarch64" ;;
+    armv7*) arch="armv7" ;;
+    *) log_warn "Unsupported architecture for prebuilts: $arch" ; return 1 ;;
+  esac
+
+  create_bin_folder
+
+  # 1. htmlq (x86_64 static tarball)
+  if [[ -z $(command -v htmlq 2>/dev/null) && $arch == "x86_64" ]]; then
+    log_info "Fetching prebuilt static 'htmlq'..."
+    curl -sfL "https://github.com/mgdm/htmlq/releases/latest/download/htmlq-${arch}-linux.tar.gz" | tar -xz -C "$BIN_DIR" htmlq 2>/dev/null \
+      && chmod +x "$BIN_DIR/htmlq" && log_success "'htmlq' installed to $BIN_DIR"
+  fi
+
+  # 2. websocat (musl static binary)
+  if [[ -z $(command -v websocat 2>/dev/null) ]]; then
+    local ws_url=""
+    if is_termux; then
+      ws_url="https://github.com/vi/websocat/releases/latest/download/websocat.${arch}-linux-android"
+    else
+      ws_url="https://github.com/vi/websocat/releases/latest/download/websocat.${arch}-unknown-linux-musl"
+    fi
+    log_info "Fetching prebuilt static 'websocat'..."
+    curl -sfL "$ws_url" -o "$BIN_DIR/websocat" 2>/dev/null \
+      && chmod +x "$BIN_DIR/websocat" && log_success "'websocat' installed to $BIN_DIR"
+  fi
+
+  # 3. curl-impersonate (standalone binary)
+  if [[ -z $(command -v curl-impersonate 2>/dev/null) ]]; then
+    local ci_target=""
+    if is_termux; then
+      ci_target="${arch}-linux-android"
+    else
+      ci_target="${arch}-linux-gnu"
+    fi
+    log_info "Fetching prebuilt static 'curl-impersonate'..."
+    curl -sfL "https://github.com/lexiforest/curl-impersonate/releases/download/v2.3.2/curl-impersonate-v2.3.2.${ci_target}.tar.gz" | tar -xz -C "$BIN_DIR" curl-impersonate 2>/dev/null \
+      && chmod +x "$BIN_DIR/curl-impersonate" && log_success "'curl-impersonate' installed to $BIN_DIR"
+  fi
+}
+
 install_deps() {
-  # Goal: Handle all supported platforms in the README (except Windows related)
+  # Goal: Handle all supported platforms cleanly without source compilation
   local missing_deps ; missing_deps=$(check_deps)
 
   if [[ -n $missing_deps ]]; then
     if is_macos; then
       log ; log_info "Detected: macOS"
 
-      # Replace 'htmlq' by 'cargo' and remove 'websocat' for macos
-      missing_deps=${missing_deps//htmlq /cargo}
-      missing_deps=${missing_deps//websocat/}
+      # Remove 'ffprobe' as it is installed with 'ffmpeg'
+      missing_deps=${missing_deps//ffprobe/}
       missing_deps=${missing_deps//  / }
 
-      # Return proper install instructions for macos
-      log_info "Please run:\n\nbrew install $missing_deps && cargo install htmlq websocat"
+      if [[ -z $BIN_BREW ]]; then
+        log_error "You must install 'brew' to continue.\n\nPlease go to https://brew.sh/ to install Homebrew and try again."
+      else
+        log_info "Please run:\n\nbrew install $missing_deps"
+        # Optional recommendation for anti-bot bypass on macOS
+        if [[ -z $(command -v curl-impersonate 2>/dev/null) ]]; then
+          log_info "Recommended for advanced web scraping:\nbrew install lexiforest/tap/curl-impersonate"
+        fi
+      fi
     elif is_termux; then
       log ; log_info "Detected: Termux"
-
-      # Replace 'htmlq' by 'cargo-binstall' for termux
-      missing_deps=${missing_deps//htmlq /cargo-binstall }
 
       # Replace 'adb' by 'android-tools' for termux
       missing_deps=${missing_deps//adb/android-tools}
 
-      # Add missing dev deps
+      # Remove 'ffprobe'
+      missing_deps=${missing_deps//ffprobe/} # Already included in ffmpeg
+      missing_deps=${missing_deps//  / }
+
+      # Add termux specific requirements
       missing_deps+=" openssl-tool"
 
-      # Return proper install instructions for termux
-      log_info "Please run:\n\npkg install $missing_deps && cargo-binstall htmlq"
+      # Return clean instructions for Termux
+      log_info "Please run:\n\npkg install $missing_deps"
+
+      # Propose static binaries download for what's not in pkg
+      log_info "Installing remaining static tools (curl-impersonate, websocat)..."
+      install_prebuilt_tools
     else
       # shellcheck source=/dev/null
       [[ -r /etc/os-release ]] && source /etc/os-release
       log ; log_info "Detected: ${PRETTY_NAME:-Linux}"
 
-      # Return proper install instructions for supported linux variants
       case "${ID:-} ${ID_LIKE:-}" in
-        *arch*) log_info "Please run:\n\nparu -Sy $missing_deps" ;;
-        *ubuntu*|*debian*)
-          # Replace 'htmlq' by 'cargo' and remove 'websocat' for linux
-          missing_deps=${missing_deps//htmlq /cargo}
-          missing_deps=${missing_deps//websocat/}
+        *arch*)
+          # Remplace binaries names by their Arch Linux package equivalent
+          missing_deps=${missing_deps//exiftool/perl-image-exiftool}
+          missing_deps=${missing_deps//ffprobe/} # Already included in ffmpeg
           missing_deps=${missing_deps//  / }
-          
-          # Add missing dev deps
-          missing_deps+=" build-essential libssl-dev pkgconf"
-
-          log_info "Please run:\n\nsudo apt install $missing_deps && cargo install htmlq websocat"
+          missing_deps+=" alsa-utils"
+          log_info "Please run:\n\nparu -Sy $missing_deps"
         ;;
-        *) log_info "Please install: $missing_deps" ;;
+        *ubuntu*|*debian*)
+          # Filter out tools that will be installed via prebuilt binaries
+          local apt_deps="$missing_deps"
+          apt_deps=${apt_deps//htmlq/}
+          apt_deps=${apt_deps//websocat/}
+          apt_deps=${apt_deps//  / }
+
+          # Remplace binaries names by their Debian/Ubuntu package equivalent
+          apt_deps=${apt_deps//exiftool/libimage-exiftool-perl}
+          apt_deps=${apt_deps//ffprobe/} # Already included in ffmpeg
+          apt_deps=${apt_deps//  / }
+          apt_deps+=" alsa-utils"        # Provides arecord for mic recording with Alt+V
+
+          log_info "Please run:\n\nsudo apt update && sudo apt install $apt_deps"
+
+          # Fetch prebuilts directly into ~/.local/bin in 3 seconds
+          log_info "Installing static binaries for htmlq, websocat & curl-impersonate..."
+          install_prebuilt_tools
+        ;;
+        *)
+          log_info "Please install: $missing_deps"
+        ;;
       esac
     fi
     return 1
@@ -310,7 +386,7 @@ create_binary() {
 cd "$src_dir" && bash "${src_dir}/${CLI_FILE}" "\$@"
 EOF
     log ; log_info "Adding required permission to '$bin_name' binary...\n"
-    chmod -c +x "${bin_dir}/${bin_name}"
+    chmod +x "${bin_dir}/${bin_name}"
   else
     set_console_title "Install Error"
     error "Missing required arguments: <src dir> <bin dir> <bin name>"
@@ -319,22 +395,29 @@ EOF
 
 update_path() {
   local rc_file
+  local -a rc_files ; rc_files=("$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc")
 
-  # Patch rc files (skip if the bin dir is already referenced in either form)
-  for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  # Patch rc files (skip if the bin dir is already referenced)
+  for rc_file in "${rc_files[@]}"; do
+    # Skip "$HOME/.bashrc" on macos
+    if is_macos && [[ $rc_file == "$HOME/.bashrc" ]]; then continue; fi
+
+    # Create rc_file if not exist
     [[ -f $rc_file ]] || touch "$rc_file"
-    if ! grep -qi -e '\.cargo/bin' -e "$HOME/.cargo/bin" "$rc_file"; then
-      printf '\n# Add %s to the PATH\nexport PATH="$HOME/.cargo/bin:$PATH"\n' "$HOME/.cargo/bin" >> "$rc_file"
+
+    # Lookup in rc_file before updating
+    if ! grep -qi -e "$HOME/.cargo/bin" "$rc_file"; then
+      printf '\n# Add %s to the PATH\nexport PATH="%s:$PATH"\n' "$HOME/.cargo/bin" "$HOME/.cargo/bin" >> "$rc_file"
       log ; log_info "Added '$HOME/.cargo/bin' to PATH in '$rc_file'.\n"
     fi
-    if ! grep -qi -e '\.local/bin' -e "$BIN_DIR" "$rc_file"; then
-      printf '\n# Add %s to the PATH\nexport PATH="$HOME/.local/bin:$PATH"\n' "$BIN_DIR" >> "$rc_file"
+    if ! grep -qi -e "$BIN_DIR" "$rc_file"; then
+      printf '\n# Add %s to the PATH\nexport PATH="%s:$PATH"\n' "$BIN_DIR" "$BIN_DIR" >> "$rc_file"
       log ; log_info "Added '$BIN_DIR' to PATH in '$rc_file'.\n"
     fi
   done
 
   # Apply change for the current session
-  export PATH="${PATH}:${BIN_DIR}:${HOME}/.cargo/bin"
+  export PATH="${BIN_DIR}:${HOME}/.cargo/bin:${PATH}"
 }
 
 init_install() {
@@ -349,22 +432,22 @@ init_install() {
   # Step 1: Display banner
   show_banner
 
-  # Step 2: Check dependencies
+  # Step 2: Update binary path
+  update_path
+
+  # Step 3: Check dependencies
   install_deps ; deps_status=$?
   [[ $deps_status -ne 0 ]] && return $deps_status
 
-  # Step 3: Clone repo
+  # Step 4: Clone repo
   clone_repo "$INSTALL_DIR"
 
-  # Step 4: Create bin folder
+  # Step 5: Create bin folder
   create_bin_folder
 
-  # Step 5: Create binary
+  # Step 6: Create binary
   create_binary "$INSTALL_DIR" "$BIN_DIR" "$BIN_NAME" && \
   log ; log_success "Installed."
-
-  # Step 6: Update binary path
-  update_path
 }
 
 # Main

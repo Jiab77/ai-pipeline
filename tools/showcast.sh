@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-#
+# shellcheck shell=bash
 # ==============================================================================
-# showcast.sh — asciinema recorder wrapper for the AI pipeline
+# tools/showcast.sh — Asciinema recording wrapper
 # ==============================================================================
-# Simple wrapper for the 'asciinema' binary.
+# Records terminal demonstrations with configurable metadata, output, command,
+# idle-time limit, and headless operation.
 #
-# Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (deepseek)
+# Author: Jiab77
+# Collaborator: Jarvis
+# Version: 0.0.1
+# Dependencies: asciinema
 #
-# Version: 0.0.0
+# Usage: ./tools/showcast.sh [options]
 # ==============================================================================
-#
-# Usage: /run ./tools/showcast.sh [options]
-#        Or directly:         ./tools/showcast.sh [options]
 #
 # Options:
 #   --title "Demo Title"          Title embedded in recording metadata
@@ -23,7 +23,6 @@
 #   --stop                        Kill any currently running asciinema recording
 
 # Options
-[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
 set -o pipefail
 

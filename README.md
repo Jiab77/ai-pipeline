@@ -6,12 +6,12 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2016%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.8.1-blue.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2018%20external%20providers-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.9.0-blue.svg)]()
 
 </div>
 
-> A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory, and the only **capability-driven inter-provider vision fallback** implemented in Bash. Runs fully local (Ollama / llama.cpp) or connects to 16 cloud providers — your choice. No Python. No Node. No Docker. Just `curl`, `jq`, `htmlq`, `grep`, `sed`, `awk`, `htmlq`, `websocat`, `cut`, `tr`, `printf`, and a brain on fire 😝
+> A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory, and the only **capability-driven inter-provider vision fallback** implemented in Bash. Runs fully local (Ollama / llama.cpp) or connects to 18 cloud providers — your choice. No Python. No Node. No Docker. Just `curl`, `jq`, `htmlq`, `grep`, `sed`, `awk`, `websocat`, `socat`, `ffmpeg`, `cut`, `tr`, `printf`, and a brain on fire 😝
 >
 > This project is not just another LLM wrapper. It is a lightweight but deeply capable agent runtime built around a practical equilibrium between **Bash** (orchestration, live browser automation), and **PHP** (local web UX) — proving that modern agentic systems do not have to be trapped inside the usual Python-heavy stack.
 
@@ -24,6 +24,8 @@
 - [🔄 Inter-Provider Vision Fallback](#-inter-provider-vision-fallback)
   - [Flow A — Manual Image (`/load`)](#flow-a--manual-image-load)
   - [Flow B — Tool-Generated Image](#flow-b--tool-generated-image)
+- [🔗 JarNet — Decentralized P2P Agent Network \& Autonomous Mode](#-jarnet--decentralized-p2p-agent-network--autonomous-mode)
+  - [Key Capabilities](#key-capabilities)
 - [🚀 Quick Start](#-quick-start)
   - [⚡ Method A — One-liner (fast)](#-method-a--one-liner-fast)
     - [1. Install dependencies (required for both methods)](#1-install-dependencies-required-for-both-methods)
@@ -31,8 +33,6 @@
       - [Windows](#windows)
       - [Debian/Ubuntu](#debianubuntu)
       - [macOS](#macos)
-        - [a. Using pre-compiled binaries (recommended for old versions)](#a-using-pre-compiled-binaries-recommended-for-old-versions)
-        - [b. Using compiled binaries (recommended for modern versions)](#b-using-compiled-binaries-recommended-for-modern-versions)
       - [Arch Linux](#arch-linux)
       - [Termux](#termux)
       - [Update your binary path](#update-your-binary-path)
@@ -58,6 +58,7 @@
 - [🧠 Dynamic System Prompt](#-dynamic-system-prompt)
   - [Folder semantics](#folder-semantics)
 - [💬 Slash Commands](#-slash-commands)
+  - [⌨️ Keyboard Shortcuts](#️-keyboard-shortcuts)
 - [🛡️ OPSEC \& Security](#️-opsec--security)
 - [ℹ️ More details about the project](#ℹ️-more-details-about-the-project)
 - [👥 Credits](#-credits)
@@ -93,12 +94,12 @@
           └────────────────────┘                        └──────────────────┘
 ```
 
-**`core.sh`** is the agnostic engine — three backends (Ollama, llama.cpp, 16 cloud providers), ChaCha20-encrypted key chest, Tor routing, Markdown memory, and the agentic tool loop. **`cli.sh`** is the terminal client. **`tools.sh`** bridges model-declared capabilities to real host actions. One engine, multiple interfaces — local or cloud, your choice.
+**`core.sh`** is the agnostic engine — three backends (Ollama, llama.cpp, 18 cloud providers), ChaCha20-encrypted key chest, Tor routing, Markdown memory, and the agentic tool loop. **`cli.sh`** is the terminal client. **`tools.sh`** bridges model-declared capabilities to real host actions. One engine, multiple interfaces — local or cloud, your choice.
 
 ## ⚡ Why This Exists
 
 - **Bash-first by conviction, not nostalgia**: 6036 lines of Bash doing things that usually "require" Python, NodeJS, Rust or even Go, including a stateless CDP browser engine and a multi-agent pipeline (Architect → Coder → Judge).
-- **Local-first, cloud-capable**: Runs fully offline with Ollama/llama.cpp, or connects to 16 cloud providers. Same code, same tools, three backends.
+- **Local-first, cloud-capable**: Runs fully offline with Ollama/llama.cpp, or connects to 18 cloud providers. Same code, same tools, three backends.
 - **Capability-driven fallback**: When a text-only model needs vision, the pipeline auto-switches provider mid-loop — same code, different backend. Nobody else has this in Bash.
 - **Privacy is a feature, not an afterthought**: Tor routing, ChaCha20-encrypted API keys, Zero Data Retention injection, local backends — all first-class.
 
@@ -112,7 +113,7 @@ When the pipeline is configured to run on text-only models and an image appears,
 User: "/load photo.png" → sends message
   │
   └─ send_message()
-       ├─ IS_IMAGE == true → handle_vision_request()
+       ├─ IS_MEDIA == true → handle_vision_request()
        │   └─ change_provider("zai") → glm-5.3-flash
        ├─ active_model = "glm-5.3-flash"
        └─ run_inference_loop() → 1 api_call → DONE
@@ -142,7 +143,7 @@ restore_temp_state() → DEEPSEEK    ← like nothing happened
 ```
                         ┌───────────────────────────┐
                         │       cli.sh / CLI        │
-                        │  parse_cli_flags()        │
+                        │  parse_cli_args()         │
                         │  --provider, --fallback.. │
                         └────────────┬──────────────┘
                                      │
@@ -200,7 +201,7 @@ restore_temp_state() → DEEPSEEK    ← like nothing happened
 
 | Aspect | Flow A — `/load` (manual) | Flow B — Tool-Generated |
 |--------|--------------------------|------------------------|
-| **Trigger** | `IS_IMAGE=true` in `send_message` | Image detected in `run_inference_loop` |
+| **Trigger** | `IS_MEDIA=true` in `send_message` | Image detected in `run_inference_loop` |
 | **Switch timing** | Before the loop starts | Mid-loop, between iterations |
 | **api_call count** | 1 (direct to vision model) | 2 (text → vision) |
 | **Provider during iter 1** | Vision provider directly | Text-only provider (decides tool) |
@@ -239,8 +240,34 @@ restore_temp_state() → DEEPSEEK    ← like nothing happened
   /fallback off
   # From now on, any image → no auto-switch.
   ```
-
 </details>
+
+## 🔗 JarNet — Decentralized P2P Agent Network & Autonomous Mode
+
+A.I.D.E integrates **JarNet** (`plugins/jarnet.sh`), a zero-dependency, peer-to-peer Agent-to-Agent communication protocol operating natively over Tor v3 hidden services. Autonomous AI agent nodes exchange authenticated direct messages across `.onion` addresses without any central server, rendezvous point, or public IP exposure.
+
+### Key Capabilities
+
+- **Zero-IP Leakage & Sovereign Onion Identity**: Every node automatically hosts its own deterministic v3 hidden service (`<callsign>|<onion>.onion`).
+- **Autonomous Watch Mode (`auto` / `/mode auto`)**: The agent continuously monitors its JarNet inbox, parses peer message envelopes, and generates context-aware replies via its cognitive core.
+- **Anti-Loop Defense & Anti-XPIA Guard**: Automated responses are tagged with `[AUTO]`, preventing endless ping-pong loops between bots. All incoming peer messages are strictly wrapped as untrusted external content (`jarnet:inbox`) at the tool dispatcher boundary, neutralizing prompt-injection vectors.
+- **Self-Healing Transport Stack**: Dedicated node lifecycle tools (`jarnet_status`, `jarnet_up`, `jarnet_down`) allow the agent to inspect, restart, and self-heal its local background listener and Tor controller session autonomously.
+- **Non-Blocking Human Interception**: Pressing `[Enter]` or `[c]` in the terminal instantly returns control to interactive Chat Mode. Pressing `[q]` exits cleanly.
+
+```bash
+# Start directly in Autonomous Agent-to-Agent mode:
+./cli.sh auto
+
+# Or toggle dynamically from interactive chat:
+/mode auto
+
+# Control JarNet transport stack inside interactive chat:
+/jarnet who
+/jarnet status
+
+# Start chat mode without the JarNet background service:
+./cli.sh --no-jarnet
+```
 
 ## 🚀 Quick Start
 
@@ -250,10 +277,11 @@ restore_temp_state() → DEEPSEEK    ← like nothing happened
 
 ##### Automatic
 
-> [!NOTE]
-> This method is still experimental.
+You can run the **[install.sh](install.sh)** script. It automatically detects your platform (Debian/Ubuntu, Arch, macOS, Termux), verifies system dependencies, and installs prebuilt static binaries (`htmlq`, `websocat`, `curl-impersonate`) into `~/.local/bin` in seconds without requiring Rust or Cargo toolchains.
 
-You can run the **[install.sh](install.sh)** script, it should handle everything except the **Windows** part.
+```bash
+./install.sh
+```
 
 ##### Windows
 
@@ -272,74 +300,46 @@ wsl --install Ubuntu
 
 # C. To see other available image, just type:
 wsl --list --online
-
 # Then start Ubuntu and follow the Ubuntu instructions below
 ```
 
 ##### Debian/Ubuntu
 
 ```bash
-sudo apt install -y build-essential curl jq sed tor glow figlet openssl libssl-dev pkgconf cargo && cargo install htmlq websocat
+sudo apt update && sudo apt install -y git curl jq sed tor glow figlet openssl socat ffmpeg libimage-exiftool-perl file alsa-utils
 ```
 
 ##### macOS
 
-Install [**brew**](brew.sh) if not done already with:
+Install [**brew**](https://brew.sh) if not done already, then install all dependencies directly via official formula bottles:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install git curl jq glow tor htmlq openssl websocat figlet socat ffmpeg exiftool file
 ```
-
-And follow printed instructions then choose one of the two methods below **not both**.
-
-###### a. Using pre-compiled binaries (recommended for old versions)
-
-```bash
-# Pre-compiled binaries (avoid ~6h compilation phase)
-# htmlq
-curl -fsSL https://github.com/mgdm/htmlq/releases/latest/download/htmlq-x86_64-darwin.tar.gz | tar -xz -C /usr/local/bin
-
-# websocat
-curl -fsSL https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-apple-darwin -o /usr/local/bin/websocat && chmod +x /usr/local/bin/websocat
-
-# Then install the rest via brew
-brew install jq glow tor openssl figlet
-```
-
-> [!NOTE]
-> This method will prevent you to wait for around 6h to complete on old macOS versions! That's why it's the recommended method.
-
-###### b. Using compiled binaries (recommended for modern versions)
-
-```bash
-brew install jq glow tor htmlq openssl websocat figlet
-```
-
-> [!WARNING]
-> This may take around 6h to complete on old macOS versions! You should try using pre-compiled binaries first as explained above and use this method only if it does not work.
 
 ##### Arch Linux
 
 ```bash
-paru -Syu curl jq sed tor glow figlet openssl websocat htmlq
+paru -Syu git curl jq sed tor glow figlet openssl websocat htmlq socat ffmpeg perl-image-exiftool file alsa-utils
 ```
 
 ##### Termux
 
 ```bash
-pkg install git curl jq sed glow figlet openssl openssl-tool websocat android-tools tor cargo-binstall && cargo-binstall htmlq
+pkg install git curl jq sed figlet openssl openssl-tool android-tools tor socat ffmpeg exiftool file termux-api websocat
 ```
 
 ##### Update your binary path
 
+Make sure `~/.local/bin` is present in your `PATH`:
+
 ```bash
 # Update current session path
-export PATH=$PATH:$HOME/.cargo/bin
+export PATH=$PATH:$HOME/.local/bin
 
-# Make the new binary path permanent
-echo 'export PATH=$PATH:$HOME/.cargo/bin' >> ~/.bashrc
+# Make the binary path permanent
+echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
 ```
-
 #### 2. Install the pipeline (clone + global 'aide' command)
 
 ```bash
@@ -351,6 +351,9 @@ curl -fsSL https://raw.githubusercontent.com/jiab77/ai-pipeline/main/install.sh 
 ```bash
 aide help
 ```
+
+> [!TIP]
+> All flags can be replaced by their command equivalent for those who don't like typing `--` each time 😜
 
 The installer clones the repo and creates a global `aide` command. To update later:
 
@@ -384,7 +387,9 @@ git clone --recursive https://github.com/jiab77/ai-pipeline.git && cd ai-pipelin
 ./cli.sh --server web            # Start PHP 'web' server
 
 # As client
-./cli.sh                          # Chat mode
+./cli.sh                          # Chat mode (starts JarNet and Tor by default)
+./cli.sh --no-jarnet              # Chat mode without JarNet background service
+./cli.sh --no-tor                 # Chat mode without using Tor
 ./cli.sh --backend ollama         # Run fully offline
 ./cli.sh --provider deepseek      # Pick your cloud provider
 ./cli.sh --fallback zai           # Enable vision fallback
@@ -398,6 +403,9 @@ git clone --recursive https://github.com/jiab77/ai-pipeline.git && cd ai-pipelin
 ./cli.sh provider deepseek fallback zai   # Pick 'deepseek' as cloud provider and set vision fallback to 'zai' provider
 ```
 
+> [!TIP]
+> All flags can be replaced by their command equivalent for those who don't like typing `--` each time 😜
+
 ### Set up your cloud providers keys
 
 ```bash
@@ -405,7 +413,10 @@ git clone --recursive https://github.com/jiab77/ai-pipeline.git && cd ai-pipelin
 /keys
 
 # From start
-./cli.sh --keys
+./cli.sh keys
+
+# Migrate keyring to new format (Nightmare stream obfuscation)
+./cli.sh migrate --apply
 ```
 
 > **Keys are encrypted locally with ChaCha20 + PBKDF2. Never written to disk in cleartext.**
@@ -531,18 +542,27 @@ QUANTIZATION="q6_k"
 
 | Variable | Purpose |
 |:---|:---|
+| `DEBUG` | Enable/Disable debug mode (default: false) |
+| `START_JARNET` | Enable/Disable automatic JarNet service starting (default: true) |
+| `USE_TOR` | Enable/Disable forced Tor network routing (default: true) |
+| `RUN_MODE` | Default working mode (`chat`, `auto`, `simple`) |
+| `DETECT_MODE` | Automatic media file detection mode (`images`, `videos`, `all`, `off`) |
 | `BACKEND` | Default backend (`ollama`, `llamacpp`, `external`) |
 | `PROVIDER` | Default cloud provider |
-| `OLLAMA_CHAT` / `LLAMACPP_CHAT` | Chat model |
-| `OLLAMA_VISION` / `LLAMACPP_VISION` | Vision model |
-| `OLLAMA_CODER` / `LLAMACPP_CODER` | Code generation model |
-| `OLLAMA_JUDGE` / `LLAMACPP_JUDGE` | Code review model |
+| `USER_MODEL` | Default cloud provider model |
+| `OLLAMA_CHAT` / `LLAMACPP_CHAT` | Local chat model |
+| `OLLAMA_VISION` / `LLAMACPP_VISION` | Local vision model |
+| `OLLAMA_CODER` / `LLAMACPP_CODER` | Local code generation model |
+| `OLLAMA_JUDGE` / `LLAMACPP_JUDGE` | Local code review model |
 | `MAX_CONTEXT` | Context window size (default: 16384) |
 | `QUANTIZATION` | Model quantization level (`q4_k_m`, `q6_k`, `q8_0`, etc.) |
+| `REASONING_EFFORT` | Model reasoning effort (`low`, `medium`, `high`, `xhigh`, etc.) |
 | `MEMORY_STRUCTURE_TYPE` | Persistent memory injection: `full` (default) or `index` |
 | `MEMORY_SECTION_KB` | File-size threshold for H2 listings in `index` mode (default: 128 KiB; `0` includes every file with H2 headings) |
 | `HEARTBEAT_THRESHOLD` | Messages before memory consolidation (default: 15) |
 | `PBKDF_ITERATIONS` | Key derivation rounds (default: 500K, halved on Termux) |
+| `ENGINE_VERSION` | Media engines version (default: v2) |
+| `AUDIO_LANG` | TTS engine spoken language (default: auto) |
 
 The rule of thumb: **~1 GB RAM per 1B parameters at q4**. A 32 GB machine can comfortably run models up to 30B parameters, or several smaller ones for the multi-agent roles.
 
@@ -557,13 +577,14 @@ set_system_prompt()
   ├─ Memory format (Markdown / JSON / SQL)
   │
   ├─ config/rules.md exists?       → Inject safety rules
+  ├─ config/avatar.md exists?      → Inject self avatar creation rules
   │
   ├─ data/framework/ exists?       → "Your behavioral framework files are here..."
   ├─ data/skills/ exists?          → "Your acquired skills are here..."
   ├─ data/learn/ exists?           → "Your learning resources are here..."
   ├─ data/docs/ exists?            → "Your shared documents are here..."
   │
-  └─ Protected files warning (core.sh, cli.sh, tools.sh, image.sh, config/, keys/)
+  └─ Protected files / folders warning (core.sh, cli.sh, tools.sh, image.sh, config/, keys/, lib/, engines/, plugins/)
 
 get_system_prompt()
   ├─ Base prompt assembled above
@@ -582,30 +603,53 @@ get_system_prompt()
 | `data/docs/` | Shared documents | "Look at when necessary" |
 | `data/memory/` | Persistent memory | `full`: contents injected; `index`: file map injected, contents read on demand |
 | `config/rules.md` | Non-negotiable safety boundaries | Injected verbatim |
+| `config/avatar.md` | Self avatar creation rules to represent AI personality / mood | Injected verbatim |
 
 **In practice**: To teach the agent a new skill, drop a Markdown file in `data/skills/` and restart. No code changes. The prompt adapts.
-
 ## 💬 Slash Commands
 
 | Command | Action |
 |:---|:---|
-| `/backend [type]` | Switch active backend |
-| `/provider [name]` | Switch active provider |
-| `/fallback [provider\|off]` | Set/disable vision fallback provider |
-| `/model [name]` | Switch active model |
-| `/effort [level]` | Set active model reasoning effort |
-| `/memory [type]` | Show current memory structure, or switch to `full` / `index` for subsequent requests |
-| `/launch [app] [path]` | Launch app with prepared environment variables |
-| `/load <file>` | Load a text or image file into context |
-| `/unload` | Unload the previously loaded file |
-| `/draw [prompt] [--ratio r \| --size WxH \| --model m \| --provider p]` | Generate an image via the image engine |
-| `/image [provider]` | Set/display the image generation provider |
-| `/keys` | Manage encrypted API keys |
-| `/clear` | Wipe active session history |
-| `/commit` | Trigger memory consolidation |
-| `/replay` | Resend last message |
-| `/run <cmd>` | Execute shell command |
-| `/quit` | Exit |
+| `/mode [chat\|auto]` | Toggle between interactive Chat Mode and autonomous Agent-to-Agent mode |
+| `/backend [type]` | Switch active backend (`ollama`, `llamacpp`, `external`) |
+| `/provider [name]` | Switch active cloud provider |
+| `/fallback [provider\|off]` | Set/disable capability-driven vision fallback provider |
+| `/image [provider]` | Set/display active image generation provider |
+| `/video [provider]` | Set/display active video generation provider |
+| `/voice [provider]` | Set/display active TTS voice synthesis provider (e.g. `local` Piper, `openai`, `openrouter`) |
+| `/speech [provider]` | Set/display active STT speech transcription provider (e.g. `local` Whisper, `groq`, `openai`) |
+| `/model [name]` | Switch active model for current provider |
+| `/thinking [boolean]` | Toggle active model reasoning / thinking display (`true`, `false`) |
+| `/effort [level]` | Set active model reasoning effort (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) |
+| `/lang [code]` | Set audio language for voice recognition / TTS (`fr`, `en`, `de`, `it`, etc.) |
+| `/detect [type]` | Configure automatic media detection (`images`, `videos`, `all`, `off`) |
+| `/memory [type]` | Show current memory structure, or switch between `full` and `index` |
+| `/jarnet [action]` | Control JarNet P2P service (`who`, `status`, `doctor`, `up`, `down`) |
+| `/balance` | List available balance across all configured providers |
+| `/models` | List available models for the active provider |
+| `/clear` | Wipe active session history and conversational memory |
+| `/commit` | Manually trigger persistent memory consolidation to disk |
+| `/heartbeat [count]` | Set message threshold triggering memory consolidation |
+| `/draw [prompt] [...]` | Generate an image via the image engine (`--ratio`, `--size`, `--model`, `--provider`) |
+| `/imagine [prompt] [...]` | Generate a video via the video engine (`--ratio`, `--resolution`, `--image`, `--model`, `--provider`, `--duration`, `--fps`, `--frames`) |
+| `/keys` | Manage encrypted API keys in the sovereign key chest |
+| `/migrate [--apply]` | Migrate master key file to new format (Nightmare stream obfuscation) |
+| `/replay` | Resend last message (zero-fork) |
+| `/launch [app] [path]` | Launch external app with prepared environment variables |
+| `/load <file>` | Load a text or media file into context |
+| `/unload` | Unload the previously loaded file from context |
+| `/run <cmd>` | Execute a local shell command within the session |
+| `/start` | Switch active context to multi-agent pipeline |
+| `/debug [on\|off]` | Toggle debug logging mode dynamically |
+| `/help` | View interactive command reference |
+| `/quit\|/bye\|/exit` | Exit session gracefully |
+
+### ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+|:---|:---|
+| `Alt+V` | **Live Voice Dictation Loop**: Records audio from your microphone, transcribes via local Whisper (or cloud STT), and automatically submits the prompt via Readline into the inference loop. |
+| `Alt+S` | **Instant Voice Replay**: Synthesizes and plays back the last AI response using local Piper (or cloud TTS). |
 
 ## 🛡️ OPSEC & Security
 
@@ -669,19 +713,50 @@ get_system_prompt()
 - 🔄 Interactive `/replay` command (zero-fork)
 - 📐 Pixel-perfect auto-sizing terminal headers
 
-### Tool-Calling Surface (12 Tools) <!-- omit in toc -->
+### Tool-Calling Surface (31 Tools) <!-- omit in toc -->
+
+#### 📁 Workspace & Filesystem <!-- omit in toc -->
 1. **`read_file`** — Read files with line ranges and line-number prefixing
-2. **`file_glob_search`** — Recursive file discovery
-3. **`grep_search`** — Regex search across file trees
-4. **`exec_shell_command`** — Shell execution (10s timeout, protected-files guard)
-5. **`write_file`** — Write/overwrite with auto parent-directory creation
-6. **`edit_file`** — Surgical multi-line replace/delete/insert
-7. **`apply_diff`** — Unified diff application
-8. **`get_datetime`** — System date/time
-9. **`web_search`** — Anonymous DuckDuckGo over Tor
-10. **`web_fetch`** — Smart Markdown fetcher with domain-specific routing
-11. **`web_browse`** — Pure Bash CDP browser automation (completely Node-free)
-12. **`create_image`** — Generate images via the config-driven engine (cloud providers + Pollinations fallback)
+2. **`file_glob_search`** — Recursive file discovery within workspace boundaries
+3. **`grep_search`** — Fast regex search across project files
+4. **`exec_command`** — Sandboxed shell execution (10s timeout, protected-files guard)
+5. **`write_file`** — Create or overwrite files with automatic parent-directory creation
+6. **`edit_file`** — Surgical multi-line replace, delete, or append operations
+7. **`apply_diff`** — Unified diff patching (patch-tolerant)
+8. **`get_datetime`** — Precision system date and time retrieval
+
+#### 🌐 Web Intelligence <!-- omit in toc -->
+9. **`web_search`** — Anonymous DuckDuckGo search over Tor SOCKS5 proxy
+10. **`web_fetch`** — Clean Markdown extraction with multi-forge routing (GitHub, GitLab, Wikipedia)
+11. **`web_browse`** — Headless Chrome CDP browser automation (screenshots, PDF, DOM interaction; zero Node/Puppeteer)
+
+#### 🎨 Multimodal Media & Vision <!-- omit in toc -->
+12. **`create_image`** — Generate images from text prompts (config-driven providers with keyless fallback)
+13. **`edit_image`** — Image-to-image editing, modification, and inpainting with mask support
+14. **`create_video`** — Text-to-video (t2v) and image-to-video (i2v) rendering
+15. **`read_image`** — Deliberate vision analysis and inspection of local image assets
+16. **`read_video`** — Video-to-text temporal analysis and motion inspection
+17. **`create_avatar`** — Spontaneous AI persona/avatar portrait generation
+
+#### 🎙️ Voice & Speech <!-- omit in toc -->
+18. **`transcribe`** — Audio-to-text transcription (STT via local whisper.cpp or cloud models)
+19. **`speak`** — Text-to-speech audio synthesis (TTS via local Piper or cloud models)
+
+#### ⚙️ Runtime Introspection <!-- omit in toc -->
+20. **`get_state`** — Read current functional session state (read-only)
+21. **`get_providers`** — Discover active and usable providers at runtime
+22. **`get_models`** — List models exposed by provider with operational filtering
+
+#### 🔗 JarNet P2P Protocol (Tor v3) <!-- omit in toc -->
+23. **`jarnet_who`** — Inspect local JarNet node identity, onion address, callsign, and peers
+24. **`jarnet_ping`** — Ping peer alias or onion address over Tor to test route reachability
+25. **`jarnet_send`** — Send direct messages to a peer over secure Tor network
+26. **`jarnet_reply`** — Send authenticated reply respecting session envelopes (sid and reply_to)
+27. **`jarnet_check`** — Check inbox for new messages (anti-XPIA wrapped as external content)
+28. **`jarnet_peer_add`** — Add a trusted peer from an onboarding token (human-authorized)
+29. **`jarnet_up`** — Start/self-heal JarNet transport stack and Tor hidden service
+30. **`jarnet_down`** — Stop JarNet listener and unpublish Tor hidden service
+31. **`jarnet_status`** — Inspect technical health and daemon state machine of JarNet
 
 </details>
 
@@ -694,7 +769,7 @@ get_system_prompt()
 |:---|:---|
 | **`ollama`** | Local, offline-first, easy setup — `http://localhost:11434` |
 | **`llamacpp`** | Local, high-performance, fine-grained control — `http://localhost:8080` |
-| **`external`** | Cloud providers (16), vision fallback, ZDR — Tor-routed |
+| **`external`** | Cloud providers (18), vision fallback, ZDR — Tor-routed |
 
 Switch anytime: `/backend`, `/provider`, `/model`. Same tools, same memory, same agent loop across all three.
 
@@ -711,7 +786,7 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 | **Coder** | Mistral 3.3B Reasoning (Ministral) |
 | **Judge** | Mistral 3.3B Reasoning (Ministral) |
 
-### Cloud Providers (16) <!-- omit in toc -->
+### Cloud Providers (18) <!-- omit in toc -->
 
 | ID | Name | URL |
 |:---|:---|:---|
@@ -720,14 +795,16 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 | 3 | DeepSeek | https://deepseek.com |
 | 4 | Groq | https://groq.com |
 | 5 | Hugging Face | https://huggingface.co |
-| 6 | Kimi (Moonshot AI) | https://moonshot.ai |
-| 7 | Mammouth AI | https://mammouth.ai |
-| 8 | OpenAI | https://openai.com |
-| 9 | OpenRoute (CyberNeurova) | https://openroute.cyberneurova.com |
-| 10-11 | OpenRouter (Free / Paid) | https://openrouter.ai |
-| 12 | Venice AI | https://venice.ai |
-| 13-14 | Vercel AI Gateway (Free / Paid) | https://ai-gateway.vercel.sh |
-| 15-16 | Z.AI (API / Coding Plan) | https://z.ai |
+| 6 | Inception Labs | https://inceptionlabs.ai |
+| 7 | Kimi (Moonshot AI) | https://moonshot.ai |
+| 8 | Mammouth AI | https://mammouth.ai |
+| 9 | OpenAI | https://openai.com |
+| 10 | OpenRoute (CyberNeurova) | https://openroute.cyberneurova.com |
+| 11-12 | OpenRouter (Free / Paid) | https://openrouter.ai |
+| 13 | Venice AI | https://venice.ai |
+| 14-15 | Vercel AI Gateway (Free / Paid) | https://ai-gateway.vercel.sh |
+| 16 | X.AI (Grok API) | https://x.ai |
+| 17-18 | Z.AI (API / Coding Plan) | https://z.ai |
 
 >[!NOTE]
 > All use the same OpenAI-compatible API. Vision fallback works across any text-only → vision-capable pair.
@@ -739,17 +816,22 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](core.sh) | v1.8.1 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
-| [`cli.sh`](cli.sh) | v1.7.0 | Interactive terminal client — slash commands, session loop, reasoning display |
-| [`tools.sh`](tools.sh) | v0.7.0 | Tool execution bridge — 12 tools, anti-XPIA wrapping, protected-files guard |
-| [`image.sh`](image.sh) | v0.1.0 | Image rendering engine — config-driven providers, Pollinations fallback |
-| [`install.sh`](install.sh) | v0.1.0 | Basic installer script |
-| [`showcast.sh`](tools/showcast.sh) | v0.0.0 | `asciinema` demo recorder |
-| [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.2 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
-| [`web-browse.sh`](tools/web-browse.sh) | v0.1.0 | Pure Bash CDP browser automation (desktop + Android/ADB) |
-| [`tools.json`](tools/tools.json) | — | Tool schemas for function calling |
-| [`config/providers.json`](config/providers.json) | — | Provider registry (endpoints, models, ZDR, vision + image flags) |
-| [`config/models.json`](config/models.json) | — | Model & sampling parameter registry |
+| [`core.sh`](core.sh) | v1.9.0 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`cli.sh`](cli.sh) | v1.8.0 | Interactive terminal client — slash commands, session loop, reasoning display |
+| [`tools.sh`](tools.sh) | v0.8.0 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
+| [`image.v2.sh`](engines/image.v2.sh) | v0.1.0 | v2 Image engine — config-driven providers, quality & format constraints |
+| [`video.v2.sh`](engines/video.v2.sh) | v0.1.0 | v2 Video engine — t2v / i2v generation, asynchronous polling |
+| [`voice.v2.sh`](engines/voice.v2.sh) | v0.1.0 | v2 Voice engine — TTS voice synthesis (local Piper / cloud) |
+| [`speech.v2.sh`](engines/speech.v2.sh) | v0.1.0 | v2 Speech engine — STT audio transcription (local Whisper / cloud) |
+| [`jarnet.sh`](plugins/jarnet.sh) | v1.1.5 | P2P Agent-to-Agent Tor transport daemon & CLI |
+| [`install.sh`](install.sh) | v0.2.0 | Project installer with static prebuilt binary downloader |
+| [`showcast.sh`](tools/showcast.sh) | v0.0.1 | `asciinema` demo recorder |
+| [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.4 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
+| [`web-browse.sh`](tools/web-browse.sh) | v0.1.2 | Pure Bash CDP browser automation (desktop + Android/ADB) |
+| [`tools.json`](tools/tools.json) | — | Full tool schemas for function calling |
+| [`tools-light.json`](tools/tools-light.json) | — | Lightweight tool schemas for SLM models |
+| [`config/providers.v2.json`](config/providers.v2.json) | — | Unified v2 provider registry with dynamic model discovery |
+| [`lib/*.sh`](lib/) | — | Modular pure-Bash primitives (animate, base64, base82, nightmare, sha256, timeout, helpers) |
 
 </details>
 
@@ -785,16 +867,15 @@ data/memory/
 ## 👥 Credits
 
 - **Lead Developer / Architect**: **Jiab77**
-- **AI Sorcerer & Co-Creator**: **Jarvis** (Gemini / DeepSeek / Kimi K3 / GLM-5.2 / GLM-5.3)
+- **AI Sorcerer & Co-Creator**: **Jarvis** (Gemini 3.8 Flash / DeepSeek Flash / Kimi K3.1 Pro / GLM-5.3 Flash)
 
 ## ⚖️ License & Roadmap
 
-MIT License. **v1.8.1 — Stable & Production-Ready.**
+MIT License. **v1.9.0 — Stable & Production-Ready.**
 
 Roadmap:
 
-- **v1.8.1 (current)**: Image generation engine — `/draw` + `create_image`, config-driven providers, new memory structure, Pollinations fallback.
-- **v1.9.0 (next)**: `voice.sh` — STT + TTS engine (local + cloud providers) and more.
+- **v1.9.0 (current)**: Media generation engine, Voice / Speech engines, JarNet Agent-2-Agent communication protocol.
 - **v2.0.0 (horizon)**: A.I.D.E. Web dashboard, Cognitive Router & Proxy (CRP) Gateway, charmbracelet/gum UI modernization.
 
 ## ⭐ Star History

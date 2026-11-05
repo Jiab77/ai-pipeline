@@ -4,21 +4,28 @@ node_modules
 # Backup files
 *.bak
 
+# Log files
+*.log
+
 # Folders that must never be published
 archive/
 backup/
+build/
 data*/
-models/
+dist/
 keys/
-skills/
+models/
+pre-release/
+# skills/
 tools/web-browse/tests/
 tests/
 
 # Files that must never be published
 providers.biollm.json
+providers.old.json
 state.json
 core.conf
 core-v*.sh
-test-core.sh
 specs.sh
-*.log
+test-core.sh
+video-gen.sh

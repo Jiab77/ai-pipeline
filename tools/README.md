@@ -1,66 +1,74 @@
-# 🛠️ A.I.D.E. CLI - Native Shell Tools & Schemas
+# 🛠️ Native Shell Tools & Agent Capabilities
 
-Following the official architectural partitioning of the **A.I.D.E.** project, the Progressive Web App (PWA) code and its heavy frontend asset trees have been completely decoupled and migrated into their own dedicated repository (**A.I.D.E. PWA**).
+The tools subsystem provides the AI agent with a safe, deterministic interface to interact with its workspace, discover live runtime models, control web automation, synthesize/transcribe multimodal media, and communicate peer-to-peer over Tor.
 
-This directory is now dedicated 100% to **A.I.D.E. CLI**—our fast, lightweight, and sovereign native terminal workstation. It contains only declarative, DRY JSON schemas and auxiliary, dependency-free compiled/shell utilities.
+The architecture separates execution from declarative contracts: schemas reside in declarative JSON files under `tools/`, while the dispatcher resides directly at the project root as `tools.sh`.
 
 ---
 
-## 📂 Immaculate Directory Structure
-
-The tools architecture has been flattened to achieve absolute aesthetic and structural simplicity, with the primary tools dispatcher residing directly at the repository root:
+## 📂 Directory Structure
 
 ```
-A.I.D.E. CLI (Repository Root)
-├── tools.sh                # 🐚 Master Local Agent Tools Dispatcher (Bash - Root level!)
+AI Pipeline (Repository Root)
+├── tools.sh                # 🐚 Master Tool Dispatcher (Bash - Root level)
 │
-└── tools/                  # 🛠️ Tools Assets & Schemas Directory
-    ├── tools.json          # Premium Tool Schemas (12 tools - Cloud/Premium backends)
-    ├── tools-light.json    # Frugal Tool Schemas (8 tools - Local/SLM backends)
-    ├── tools-groq.json     # Groq-compatible schemas (Formatted to bypass LPU checks)
-    ├── README.md           # This documentation
-    ├── web-fetch.sh        # Smart crawler & static parser (Zero-NodeJS, Tor-routing capable)
-    └── web-browse.sh       # Browser automation via Stateless WebSocket RPC daemon
+└── tools/                  # 🛠️ Auxiliary Tools, Binaries & Schemas
+    ├── tools.json          # Master Tool Schemas (31 tools - Cloud/Advanced backends)
+    ├── tools-light.json    # Streamlined Tool Schemas (28 tools - Frugal/Local SLMs)
+    ├── web-fetch.sh        # Fast, headless static scraper & Markdown extractor via Tor
+    ├── web-browse.sh       # Stateless Chrome DevTools Protocol (CDP) WebSocket browser automation
+    ├── showcast.sh         # Terminal cast and visualization helper
+    └── README.md           # This documentation
 ```
 
 ---
 
-## 🐚 The Root Master Dispatcher (`./tools.sh`)
+## 🐚 Master Dispatcher (`./tools.sh`)
 
-To streamline imports and execution mapping across our cognitive core scripts (`core.sh` / `cli.sh`), the unified dispatcher **`tools.sh`** has returned to its rightful throne **directly at the project root**.
+The root **`tools.sh`** dispatcher is loaded dynamically by `core.sh`. It intercepts function call payloads from the reasoning model and routes them safely:
 
-* **Zero-Fork Parsing**: It intercepts JSON payloads sent by the AI Reasoning Engine, using a single-pass `jq` streaming pipeline separated by null-characters (`\u0000`) to guarantee high-performance, injection-proof argument parsing.
-* **Masterful Optimizations (v0.3.3)**:
-  * **0-Fork `read_file`**: Reads files with sub-millisecond speeds, completely bypassing redundant processes. Uses dynamic, unbounded `awk` logic that handles files with absolute immunity to missing trailing newlines.
-  * **0-Fork `edit_file`**: Evaluates and applies sorted line modifications on-the-fly without running redundant file counting forks, preserving mobile battery life and preventing CPU throttling on Android Termux.
-  * **Sovereign Boundaries**: Automatically checks paths at C-speed using in-memory Zero-Fork glob matching to prevent the AI model from reading, writing, or patching core execution scripts (`core.sh`, `cli.sh`, `tools.sh`, `image.sh`).
+* **Zero-Fork Streaming Argument Parsing**: Intercepts tool parameters via a single-pass `jq` stream delimited by NUL bytes (`\u0000`), guaranteeing high performance and complete immunity to argument-injection attacks.
+* **Deterministic File Manipulation**:
+  * `read_file`: Zero-fork bounded reading with dynamic `awk`, immune to missing trailing newlines.
+  * `edit_file`: Atomic, line-based multi-hunk replacement/deletion/insertion applied in reverse order.
+  * `write_file`: Atomic write with recursive directory creation.
+* **Sovereign Safety Boundaries**: Strictly enforces execution constraints (Rules §1–§6):
+  * Blocks traversal outside authorized project paths.
+  * Forbids unauthorised package manager invocations (`npm`, `pip`, `apt`, `brew`, etc.).
+  * Protects core engine scripts (`cli.sh`, `core.sh`, `tools.sh`, `config/`, etc.) from self-modification.
 
 ---
 
-## 🛠️ Specialized Shell Tools (`tools/`)
+## 🛠️ Auxiliary Scripts (`tools/`)
 
-The `./tools/` directory houses lightweight, compiled, or shell-native auxiliary assets designed with strict compliance to UNIX philosophies.
-
-### 1. `web-fetch.sh` (Static Crawler)
-A 100% dependency-free static web scrapper and parser. It utilizes standard UNIX utilities (`curl`, `sed`, `jq`) combined with `htmlq` to parse and format raw, complex web structures into beautiful, readable Markdown.
-* **Onion-Routed**: Automatically checks for a running Tor service on SOCKS5 port `9050`. If found, it routes all web crawls through secure Tor exit nodes automatically, shielding your real IP address.
+### 1. `web-fetch.sh` (Static Crawler & Markdown Extractor)
+A lightweight static fetcher using `curl` and `htmlq` (or precompiled binary) to convert web pages into clean Markdown without executing JavaScript.
+* **Privacy Shield**: Automatically routes traffic through Tor (`socks5h://127.0.0.1:9050`) by default.
+* **Anti-Bot Resiliency**: Integrates with `curl-impersonate` when available to bypass TLS/HTTP fingerprint blocking.
 
 ### 2. `web-browse.sh` (Stateless WebSocket Browser Automation)
-Our high-performance alternative to bloated Puppeteer runtimes. It uses a **Stateless, One-Shot RPC** connection model:
-* **The Concept**: Chrome/Chromium runs in the background as a persistent system daemon, maintaining the tab context, cookies, and DOM.
-* **The Flow**: To click, type, navigate, or capture screenshots, a stateless WebSocket connection is opened over `websocat` or `wscat` for a fraction of a second, sends a single JSON-RPC packet, extracts the response, and instantly closes. This avoids memory leaks and CPU-blocking loops.
-* **Process-Level Proxy Binding**: The Chromium daemon binds to our local SOCKS5/Tor proxy during initialization at the OS process level. Even if subsequent tool-calls omit the proxy address, traffic remains hermetically sealed, preventing real IP leaks.
+A fast, headless browser controller operating via Chrome DevTools Protocol (CDP) through `websocat`.
+* **Stateless One-Shot Model**: Instead of heavy frameworks (Puppeteer/Playwright), opens an ephemeral WebSocket connection per command, transmits a single JSON-RPC packet, extracts the DOM/screenshot, and disconnects immediately.
+* **Hermetic Process Binding**: Chrome/Chromium is bound to the local Tor proxy at startup, preventing clearnet IP leaks.
 
 ---
 
-## 📊 DRY Tool Schemas (`tools/*.json`)
+## 📊 Declarative Schemas (`tools/*.json`)
 
-Tool schemas are declared once in JSON format and acts as the single source of truth for the entire pipeline, preventing parameter duplication.
+Tool definitions act as the single source of truth for the agent's capability surface:
 
-1. **`tools.json` (Premium / Cloud API)**: Full 12-tool capability-set (including database queries, filesystem edits, web browsing, image generation, and shell execution). Bound when routing to advanced cloud engines like Gemini 3.5 Flash or large local models.
-2. **`tools-light.json` (Frugal / Local SLM)**: A streamlined 8-tool schema optimized for Small Language Models (e.g., LFM 2.5 series or Qwen-Coder-3B). Completely strips system-execution parameters to fit comfortably within tight context windows.
-3. **`tools-groq.json` (Groq Platform)**: Custom-tuned schemas specifically tailored for Groq's strict LPU schema validation engine. Converts all native `integer` parameters (such as timeouts or max sizes) into compliant `string` types to prevent API connection dropouts.
+1. **`tools.json` (Master Suite — 31 tools)**:
+   * **Filesystem & Discovery (5)** : `read_file`, `write_file`, `edit_file`, `file_glob_search`, `grep_search`.
+   * **Web & Search (3)** : `web_search`, `web_fetch`, `web_browse`.
+   * **Multimodal Media (6)** : `create_image`, `edit_image`, `read_image`, `create_video`, `read_video`, `create_avatar`.
+   * **Voice & Speech (2)** : `speak` (TTS), `transcribe` (STT).
+   * **System & Discovery (4)** : `exec_command`, `get_datetime`, `get_state`, `get_providers`, `get_models`.
+   * **JARNET P2P Networking (9)** : `jarnet_who`, `jarnet_status`, `jarnet_up`, `jarnet_down`, `jarnet_check`, `jarnet_ping`, `jarnet_send`, `jarnet_reply`, `jarnet_peer_add`.
+
+2. **`tools-light.json` (Frugal Suite — 28 tools)**:
+   * Optimized for Small Language Models (SLMs) and constrained context windows.
+   * Excludes raw shell execution parameters to keep prompts compact and minimize prompt hallucination on smaller parameter sizes.
 
 ---
 
-*Cleaned, modularized, and documented by Jarvis (The Great Master Flash) and Jiab77.*
+*Authored and hardened by Jiab77 and Jarvis.*

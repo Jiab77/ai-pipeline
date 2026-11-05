@@ -169,8 +169,8 @@
     <!-- Card 2: Providers -->
     <div class="card">
       <div class="icon">🔌</div>
-      <h2>16 Providers, Zero Lock-In</h2>
-      <p>Anthropic, OpenAI, DeepSeek, Groq, Z.AI, Kimi, Venice, OpenRouter, Vercel, CyberNeurova, Mammouth, HuggingFace, and more. One API format, one pipeline. If a provider goes down, another takes over — automatically.</p>
+      <h2>18 Providers, Zero Lock-In</h2>
+      <p>Anthropic, OpenAI, DeepSeek, Groq, Inception Labs, X.AI, Z.AI, Kimi, Venice, OpenRouter, Vercel, CyberNeurova, Mammouth, HuggingFace, and more. One API format, one pipeline. If a provider goes down, another takes over — automatically.</p>
       <div class="cmd-line">
         <span class="cmd">/provider openrouter</span>
         <span class="cmd">/fallback groq</span>
@@ -180,13 +180,13 @@
     <!-- Card 3: Tools -->
     <div class="card">
       <div class="icon">🛠️</div>
-      <h2>12 Built-In Tools, $0 Extra</h2>
+      <h2>31 Built-In Tools, $0 Extra</h2>
       <ul>
-        <li>create_image &mdash; free / paid image creation</li>
-        <li>web_search &mdash; anonymous, Tor-routed</li>
-        <li>web_fetch &mdash; clean Markdown extraction</li>
+        <li>jarnet_* &mdash; Tor v3 P2P agent network</li>
+        <li>speech &amp; voice &mdash; local STT &amp; TTS</li>
+        <li>media &mdash; image, video, vision &amp; avatar</li>
         <li>web_browse &mdash; headless CDP automation</li>
-        <li>grep_search &amp; file_glob_search</li>
+        <li>web_search &amp; web_fetch &mdash; anonymous &amp; clean</li>
         <li>read, write, edit, diff &amp; shell</li>
       </ul>
       <p style="margin-top:0.5rem; font-size:0.82rem; color:#6b7280;">
@@ -200,9 +200,12 @@
   <div class="badge-bar">
     <span class="badge">✨ Multi-model</span>
     <span class="badge">🧅 Tor enforced</span>
+    <span class="badge">🔗 JarNet P2P (Tor v3)</span>
+    <span class="badge">🤖 Autonomous agent mode</span>
+    <span class="badge">🎙️ Voice loop (Alt+V)</span>
     <span class="badge">🔒 Deny-by-default</span>
     <span class="badge">🧠 Persistent memory</span>
-    <span class="badge">🎨 Image creation engine</span>
+    <span class="badge">🎨 Multimodal v2 engines</span>
     <span class="badge">👁️ Vision auto-fallback</span>
     <span class="badge">📱 Termux + CDP mobile</span>
     <span class="badge">🐧 Linux / macOS / WSL</span>
@@ -240,6 +243,11 @@
       <p>
         <span class="cmt"># Start chatting with another provider + fallback provider</span><br>
         <span class="grn">./cli.sh</span> provider openrouter fallback groq
+      </p>
+      <br>
+      <p>
+        <span class="cmt"># Start in autonomous Agent-to-Agent mode</span><br>
+        <span class="grn">./cli.sh</span> auto
       </p>
       <br>
       <p>

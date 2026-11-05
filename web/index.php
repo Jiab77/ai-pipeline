@@ -8,8 +8,8 @@
  * Fully Localized (i18n) Supporting dynamic English & French switching.
  *
  * Architect: Jiab77
- * AI Sorcerer: Jarvis (The Great Master Flash)
- * Version: 0.0.1
+ * AI Sorcerer: Jarvis (The PHP Noob)
+ * Version: 0.0.2
  */
 
 // Load Fat-Free Framework Core
@@ -71,14 +71,14 @@ if (file_exists(WEB_ROOT . '/version.json')) {
 }
 
 // Load provider config file
-if (file_exists(PROJECT_ROOT . '/config/providers.json')) {
-    $f3->set('PROVIDERS', json_decode(file_get_contents(PROJECT_ROOT . '/config/providers.json')));
-}
+// if (file_exists(PROJECT_ROOT . '/config/providers.v2.json')) {
+//     $f3->set('PROVIDERS', json_decode(file_get_contents(PROJECT_ROOT . '/config/providers.v2.json')));
+// }
 
 // Load state config file
-if (file_exists(PROJECT_ROOT . '/config/state.json')) {
-    $f3->set('CONFIG_STATE', json_decode(file_get_contents(PROJECT_ROOT . '/config/state.json')));
-}
+// if (file_exists(PROJECT_ROOT . '/config/state.json')) {
+//     $f3->set('CONFIG_STATE', json_decode(file_get_contents(PROJECT_ROOT . '/config/state.json')));
+// }
 
 // Dynamic Translation Helper function
 function __($key) {
@@ -181,34 +181,116 @@ $f3->route('GET /api/telemetry', function($f3) {
         }
     }
 
-    // Active Models & Configs (read from config file, NO hardcoded fallback)
-    $activeModel = null;
-    $activeProvider = null;
-    $activeBackend = null;
+    // Active Models & Configs (read dynamically from config/state.json)
+    $activeModel = '';
+    $activeProvider = '';
+    $providerName = '';
+    $activeBackend = 'external';
+    $activeMode = 'cli';
+    $activeFallback = '';
+
+    $stateFile = PROJECT_ROOT . '/config/state.json';
+    if (file_exists($stateFile)) {
+        $state = json_decode(file_get_contents($stateFile), true) ?: [];
+        $activeBackend = $state['backend'] ?? 'external';
+        $activeProvider = $state['provider'] ?? '';
+        $activeModel = $state['model'] ?? '';
+        $activeMode = $state['mode'] ?? 'cli';
+        $activeFallback = $state['fallback'] ?? '';
+    }
+
+    // Resolve human-readable provider name from providers.v2.json or providers.json
+    $providerName = $activeProvider;
+    $providersConfig = null;
+    if (file_exists(PROJECT_ROOT . '/config/providers.v2.json')) {
+        $providersConfig = json_decode(file_get_contents(PROJECT_ROOT . '/config/providers.v2.json'), true);
+    } elseif (file_exists(PROJECT_ROOT . '/config/providers.json')) {
+        $providersConfig = json_decode(file_get_contents(PROJECT_ROOT . '/config/providers.json'), true);
+    }
+    if (is_array($providersConfig) && isset($providersConfig[$activeProvider]['name'])) {
+        $providerName = $providersConfig[$activeProvider]['name'];
+    }
+
+    // Tor SOCKS port live detection (127.0.0.1:9050)
     $useTor = false;
-
-    $confFile = PROJECT_ROOT . '/config/cli.conf';
-    if (!file_exists($confFile)) {
-        $confFile = PROJECT_ROOT . '/config/core.conf';
-    }
-    if (!file_exists($confFile)) {
-        $confFile = PROJECT_ROOT . '/core.sh';
-    }
-
-    if (file_exists($confFile)) {
-        $conf = file_get_contents($confFile);
-        $activeBackend = !is_null($f3->get('CONFIG_STATE')) ? $f3->get('CONFIG_STATE')->backend : '';
-        $activeProvider = !is_null($f3->get('CONFIG_STATE')) ? $f3->get('CONFIG_STATE')->provider : '';
-        $activeModel = !is_null($f3->get('CONFIG_STATE')) ? $f3->get('CONFIG_STATE')->model : '';
-        // $activeModel = $f3->get('PROVIDERS')->{$activeProvider}->default->model;
-        if (preg_match('/USE_TOR=["\']?(true)["\']?/i', $conf)) {
-            $useTor = true;
-        }
-    }
-
-    // Tor detection: if backend is external, assume Tor-capable
-    if ($activeBackend === 'external' && !$useTor) {
+    $torSock = @fsockopen('127.0.0.1', 9050, $errno, $errstr, 0.3);
+    if ($torSock) {
         $useTor = true;
+        fclose($torSock);
+    }
+
+    // JarNet P2P node live detection
+    $jarnetDir = PROJECT_ROOT . '/data/jarnet';
+    $jarnet = [
+        'active' => false,
+        'state' => 'OFFLINE',
+        'alias' => null,
+        'onion' => null,
+        'peers_count' => 0
+    ];
+
+    if (is_dir($jarnetDir)) {
+        $aliasFile = $jarnetDir . '/.alias';
+        if (file_exists($aliasFile)) {
+            $jarnet['alias'] = trim(file_get_contents($aliasFile));
+        }
+
+        $pidFile = $jarnetDir . '/.listener.pid';
+        $holderFile = $jarnetDir . '/.holder.pid';
+        $listenerAlive = false;
+        $holderAlive = false;
+
+        if (file_exists($pidFile)) {
+            $lpid = (int)trim(file_get_contents($pidFile));
+            if ($lpid > 0) {
+                if (function_exists('posix_kill')) {
+                    $listenerAlive = @posix_kill($lpid, 0);
+                } elseif (file_exists("/proc/$lpid")) {
+                    $listenerAlive = true;
+                } else {
+                    $res = trim((string)@shell_exec("kill -0 $lpid 2>/dev/null && echo 1 || echo 0"));
+                    $listenerAlive = ($res === '1');
+                }
+            }
+        }
+
+        if (file_exists($holderFile)) {
+            $hpid = (int)trim(file_get_contents($holderFile));
+            if ($hpid > 0) {
+                if (function_exists('posix_kill')) {
+                    $holderAlive = @posix_kill($hpid, 0);
+                } elseif (file_exists("/proc/$hpid")) {
+                    $holderAlive = true;
+                } else {
+                    $res = trim((string)@shell_exec("kill -0 $hpid 2>/dev/null && echo 1 || echo 0"));
+                    $holderAlive = ($res === '1');
+                }
+            }
+        }
+
+        $peersFile = $jarnetDir . '/peers.txt';
+        if (file_exists($peersFile)) {
+            $pLines = file($peersFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            $jarnet['peers_count'] = is_array($pLines) ? count($pLines) : 0;
+        }
+
+        if (!empty($jarnet['alias'])) {
+            $addrFile = $jarnetDir . '/keys/' . $jarnet['alias'] . '.addr';
+            if (file_exists($addrFile)) {
+                $jarnet['onion'] = trim(file_get_contents($addrFile));
+            }
+        }
+
+        if ($listenerAlive && $holderAlive) {
+            $jarnet['active'] = true;
+            $jarnet['state'] = 'LISTENING';
+        } elseif ($listenerAlive) {
+            $jarnet['active'] = true;
+            $jarnet['state'] = 'LOOPBACK';
+        } else {
+            $jarnet['active'] = false;
+            $jarnet['state'] = 'OFFLINE';
+        }
     }
 
     // Get credit balance
@@ -258,10 +340,14 @@ $f3->route('GET /api/telemetry', function($f3) {
         'ai' => [
             'model' => $activeModel,
             'provider' => $activeProvider,
+            'provider_name' => $providerName,
             'backend' => $activeBackend,
+            'mode' => $activeMode,
+            'fallback' => $activeFallback,
             'credits' => $credits,
             'tor' => $useTor
         ],
+        'jarnet' => $jarnet,
         'os' => [
             'name' => PHP_OS,
             'family' => PHP_OS_FAMILY,
@@ -356,98 +442,18 @@ $f3->route('POST /api/memory/save', function($f3) {
     exit;
 });
 
-// 5. Unix Pipe Stream Bridge (Option C) for Interactive Web Chat
+// 5. Unix Pipe Stream Bridge — Disabled in v1.9.0 (Native PHP rewrite planned for v2.0.0)
 $f3->route('GET /api/chat/stream', function($f3) {
     header('Content-Type: text/event-stream');
     header('Cache-Control: no-cache');
     header('Connection: keep-alive');
-    header('X-Accel-Buffering: no'); // Disable buffering for Nginx/Apache
+    header('X-Accel-Buffering: no');
 
-    $query = $f3->get('GET.q');
-    if (empty($query)) {
-        echo "data: " . json_encode(['error' => 'Empty query']) . PHP_EOL . PHP_EOL;
-        exit;
-    }
-
-    // Target execution script
-    $script = PROJECT_ROOT . '/data/test-core.sh';
-    if (!file_exists($script)) {
-        $script = PROJECT_ROOT . '/core.sh';
-    }
-
-    if (!file_exists($script)) {
-        echo "data: " . json_encode(['type' => 'error', 'text' => 'Core script not found: ' . $script]) . PHP_EOL . PHP_EOL;
-        exit;
-    }
-
-    $descriptorspec = [
-        0 => ["pipe", "r"], // stdin
-        1 => ["pipe", "w"], // stdout
-        2 => ["pipe", "w"]  // stderr
-    ];
-
-    // Establish environment variables
-    $env = [
-        'RUN_MODE' => 'simple',
-        'TERM' => 'xterm-256color', // Preserve ANSI colors for terminal fidelity!
-        'PATH' => getenv('PATH'),
-        'HOME' => getenv('HOME')
-    ];
-    if (getenv('TMPDIR')) {
-        $env['TMPDIR'] = getenv('TMPDIR');
-    }
-
-    // Launch subprocess asynchronously
-    $process = proc_open("bash " . escapeshellarg($script) . " " . escapeshellarg($query), $descriptorspec, $pipes, dirname(__DIR__), $env);
-
-    if (is_resource($process)) {
-        fclose($pipes[0]); // No stdin needed
-
-        // Non-blocking IO stream flags
-        stream_set_blocking($pipes[1], 0);
-        stream_set_blocking($pipes[2], 0);
-
-        while (!feof($pipes[1]) || !feof($pipes[2])) {
-            $read = [$pipes[1], $pipes[2]];
-            $write = null;
-            $except = null;
-
-            // Wait for data (100ms timeout)
-            if (stream_select($read, $write, $except, 0, 100000) > 0) {
-                foreach ($read as $pipe) {
-                    if ($pipe === $pipes[1]) {
-                        $line = fgets($pipes[1]);
-                        if ($line !== false && $line !== '') {
-                            echo "data: " . json_encode(['type' => 'stdout', 'text' => $line]) . PHP_EOL . PHP_EOL;
-                            ob_flush();
-                            flush();
-                        }
-                    } else if ($pipe === $pipes[2]) {
-                        $line = fgets($pipes[2]);
-                        if ($line !== false && $line !== '') {
-                            echo "data: " . json_encode(['type' => 'stderr', 'text' => $line]) . PHP_EOL . PHP_EOL;
-                            ob_flush();
-                            flush();
-                        }
-                    }
-                }
-            }
-
-            if (connection_aborted()) {
-                break;
-            }
-        }
-
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        proc_close($process);
-    } else {
-        echo "data: " . json_encode(['type' => 'error', 'text' => 'Failed to initialize core subprocess.']) . PHP_EOL . PHP_EOL;
-    }
-
+    echo "data: " . json_encode([
+        'type' => 'error',
+        'text' => 'Interactive Web Chat is currently paused in v1.9.0 pending native PHP engine rewrite in v2.0.0. Please use ./cli.sh'
+    ]) . PHP_EOL . PHP_EOL;
     echo "data: " . json_encode(['type' => 'done']) . PHP_EOL . PHP_EOL;
-    ob_flush();
-    flush();
     exit;
 });
 
@@ -847,10 +853,7 @@ $f3->route('GET /', function($f3) {
         <!-- Left Sidebar Navigation -->
         <div class="three wide column" style="padding-top: 0; padding-bottom: 0;">
             <div class="ui vertical menu inverted sidebar-menu fluid">
-                <a class="item active" data-tab="tab-chat">
-                    <i class="comments outline icon"></i> <?= __('tab_chat') ?>
-                </a>
-                <a class="item" data-tab="tab-memory">
+                <a class="item active" data-tab="tab-memory">
                     <i class="brain icon"></i> <?= __('tab_memory') ?>
                 </a>
                 <a class="item" data-tab="tab-telemetry">
@@ -858,6 +861,10 @@ $f3->route('GET /', function($f3) {
                 </a>
                 <a class="item" data-tab="tab-ingestion">
                     <i class="folder open outline icon"></i> <?= __('tab_scratchpad') ?>
+                </a>
+                <a class="item" data-tab="tab-chat" style="opacity: 0.7;">
+                    <i class="comments outline icon"></i> <?= __('tab_chat') ?>
+                    <span class="ui mini orange label" style="margin-left: auto; padding: 2px 6px;"><?= __('chat_disabled_badge') ?></span>
                 </a>
 
                 <!-- Active AI Profile Status -->
@@ -878,34 +885,47 @@ $f3->route('GET /', function($f3) {
             <div class="ui inverted segment premium-card" style="height: 100%; padding: 1.5rem !important;">
 
                 <!-- =================================================================== -->
-                <!-- TAB 1: COCKPIT INTERACTIVE CHAT -->
+                <!-- TAB 1: COCKPIT INTERACTIVE CHAT (PAUSED FOR V2.0.0 REWRITE) -->
                 <!-- =================================================================== -->
-                <div class="ui tab active chat-container" data-tab="tab-chat" style="height: 100%;">
-                    <div class="chat-history" id="chat-history">
+                <div class="ui tab chat-container" data-tab="tab-chat" style="height: 100%;">
+                    <!-- Informative Banner about v2.0.0 redesign -->
+                    <div class="ui icon message inverted warning" style="background: rgba(242, 113, 28, 0.1); border: 1px solid var(--accent-orange); border-radius: 12px; margin-bottom: 1.5rem;">
+                        <i class="clock outline icon" style="color: var(--accent-orange);"></i>
+                        <div class="content">
+                            <div class="header" style="color: var(--accent-orange); font-size: 1.15rem; margin-bottom: 0.4rem;">
+                                <?= __('chat_disabled_title') ?>
+                            </div>
+                            <p style="color: var(--color-text); line-height: 1.5;">
+                                <?= __('chat_disabled_desc') ?>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="chat-history" id="chat-history" style="opacity: 0.6; pointer-events: none;">
                         <!-- Default greeting greeting -->
                         <div class="chat-bubble assistant">
                             <strong>Jarvis:</strong> <?= __('welcome_message') ?>
                         </div>
                     </div>
 
-                    <!-- Chat Input and Controls -->
-                    <div class="ui form">
+                    <!-- Chat Input and Controls (Disabled) -->
+                    <div class="ui form" style="opacity: 0.6;">
                         <div class="ui action input fluid big" style="background: transparent;">
-                            <input type="text" id="chat-input" placeholder="<?= __('chat_placeholder') ?>" style="background: var(--bg-input); color: var(--color-text); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px 0 0 8px;">
-                            <button class="ui button teal" id="btn-send-chat" style="border-radius: 0 8px 8px 0;"><i class="paper plane icon"></i> <?= __('chat_send') ?></button>
+                            <input type="text" id="chat-input" disabled placeholder="<?= __('chat_disabled_placeholder') ?>" style="background: var(--bg-input); color: var(--color-text-dim); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px 0 0 8px; cursor: not-allowed;">
+                            <button class="ui button teal disabled" id="btn-send-chat" style="border-radius: 0 8px 8px 0; cursor: not-allowed;"><i class="paper plane icon"></i> <?= __('chat_send') ?></button>
                         </div>
                     </div>
 
-                    <!-- Real-Time Unix Output Monitor (The terminal stream bridge output) -->
-                    <div class="terminal-panel" id="terminal-monitor">
-                        <div><?= __('terminal_waiting') ?></div>
+                    <!-- Real-Time Unix Output Monitor (Disabled) -->
+                    <div class="terminal-panel" id="terminal-monitor" style="opacity: 0.5;">
+                        <div><?= __('chat_disabled_terminal') ?></div>
                     </div>
                 </div>
 
                 <!-- =================================================================== -->
                 <!-- TAB 2: COGNITIVE FREEDOM MEMORY EXPLORER -->
                 <!-- =================================================================== -->
-                <div class="ui tab" data-tab="tab-memory" style="height: 100%;">
+                <div class="ui tab active" data-tab="tab-memory" style="height: 100%;">
                     <div class="ui grid stackable" style="height: 100%;">
                         <!-- Left pane: Memory Files Index -->
                         <div class="four wide column explorer-list" id="memory-files-list">
@@ -1048,7 +1068,10 @@ $f3->route('GET /', function($f3) {
                                             <td class="collapsing">Tor Proxy Tunnel</td>
                                             <td id="hud-tor-status">Disconnected</td>
                                         </tr>
-                                    </tbody>
+                                        <tr>
+                                            <td class="collapsing"><?= __('telemetry_jarnet_label') ?></td>
+                                            <td id="hud-jarnet-status">Offline</td>
+                                        </tr>
                                 </table>
                             </div>
                         </div>
@@ -1104,6 +1127,9 @@ $f3->route('GET /', function($f3) {
                     }
                 }
             });
+
+            // Initial load for default active tab (Cognitive Memory Core)
+            loadMemoryCoreIndex();
 
             // =================================================================
             // MOBILE HAMBURGER MENU TOGGLE
@@ -1199,111 +1225,12 @@ $f3->route('GET /', function($f3) {
             }
 
             // =================================================================
-            // CHAT HANDLERS (OPTION C BRIDGE)
+            // CHAT HANDLERS (PAUSED FOR V2.0.0 REWRITE)
             // =================================================================
 
             function sendChatMessage() {
-                const query = $('#chat-input').val().trim();
-                if (!query) return;
-
-                // Disable UI elements during stream
-                $('#chat-input').val('').prop('disabled', true);
-                $('#btn-send-chat').addClass('loading').prop('disabled', true);
-
-                // Add User message bubble with slide down transition
-                const userBubble = $(`
-                    <div class="chat-bubble user" style="display: none;">
-                        <strong>User:</strong> ${escapeHtml(query)}
-                    </div>
-                `);
-                $('#chat-history').append(userBubble);
-                userBubble.transition('slide down in', '300ms');
-                scrollChatToBottom();
-
-                // Prepare Assistant streaming placeholder
-                const assistantId = 'assistant-' + Date.now();
-                const assistantBubble = $(`
-                    <div class="chat-bubble assistant" id="${assistantId}" style="display: none;">
-                        <strong>Jarvis:</strong> <span class="ui active inline loader tiny"></span> Thinking...
-                    </div>
-                `);
-                $('#chat-history').append(assistantBubble);
-                assistantBubble.transition('slide down in', '300ms');
-                scrollChatToBottom();
-
-                // Clear and reset the Unix Monitor Console
-                $('#terminal-monitor').html('<div>[SYSTEM] Unix Pipe Stream Bridge opened. Stream flowing...</div>');
-
-                // Initialize SSE connection to stream pipeline response
-                const streamUrl = 'api/chat/stream?q=' + encodeURIComponent(query);
-                const eventSource = new EventSource(streamUrl);
-
-                let answerBuffer = '';
-                let isThinking = true;
-
-                eventSource.onmessage = function(event) {
-                    const data = JSON.parse(event.data);
-
-                    if (data.type === 'stdout') {
-                        // Append raw Unix output to Console monitor
-                        const parsedLine = ansiToHtml(data.text);
-                        $('#terminal-monitor').append(`<div>${parsedLine}</div>`);
-                        scrollTerminalToBottom();
-
-                        // Detect AI answers and append to chat bubble
-                        const cleanText = data.text.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
-
-                        // Ignore system headers or logs in assistant bubble, concentrate on answer
-                        if (cleanText.includes('🤖 Jarvis ❯') || cleanText.includes('[AI ANSWER]')) {
-                            isThinking = false;
-                            $(`#${assistantId}`).html('<strong>Jarvis:</strong> ');
-                        }
-
-                        if (!isThinking && !cleanText.startsWith('🤖') && !cleanText.startsWith('[') && !cleanText.includes('❯')) {
-                            answerBuffer += cleanText;
-                            const renderedHtml = marked.parse(answerBuffer);
-                            $(`#${assistantId}`).html(`<strong>Jarvis:</strong> ${renderedHtml}`);
-                            scrollChatToBottom();
-                        }
-                    } else if (data.type === 'stderr') {
-                        // Append warning/error logs to monitor console
-                        const parsedLine = ansiToHtml(data.text);
-                        $('#terminal-monitor').append(`<div style="color: #ef4444 !important;">${parsedLine}</div>`);
-                        scrollTerminalToBottom();
-                    } else if (data.type === 'done') {
-                        eventSource.close();
-
-                        // Re-enable input controls
-                        $('#chat-input').prop('disabled', false).focus();
-                        $('#btn-send-chat').removeClass('loading').prop('disabled', false);
-
-                        // If answer buffer was empty, fallback to display full terminal output
-                        if (isThinking) {
-                            $(`#${assistantId}`).html(`<strong>Jarvis:</strong> Command executed. See Unix output log console below for complete diagnostics.`);
-                        }
-
-                        // Auto refresh credits and metrics after call
-                        updateGlobalTelemetry();
-                    } else if (data.type === 'error') {
-                        eventSource.close();
-                        $('#chat-input').prop('disabled', false);
-                        $('#btn-send-chat').removeClass('loading').prop('disabled', false);
-                        $(`#${assistantId}`).html(`<strong>Jarvis:</strong> <span style="color:#ef4444;">System Error occurred while running pipeline.</span>`);
-
-                        $('body').toast({
-                            class: 'error',
-                            message: 'System Error occurred while running pipeline subprocess.',
-                            position: 'bottom right'
-                        });
-                    }
-                };
-
-                eventSource.onerror = function() {
-                    eventSource.close();
-                    $('#chat-input').prop('disabled', false);
-                    $('#btn-send-chat').removeClass('loading').prop('disabled', false);
-                    updateGlobalTelemetry();
-                };
+                // Interactive Web Chat is disabled in v1.9.0 pending v2.0.0 native PHP rewrite
+                return;
             }
 
             // Keyboard and Send Button binds
@@ -1558,11 +1485,12 @@ $f3->route('GET /', function($f3) {
                         $('#badge-bat-container').hide();
                     }
 
-                    // Sidebar AI Profile Card
-                    $('#sidebar-backend').text('<?= __("backend_label") ?>: ' + data.ai.backend.toUpperCase());
-                    $('#sidebar-provider').text('<?= __("provider_label") ?>: ' + data.ai.provider.toUpperCase());
-                    $('#sidebar-model').text(data.ai.model);
-
+                    // Sidebar AI Profile Card (extracted live from config/state.json)
+                    const backendStr = data.ai.backend ? data.ai.backend.toUpperCase() : 'EXTERNAL';
+                    $('#sidebar-backend').text('<?= __("backend_label") ?>: ' + backendStr);
+                    const providerStr = data.ai.provider_name || (data.ai.provider ? data.ai.provider.toUpperCase() : 'N/A');
+                    $('#sidebar-provider').text('<?= __("provider_label") ?>: ' + providerStr);
+                    $('#sidebar-model').text(data.ai.model || 'N/A');
                     if (data.ai.credits !== null) {
                         $('#sidebar-credits-container').show();
                         $('#sidebar-credits').text('$' + parseFloat(data.ai.credits).toFixed(4));
@@ -1603,6 +1531,15 @@ $f3->route('GET /', function($f3) {
                         $('#hud-tor-status').html('<span style="color:#2ecc71; font-weight:bold;"><i class="shield alternate icon"></i> <?= __("telemetry_tor_active") ?></span>');
                     } else {
                         $('#hud-tor-status').html('<span style="color:#f2711c;"><i class="warning sign icon"></i> <?= __("telemetry_tor_inactive") ?></span>');
+                    }
+
+                    // JarNet P2P Node Status
+                    if (data.jarnet && data.jarnet.active) {
+                        const alias = data.jarnet.alias ? ' <span style="font-weight:normal; color:var(--accent-cyan);">' + escapeHtml(data.jarnet.alias) + '</span>' : '';
+                        const onionTooltip = data.jarnet.onion ? ' title="' + escapeHtml(data.jarnet.onion) + '"' : '';
+                        $('#hud-jarnet-status').html('<span style="color:#2ecc71; font-weight:bold; cursor:help;"' + onionTooltip + '><i class="share alternate icon"></i> <?= __("telemetry_jarnet_active") ?><br><span style="color:#ffffff; font-weight:bold;">Name:</span> ' + alias + '</span>');
+                    } else {
+                        $('#hud-jarnet-status').html('<span style="color:#94a3b8;"><i class="power off icon"></i> <?= __("telemetry_jarnet_offline") ?></span>');
                     }
                 });
             }

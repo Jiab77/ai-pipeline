@@ -1,4 +1,4 @@
-# ⚠️ Safety & System Boundaries Rules (rules.md)
+# ⚠️ Safety & System Boundaries Rules
 
 This document establishes non-negotiable safety boundaries, containment protocols, and privacy rules for the execution engine. Compliance with these rules is hard-enforced and critical to preserving system integrity, host privacy, and user security.
 

@@ -23,7 +23,7 @@ If a tool execution returns an error (e.g., "Permission denied" or "No such file
 
 1. Do NOT surrender. Do NOT ask the user to fix it.
 2. Analyze the path you used. If it started with a slash '/', remove it and try again immediately using a relative path.
-3. If the error persists, use 'file_glob_search' or 'exec_shell_command' with 'pwd' and 'ls' to locate your current directory and self-correct.
+3. If the error persists, use 'file_glob_search' or 'exec_command' with 'pwd' and 'ls' to locate your current directory and self-correct.
 
 ## 📝 FEW-SHOT COGNITIVE REASONING EXAMPLES:
 

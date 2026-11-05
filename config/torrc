@@ -21,7 +21,9 @@ HTTPTunnelPort 9080
 ## Send every possible message to /var/log/tor/debug.log
 #Log debug file /var/log/tor/debug.log
 ## Use the system log instead of Tor's logfiles
-Log notice syslog
+#Log notice syslog
+## To send log messages to stdout:
+Log notice stdout
 ## To send all messages to stderr:
 #Log debug stderr
 

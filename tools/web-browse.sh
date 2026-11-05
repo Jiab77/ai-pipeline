@@ -1,33 +1,29 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2001,SC2016
+# shellcheck shell=bash disable=SC2001,SC2016
 # ==============================================================================
-# web-browse.sh — Pure Bash Stateless One-Shot CDP Browser Automation Engine
+# tools/web-browse.sh — Stateless Chrome DevTools Protocol browser driver
 # ==============================================================================
-# Pilots Chromium-based browsers via direct Chrome DevTools Protocol (CDP)
-# WebSocket RPC calls. Supports clicking, typing, screenshots, and PDFs.
+# Drives Chromium-based browsers through direct CDP WebSocket calls on desktop,
+# or mobile devices through ADB forwarding on Termux. No Node.js or Puppeteer.
 #
-# HYBRID EDITION (v0.0.0):
-#   - Desktop mode: launches a local Chromium (Linux / macOS) -> unchanged engine.
-#   - Mobile mode (Termux): connects to the device Chrome via ADB
-#     (adb forward tcp:9222 localabstract:chrome_devtools_remote) and drives it
-#     through the exact same CDP client. No Node.js, no Puppeteer, no Shizuku.
-#
-# The ADB connection logic is DUPLICATED from start-shizuku.sh on purpose:
-# these are two separate projects. Shizuku is intentionally NOT started here.
-#
-# Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (DeepSeek)
-#
-# Version: 0.1.1
+# Author: Jiab77
+# Collaborator: Jarvis
+# Version: 0.1.2
 # ==============================================================================
 
 # Options
-[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
+
+# Config
+TOR_HOST="127.0.0.1"
+TOR_PORT=9050
+TOR_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
 
 # Global state variables
 WS_URL=""
 BROWSER_PID=""
+BROWSER_BIN=""
 USER_DATA_DIR=""
 DEBUG_PORT=9222
 cdp_seq=0
@@ -40,8 +36,11 @@ EVAL_RESULTS=()
 WS_CLIENT=""
 
 # Internals
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
+LIB_DIR="${AIDE_LIB_DIR:-${PROJECT_ROOT}/lib}"
+LIB_DEPS=("base64")
 LOG_FILE="${SCRIPT_NAME}.log"
 
 # Runtime mode flags
@@ -50,26 +49,67 @@ LAUNCH_MODE="fullscreen"
 ADB_MODE=false
 ADB_CLEANUP=false
 
+# Log and exit helper
+die() {
+  echo -e "[ERROR] $*" >&2
+  exit 255
+}
+leave() {
+  echo "[ERROR] $*"
+  return 1
+}
+
 # Helper: Detect OS
 is_macos() {
   [[ $OSTYPE == "darwin"* ]]
 }
 
-# Helper: Detect Termux (unifies the existing /data/data/com.termux check)
+# Helper: Detect Termux
 is_termux() {
   [[ -n "${TERMUX_VERSION:-}" ]] && return 0
   [[ -d "/data/data/com.termux" ]] && return 0
   return 1
 }
 
-# Helper: Base64 decoding
-base64_decode() {
-  if is_macos; then
-    base64 -D 2>/dev/null
-  else
-    base64 -d 2>/dev/null
+# Load required libraries
+load_libs() {
+  local total_libs=0
+  local found_libs=0
+  local missing_libs=0
+  local missing_libs_str=""
+  total_libs="${#LIB_DEPS[@]}"
+  for d in "${LIB_DEPS[@]}"; do
+    if [[ -r "${LIB_DIR}/${d}.sh" && -s "${LIB_DIR}/${d}.sh" ]]; then
+      # shellcheck source=/dev/null
+      source "${LIB_DIR}/${d}.sh" || die "Failed to load '$d' library."
+      ((found_libs++))
+    else
+      [[ $missing_libs -ne 0 ]] && missing_libs_str+=", "
+      missing_libs_str+="$d"
+      ((missing_libs++))
+    fi
+  done
+  if [[ $found_libs -ne $total_libs ]]; then
+    die "Missing libraries: $missing_libs_str"
   fi
 }
+
+# -----------------------------------------------------------------------------
+# Portability helpers (stock macOS / BSD differences)
+# -----------------------------------------------------------------------------
+load_libs
+
+# -----------------------------------------------------------------------------
+# Shared Base64 compatibility layer (GNU / BSD)
+# -----------------------------------------------------------------------------
+# _WB_LIB_DIR="${AIDE_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)}"
+# if [[ ! -r "${_WB_LIB_DIR}/base64.sh" ]]; then
+#   echo "[ERROR] base64.sh not found in ${_WB_LIB_DIR} (set AIDE_LIB_DIR=<dir> to override)" >&2
+#   exit 1
+# fi
+# # shellcheck source=/dev/null
+# source "${_WB_LIB_DIR}/base64.sh" || exit 1
+# unset _WB_LIB_DIR
 
 # ── E2BIG-safe jq plumbing ────────────────────────────────────────────────────
 # On Linux a SINGLE argument (argv) or environment variable is capped at
@@ -120,6 +160,12 @@ cleanup() {
   # Desktop mode: kill the local browser process and remove its temp profile
   if [[ -n $BROWSER_PID ]]; then
     kill "$BROWSER_PID" 2>/dev/null
+    local i
+    for ((i=0; i<20; i++)); do
+      kill -0 "$BROWSER_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -9 "$BROWSER_PID" 2>/dev/null
     wait "$BROWSER_PID" 2>/dev/null
   fi
   [[ -n "${USER_DATA_DIR:-}" && -d $USER_DATA_DIR ]] && rm -rf "$USER_DATA_DIR" 2>/dev/null
@@ -187,8 +233,7 @@ cdp_eval() {
   local exception ; exception=$(jq -rc '.result.exceptionDetails // empty' <<<"$resp" 2>/dev/null)
   if [[ -n $exception ]]; then
     local err_msg ; err_msg=$(jq -rc '.result.exceptionDetails.exception.description // "JavaScript exception"' <<<"$resp" 2>/dev/null)
-    echo "ERROR:$err_msg"
-    return 1
+    leave "$err_msg"
   fi
 
   # Return the value
@@ -232,8 +277,7 @@ action_navigate() {
   local resp ; resp=$(cdp_send "Page.navigate" "{\"url\":\"$url\"}" "$timeout")
   local frame_id ; frame_id=$(jq -rc '.result.frameId // empty' <<<"$resp" 2>/dev/null)
   if [[ -z $frame_id ]]; then
-    echo "ERROR:Navigation failed"
-    return 1
+    leave "Navigation failed"
   fi
 
   # Wait for page readiness
@@ -274,8 +318,7 @@ action_wait() {
       fi
       sleep 0.2
     done
-    echo "ERROR:Timeout waiting for selector: $selector"
-    return 1
+    leave "Timeout waiting for selector: $selector"
   else
     # Simple timeout sleep
     local sec=$((timeout / 1000))
@@ -317,8 +360,7 @@ action_click() {
   "
   local res ; res=$(cdp_eval "$src")
   if [[ $res == "NOT_FOUND" ]]; then
-    echo "ERROR:Selector not found for click: $selector"
-    return 1
+    leave "Selector not found for click: $selector"
   fi
   return 0
 }
@@ -356,8 +398,7 @@ action_type() {
   "
   local res ; res=$(cdp_eval "$src")
   if [[ $res == "NOT_FOUND" ]]; then
-    echo "ERROR:Selector not found for typing: $selector"
-    return 1
+    leave "Selector not found for typing: $selector"
   fi
   return 0
 }
@@ -386,25 +427,41 @@ action_screenshot() {
   local full_page="${2:-false}"
   local timeout=15   # Increased default to 15s for Tor resilience (large base64 transmission)
 
-  local params='{"format":"jpeg","quality":80}'
-  [[ $full_page == "true" ]] && params='{"format":"jpeg","quality":80,"captureBeyondViewport":true}'
+  # Encoding derived from the target filename: Page.captureScreenshot accepts jpeg, png, webp
+  # (protocol default is png). Unknown or missing extension keeps the legacy jpeg output.
+  # NOTE: "quality" is jpeg-only per the protocol spec, so it is never sent for png/webp.
+  local fmt
+  case "${path##*.}" in
+    [Pp][Nn][Gg])         fmt="png"  ;;
+    [Ww][Ee][Bb][Pp])     fmt="webp" ;;
+    *)                    fmt="jpeg" ;;
+  esac
+
+  local params
+  params=$(jq -nc --arg f "$fmt" --arg fp "$full_page" '
+    {format: $f}
+    + (if $f == "jpeg" then {quality: 80} else {} end)
+    + (if $fp == "true" then {captureBeyondViewport: true} else {} end)')
+
+  if [[ -z $params ]]; then
+    echo "[ERROR] Failed to build screenshot parameters."
+    return 1
+  fi
 
   local resp ; resp=$(cdp_send "Page.captureScreenshot" "$params" "$timeout")
   local base64_data ; base64_data=$(jq -rc '.result.data // empty' <<< "$resp" 2>/dev/null)
 
   if [[ -z $base64_data ]]; then
-    echo "ERROR:Failed to create screenshot."
-    return 1
+    leave "Failed to create screenshot."
   fi
 
   local dir ; dir=$(dirname "$path")
   mkdir -p "$dir" 2>/dev/null
 
-  echo "$base64_data" | base64_decode > "$path"
+  echo "$base64_data" | b64d > "$path"
 
   if [[ ! -r $path ]]; then
-    echo "ERROR:Failed to write screenshot file: $path"
-    return 1
+    leave "Failed to write screenshot file: $path"
   fi
 
   return 0
@@ -427,18 +484,16 @@ action_pdf() {
   local base64_data ; base64_data=$(jq -rc '.result.data // empty' <<< "$resp" 2>/dev/null)
 
   if [[ -z $base64_data ]]; then
-    echo "ERROR:Failed to print PDF"
-    return 1
+    leave "Failed to print PDF"
   fi
 
   local dir ; dir=$(dirname "$path")
   mkdir -p "$dir" 2>/dev/null
 
-  echo "$base64_data" | base64_decode > "$path"
+  echo "$base64_data" | b64d > "$path"
 
   if [[ ! -r $path ]]; then
-    echo "ERROR:Failed to write PDF file: $path"
-    return 1
+    leave "Failed to write PDF file: $path"
   fi
 
   return 0
@@ -448,9 +503,8 @@ action_pdf() {
 action_evaluate() {
   local expression="$1"
   local val ; val=$(cdp_eval "$expression")
-  if [[ $val == ERROR:* ]]; then
-    echo "$val"
-    return 1
+  if [[ $val == "[ERROR]"* ]]; then
+    leave "$val"
   fi
   echo "$val"
   return 0
@@ -473,11 +527,23 @@ action_scroll() {
 
 # Detect Chrome binary candidate paths
 detect_chrome_binary() {
-  local candidates=()
+  local -a candidates ; candidates=()
+
+  # Override browser detection when necessary
+  if [[ -n ${BROWSER_BIN:-} ]]; then
+    local resolved ; resolved=$(command -v "$BROWSER_BIN" 2>/dev/null)
+    if [[ -z $resolved || ! -x $resolved ]]; then
+      leave "Invalid browser override: $BROWSER_BIN (not found or not executable)"
+    fi
+    echo "$resolved"
+    return 0
+  fi
+
   if is_macos; then
     candidates=(
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
       "/Applications/Chromium.app/Contents/MacOS/Chromium"
+      "/Applications/Brave.app/Contents/MacOS/Brave"
     )
   else
     candidates=(
@@ -486,11 +552,14 @@ detect_chrome_binary() {
       "/usr/bin/google-chrome"
       "/usr/bin/google-chrome-stable"
       "/usr/bin/google-chrome-beta"
+      "/usr/bin/brave"
+      "/usr/bin/brave-browser"
+      "/usr/bin/brave-browser-stable"
     )
   fi
 
   # Add binaries in path
-  local path_binaries=(chromium chromium-browser google-chrome google-chrome-stable chrome)
+  local -a path_binaries ; path_binaries=(brave brave-browser brave-browser-stable chromium chromium-browser google-chrome google-chrome-stable chrome)
   for pb in "${path_binaries[@]}"; do
     local resolved ; resolved=$(which "$pb" 2>/dev/null)
     [[ -n $resolved && -x $resolved ]] && candidates+=("$resolved")
@@ -582,7 +651,7 @@ init_android_browser() {
 
   local launched=false
   local target_pkg window_mode
-  local known_browsers=("org.cromite.cromite" "com.android.chrome" "com.brave.browser" "com.kiwi_browser.browser")
+  local -a known_browsers ; known_browsers=("org.cromite.cromite" "com.android.chrome" "com.brave.browser" "com.kiwi_browser.browser")
 
   # When changing launch mode, kill any existing instance to avoid reusing
   # a fullscreen browser for a freeform launch (or vice-versa).
@@ -701,7 +770,7 @@ init_android_browser() {
   # so we set it via CDP instead of a launch flag. The device Chrome reaches
   # Termux's Tor on the shared device loopback (127.0.0.1:9050).
   if [[ $NO_TOR == "false" && -z $PROXY ]]; then
-    PROXY="socks4a://127.0.0.1:9050"
+    PROXY="$TOR_PROXY_MOBILE"
   fi
   [[ $PROXY == "null" || $PROXY == "false" ]] && PROXY=""
   if [[ -n $PROXY ]]; then
@@ -735,11 +804,13 @@ init_desktop_browser() {
     exit 1
   fi
 
-  local args=(
+  local -a args ; args=(
     "--user-data-dir=$USER_DATA_DIR"
     "--remote-debugging-port=$DEBUG_PORT"
     "--no-first-run"
     "--no-default-browser-check"
+    "--password-store=basic"
+    "--use-mock-keychain"
     "--disable-background-timer-throttling"
     "--disable-backgrounding-occluded-windows"
     "--disable-renderer-backgrounding"
@@ -749,13 +820,16 @@ init_desktop_browser() {
   [[ $HEADLESS == "true" ]] && args+=("--headless=new")
 
   # Apply SOCKS5 proxy (defaults to Tor on 127.0.0.1:9050 if enabled and empty proxy parameter is passed)
-  [[ $NO_TOR == "false" && -z $PROXY ]] && PROXY="socks5://127.0.0.1:9050"
+  [[ $NO_TOR == "false" && -z $PROXY ]] && PROXY="$TOR_PROXY"
   [[ $PROXY == "null" || $PROXY == "false" ]] && PROXY=""
 
   if [[ -n $PROXY ]]; then
     args+=("--proxy-server=$PROXY")
     args+=("--proxy-bypass-list=<-loopback>")
   fi
+
+  # Fix Tor proxy DNS leak warning
+  [[ $PROXY == socks5* ]] && args+=("--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1")
 
   [[ -n $USER_AGENT ]] && args+=("--user-agent=$USER_AGENT")
 
@@ -809,6 +883,7 @@ parse_args() {
         echo "  --screenshot <path>                   Save screenshot to given path"
         echo "  --viewport <WxH>                      Viewport Width x Height"
         echo "  --headless <true|false>               Headless mode"
+        echo "  --browser <name|path>                 Override browser detection"
         echo "  --no-tor                              Disabled Tor proxy"
         echo "  --adb                                 Enable ADB mode"
         echo "  --cleanup-adb                         Cleanup ADB when exit"
@@ -827,6 +902,7 @@ parse_args() {
       ;;
       --screenshot) SCREENSHOT_PATH_CONV="$2" ; shift 2 ;;
       --headless) HEADLESS="${2:-true}" ; shift 2 ;;
+      --browser) BROWSER_BIN="$2" ; shift 2 ;;
       --no-tor) NO_TOR=true ; shift ;;
       --adb) ADB_MODE=true ;;
       --local-chrome) LOCAL_CHROME=true ;;
@@ -858,6 +934,7 @@ parse_input() {
   # Parse out values
   URL=$(jq -rc '.url // empty' <<<"$raw_input")
   HEADLESS=$(jq -rc 'if has("headless") then .headless else "true" end' <<<"$raw_input")
+  BROWSER_BIN=$(jq -rc '.browser // empty' <<<"$raw_input")
   VIEWPORT_WIDTH=$(jq -rc '.viewport.width // 1280' <<<"$raw_input")
   VIEWPORT_HEIGHT=$(jq -rc '.viewport.height // 800' <<<"$raw_input")
   PROXY=$(jq -rc '.proxy // empty' <<<"$raw_input")

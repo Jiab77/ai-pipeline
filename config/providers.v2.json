@@ -1,0 +1,871 @@
+{
+  "local": {
+    "name": "Local System",
+    "status": "stable",
+    "default": {
+      "memory": "index",
+      "model": "LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
+      "max_tokens": 16384,
+      "vision": false,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    },
+    "voice": {
+      "tts": {
+        "voices": {
+          "male": "+m3",
+          "female": "+f2",
+          "neutral": ""
+        }
+      },
+      "stt": {
+        "default": "whisper.cpp",
+        "models": ["whisper.cpp"]
+      }
+    }
+  },
+  "anthropic": {
+    "name": "Anthropic",
+    "status": "experimental",
+    "api": "https://platform.claude.com/docs/en/api/messages/create",
+    "url": "https://api.anthropic.com/v1/messages",
+    "models": "https://api.anthropic.com/v1/models",
+    "auth": true,
+    "keys": "https://platform.claude.com/settings/keys",
+    "docs": {
+      "base": "https://platform.claude.com/docs",
+      "intro": "/en/get-started",
+      "models": "/en/api/models/list",
+      "files": [
+        "/en/api/http/beta/files/upload",
+        "/en/api/http/beta/files/list",
+        "/en/api/http/beta/files/download",
+        "/en/api/http/beta/files/retrieve_metadata",
+        "/en/api/http/beta/files/delete"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 128000,
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    },
+    "version": "2023-06-01"
+  },
+  "cyberneurova": {
+    "name": "CyberNeurova",
+    "status": "experimental",
+    "api": "https://cyberneurova.com/api",
+    "url": "https://api.cyberneurova.ai/v1/chat/completions",
+    "models": "https://api.cyberneurova.ai/v1/models",
+    "auth": true,
+    "keys": "https://platform.cyberneurova.com/keys",
+    "default": {
+      "memory": "index",
+      "model": "glm5.3",
+      "vision": true,
+      "image": true,
+      "edit": false,
+      "video": true,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://api.cyberneurova.ai/v1/images/generations",
+        "default": "artemis-img",
+        "models": [
+          "artemis-img"
+        ]
+      }
+    },
+    "video": {
+      "t2v": {
+        "endpoint": "https://api.cyberneurova.ai/v1/videos/generations",
+        "protocol": "async",
+        "default": "artemis-vid",
+        "models": [
+          "artemis-vid"
+        ]
+      }
+    }
+  },
+  "deepseek": {
+    "name": "DeepSeek",
+    "status": "stable",
+    "url": "https://api.deepseek.com/chat/completions",
+    "models": "https://api.deepseek.com/models",
+    "auth": true,
+    "keys": "https://platform.deepseek.com/api_keys",
+    "docs": {
+      "base": "https://api-docs.deepseek.com/",
+      "intro": "/",
+      "models": "/quick_start/pricing",
+      "files": "/guides/files_api",
+      "chat": "/api/create-chat-completion",
+      "vision": "/guides/vision"
+    },
+    "default": {
+      "memory": "full",
+      "model": "deepseek-flash",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    }
+  },
+  "groq": {
+    "name": "Groq",
+    "status": "stable",
+    "api": "https://console.groq.com/docs/api-reference",
+    "url": "https://api.groq.com/openai/v1/chat/completions",
+    "models": "https://api.groq.com/openai/v1/models",
+    "auth": true,
+    "keys": "https://console.groq.com/keys",
+    "docs": {
+      "base": "https://console.groq.com/docs",
+      "intro": "/quickstart",
+      "models": "/models",
+      "chat": "/text-chat",
+      "vision": "/vision",
+      "voice": [
+        "/speech-to-text",
+        "/text-to-speech"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "qwen/qwen3.8-27b",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    },
+    "voice": {
+      "tts": {
+        "endpoint": "https://api.groq.com/openai/v1/audio/speech"
+      },
+      "stt": {
+        "endpoint": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "protocol": "multipart"
+      }
+    }
+  },
+  "huggingface": {
+    "name": "Hugging Face",
+    "status": "stable",
+    "api": "https://huggingface.co/docs/inference-providers/providers/hf-inference",
+    "url": "https://router.huggingface.co/v1/chat/completions",
+    "models": "https://router.huggingface.co/v1/models",
+    "inference": "https://huggingface.co/api/models?inference_provider=hf-inference",
+    "auth": true,
+    "keys": "https://huggingface.co/settings/tokens",
+    "docs": {
+      "base": "https://huggingface.co/docs",
+      "intro": "/inference-providers/index",
+      "models": "https://huggingface.co/models?inference_provider=all",
+      "chat": "/inference-providers/tasks/chat-completion",
+      "images": "/inference-providers/tasks/text-to-image",
+      "vision": "/inference-providers/tasks/image-text-to-text",
+      "voice": "/inference-providers/tasks/automatic-speech-recognition",
+      "videos": "/inference-providers/tasks/text-to-video"
+    },
+    "default": {
+      "memory": "index",
+      "model": "moonshotai/Kimi-K3",
+      "vision": true,
+      "image": true,
+      "edit": false,
+      "video": true,
+      "voice": false,
+      "speech": true,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://router.huggingface.co/hf-inference/models"
+      }
+    },
+    "video": {
+      "t2v": {
+        "endpoint": "https://router.huggingface.co/fal-ai",
+        "protocol": "async",
+        "default": "Wan-AI/Wan2.2-TI2V-5B",
+        "models": ["Wan-AI/Wan2.2-TI2V-5B"]
+      },
+      "i2v": {
+        "endpoint": "https://router.huggingface.co/fal-ai",
+        "protocol": "async",
+        "default": "Wan-AI/Wan2.2-I2V-A14B",
+        "models": ["Wan-AI/Wan2.2-I2V-A14B"]
+      }
+    },
+    "voice": {
+      "stt": {
+        "endpoint": "https://router.huggingface.co/hf-inference/models",
+        "protocol": "binary"
+      }
+    }
+  },
+  "inception": {
+    "name": "Inception Labs",
+    "status": "experimental",
+    "api": "https://docs.inceptionlabs.ai/api-reference/chat/create-a-chat-completion",
+    "url": "https://api.inceptionlabs.ai/v1/chat/completions",
+    "models": "https://api.inceptionlabs.ai/v1/models",
+    "auth": true,
+    "keys": "https://platform.inceptionlabs.ai/dashboard/api-keys",
+    "docs": {
+      "base": "https://docs.inceptionlabs.ai",
+      "intro": "/get-started",
+      "models": "/get-started/models",
+      "chat": "/resources/prompt-guide",
+      "streaming": "/capabilities/streaming",
+      "voice": [
+        "/usecases/voice",
+        "/cookbooks/realtime-voice-assistant"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "mercury-3",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    }
+  },
+  "kimi": {
+    "name": "Moonshot AI",
+    "status": "stable",
+    "url": "https://api.moonshot.ai/v1/chat/completions",
+    "models": "https://api.moonshot.ai/v1/models",
+    "auth": true,
+    "keys": "https://platform.kimi.ai/console/api-keys",
+    "docs": {
+      "base": "https://platform.moonshot.ai/docs",
+      "intro": "/guide/start-using-kimi-api",
+      "models": "/models",
+      "chat": "/api/chat",
+      "vision": "/guide/use-kimi-vision-model"
+    },
+    "default": {
+      "memory": "index",
+      "model": "kimi-k3.1-pro",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    }
+  },
+  "mammouth": {
+    "name": "Mammouth AI",
+    "status": "stable",
+    "api": "https://info.mammouth.ai/docs/api-quick-start/",
+    "url": "https://api.mammouth.ai/v1/chat/completions",
+    "models": "https://api.mammouth.ai/public/models",
+    "auth": true,
+    "keys": "https://mammouth.ai/app/account/settings/api",
+    "docs": {
+      "base": "https://info.mammouth.ai/docs",
+      "intro": "/introduction-to-mammouth",
+      "models": "https://model-explorer.mammouth.ai/"
+    },
+    "default": {
+      "memory": "index",
+      "model": "mammouth-recommended",
+      "vision": true,
+      "image": true,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "protocol": "chat",
+        "default": "gemini-3.1-flash-image-preview",
+        "models": [
+          "gemini-3.1-flash-image-preview",
+          "gemini-3.1-flash-lite-image",
+          "gemini-3-pro-image-preview",
+          "gemini-2.5-flash-image",
+          "gemini-nano-banana-2.1",
+          "gpt-image-2"
+        ]
+      }
+    }
+  },
+  "openai": {
+    "name": "OpenAI",
+    "status": "stable",
+    "api": "https://developers.openai.com/api/reference/overview",
+    "url": "https://api.openai.com/v1/responses",
+    "models": "https://api.openai.com/v1/models",
+    "auth": true,
+    "keys": "https://platform.openai.com/api-keys",
+    "docs": {
+      "base": "https://developers.openai.com/api/docs",
+      "intro": "/quickstart",
+      "models": "/models",
+      "files": "/guides/file-inputs",
+      "chat": "/guides/text",
+      "images": "/guides/image-generation",
+      "vision": "/guides/images-vision",
+      "voice": [
+        "/guides/audio",
+        "/guides/text-to-speech"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "gpt-6-astra",
+      "vision": true,
+      "image": true,
+      "edit": true,
+      "video": false,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://api.openai.com/v1/images/generations",
+        "default": "gpt-image-2.5-flare",
+        "models": [
+          "gpt-image-2",
+          "gpt-image-1.5",
+          "gpt-image-1-mini",
+          "gpt-image-2.5-flare",
+          "gpt-image-2.5-sunburst"
+        ]
+      },
+      "i2i": {
+        "endpoint": "https://api.openai.com/v1/images/edits",
+        "protocol": "multipart",
+        "default": "gpt-image-2.5-sunburst",
+        "models": [
+          "gpt-image-2",
+          "gpt-image-2.5-flare",
+          "gpt-image-2.5-sunburst"
+        ]
+      }
+    },
+    "voice": {
+      "tts": {
+        "endpoint": "https://api.openai.com/v1/audio/speech",
+        "default": "tts-1",
+        "models": [
+          "tts-1",
+          "tts-1-hd"
+        ],
+        "voices": {
+          "male": "onyx",
+          "female": "nova",
+          "neutral": "alloy"
+        }
+      },
+      "stt": {
+        "endpoint": "https://api.openai.com/v1/audio/transcriptions",
+        "protocol": "multipart",
+        "default": "whisper-1",
+        "models": [
+          "whisper-1",
+          "gpt-4o-transcribe",
+          "gpt-4o-mini-transcribe",
+          "gpt-transcribe",
+          "gpt-live-transcribe"
+        ]
+      }
+    }
+  },
+  "openroute": {
+    "name": "OpenRoute (CyberNeurova)",
+    "status": "experimental",
+    "url": "https://openroute.cyberneurova.com/v1/chat/completions",
+    "models": "https://openroute.cyberneurova.com/v1/models",
+    "auth": true,
+    "keys": "https://openroute.cyberneurova.com/account/keys",
+    "docs": {
+      "base": "https://openroute.cyberneurova.com/docs",
+      "models": "https://openroute.cyberneurova.com/models"
+    },
+    "default": {
+      "memory": "index",
+      "model": "cyberneurova/qwen3.8-flash",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    }
+  },
+  "openrouter": {
+    "name": "OpenRouter",
+    "status": "stable",
+    "api": "https://openrouter.ai/docs/api_reference/overview",
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "models": "https://openrouter.ai/api/v1/models",
+    "auth": true,
+    "keys": "https://openrouter.ai/keys",
+    "docs": {
+      "base": "https://openrouter.ai/docs",
+      "intro": "/quickstart",
+      "models": "/guides/overview/models",
+      "files": "/guides/features/files-api",
+      "chat": "/guides/overview/multimodal/overview",
+      "images": "/guides/overview/multimodal/image-generation",
+      "vision": "/guides/overview/multimodal/image-understanding",
+      "voice": [
+        "/guides/overview/multimodal/stt",
+        "/guides/overview/multimodal/tts"
+      ],
+      "videos": "/guides/overview/multimodal/video-generation"
+    },
+    "default": {
+      "memory": "index",
+      "model": "gemini-3-8-flash",
+      "vision": true,
+      "image": true,
+      "edit": true,
+      "video": true,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://openrouter.ai/api/v1/images"
+      },
+      "i2i": {
+        "endpoint": "https://openrouter.ai/api/v1/images"
+      }
+    },
+    "video": {
+      "t2v": {
+        "endpoint": "https://openrouter.ai/api/v1/videos",
+        "protocol": "async"
+      },
+      "i2v": {
+        "endpoint": "https://openrouter.ai/api/v1/videos",
+        "protocol": "async"
+      }
+    },
+    "voice": {
+      "tts": {
+        "endpoint": "https://openrouter.ai/api/v1/audio/speech"
+      },
+      "stt": {
+        "endpoint": "https://openrouter.ai/api/v1/audio/transcriptions",
+        "protocol": "multipart"
+      }
+    }
+  },
+  "openrouter_free": {
+    "name": "OpenRouter (Free)",
+    "status": "stable",
+    "api": "https://openrouter.ai/docs/api_reference/overview",
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "models": "https://openrouter.ai/api/v1/models",
+    "auth": true,
+    "keys": "https://openrouter.ai/keys",
+    "docs": {
+      "base": "https://openrouter.ai/docs",
+      "intro": "/quickstart",
+      "models": "/guides/overview/models",
+      "files": "/guides/features/files-api",
+      "chat": "/guides/overview/multimodal/overview",
+      "images": "/guides/overview/multimodal/image-generation",
+      "vision": "/guides/overview/multimodal/image-understanding",
+      "voice": [
+        "/guides/overview/multimodal/stt",
+        "/guides/overview/multimodal/tts"
+      ],
+      "videos": "/guides/overview/multimodal/video-generation"
+    },
+    "default": {
+      "memory": "index",
+      "model": "openrouter/free",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    }
+  },
+  "venice": {
+    "name": "Venice AI",
+    "status": "experimental",
+    "api": "https://docs.venice.ai/api-reference/api-spec",
+    "url": "https://api.venice.ai/api/v1/chat/completions",
+    "models": "https://api.venice.ai/api/v1/models",
+    "auth": true,
+    "keys": "https://venice.ai/settings/api",
+    "docs": {
+      "base": "https://docs.venice.ai",
+      "intro": "/getting-started/quick-start",
+      "models": "https://api.venice.ai/api/v1/models",
+      "files": "/guides/features/file-inputs",
+      "chat": "/api-reference/endpoint/chat/completions",
+      "images": [
+        "/api-reference/endpoint/image/generations",
+        "/api-reference/endpoint/image/edit"
+      ],
+      "vision": "/guides/features/vision",
+      "voice": [
+        "/guides/media/speech-to-text",
+        "/guides/media/text-to-speech"
+      ],
+      "videos": [
+        "/guides/media/video-generation",
+        "/guides/media/seedance-2-0"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "gemini-3-8-flash",
+      "vision": true,
+      "image": true,
+      "edit": true,
+      "video": true,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://api.venice.ai/api/v1/image/generate"
+      },
+      "i2i": {
+        "endpoint": "https://api.venice.ai/api/v1/image/edit"
+      }
+    },
+    "video": {
+      "t2v": {
+        "endpoint": "https://api.venice.ai/api/v1/video/queue",
+        "protocol": "async"
+      },
+      "i2v": {
+        "endpoint": "https://api.venice.ai/api/v1/video/queue",
+        "protocol": "async"
+      }
+    },
+    "voice": {
+      "tts": {
+        "endpoint": "https://api.venice.ai/api/v1/audio/speech",
+        "voices": {
+          "male": "am_adam",
+          "female": "af_heart",
+          "neutral": "af_alloy"
+        }
+      },
+      "stt": {
+        "endpoint": "https://api.venice.ai/api/v1/audio/transcriptions",
+        "protocol": "multipart"
+      }
+    }
+  },
+  "vercel": {
+    "name": "Vercel AI Gateway",
+    "status": "stable",
+    "api": "https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api",
+    "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    "models": "https://ai-gateway.vercel.sh/v1/models",
+    "auth": true,
+    "keys": "https://vercel.com/docs/ai-gateway",
+    "docs": {
+      "base": "https://vercel.com/docs/ai-gateway",
+      "intro": "/getting-started",
+      "models": "https://ai-gateway.vercel.sh/v1/models",
+      "files": "/sdks-and-apis/openai-chat-completions/images",
+      "chat": "/sdks-and-apis/openai-chat-completions/rest-api",
+      "images": "/sdks-and-apis/openai-chat-completions/image-generation",
+      "vision": "/sdks-and-apis/openai-chat-completions/images",
+      "voice": [
+        "/modalities/speech-to-text",
+        "/modalities/text-to-speech"
+      ],
+      "videos": [
+        "/modalities/video-generation/text-to-video",
+        "/modalities/video-generation/image-to-video"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "gemini-3-8-flash",
+      "vision": true,
+      "image": true,
+      "edit": true,
+      "video": true,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "protocol": "chat"
+      },
+      "i2i": {
+        "endpoint": "https://ai-gateway.vercel.sh/v1/images/edits",
+        "protocol": "multipart"
+      }
+    },
+    "video": {
+      "t2v": {
+        "endpoint": "https://ai-gateway.vercel.sh/v4/ai/video-model/start",
+        "protocol": "async"
+      },
+      "i2v": {
+        "endpoint": "https://ai-gateway.vercel.sh/v4/ai/video-model/start",
+        "protocol": "async"
+      }
+    },
+    "voice": {
+      "tts": {
+        "endpoint": "https://ai-gateway.vercel.sh/v4/ai/speech-model"
+      },
+      "stt": {
+        "endpoint": "https://ai-gateway.vercel.sh/v4/ai/transcription-model"
+      }
+    }
+  },
+  "vercel_free": {
+    "name": "Vercel AI Gateway (Free)",
+    "status": "stable",
+    "api": "https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api",
+    "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    "models": "https://ai-gateway.vercel.sh/v1/models",
+    "auth": true,
+    "keys": "https://vercel.com/docs/ai-gateway",
+    "docs": {
+      "base": "https://vercel.com/docs/ai-gateway",
+      "intro": "/getting-started",
+      "models": "https://ai-gateway.vercel.sh/v1/models",
+      "files": "/sdks-and-apis/openai-chat-completions/images",
+      "chat": "/sdks-and-apis/openai-chat-completions/rest-api",
+      "images": "/sdks-and-apis/openai-chat-completions/image-generation",
+      "vision": "/sdks-and-apis/openai-chat-completions/images",
+      "voice": [
+        "/modalities/speech-to-text",
+        "/modalities/text-to-speech"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "zai/glm-5.3-flash",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    }
+  },
+  "xai": {
+    "name": "X.AI (Grok API)",
+    "status": "experimental",
+    "api": "https://docs.x.ai/developers/rest-api-reference/inference",
+    "url": "https://api.x.ai/v1/responses",
+    "models": "https://api.x.ai/v1/models",
+    "auth": true,
+    "keys": "https://console.x.ai/team/default/api-keys",
+    "docs": {
+      "base": "https://docs.x.ai",
+      "intro": "/developers/quickstart",
+      "models": "/developers/models",
+      "files": [
+        "/developers/files",
+        "/developers/files/managing-files",
+        "/developers/files/public-urls",
+        "/developers/model-capabilities/files/chat-with-files"
+      ],
+      "chat": "/developers/model-capabilities/text/generate-text",
+      "images": [
+        "/developers/model-capabilities/images/generation",
+        "/developers/model-capabilities/images/editing",
+        "/developers/model-capabilities/images/multi-image-editing"
+      ],
+      "vision": "/developers/model-capabilities/images/understanding",
+      "videos": [
+        "/developers/model-capabilities/video/generation",
+        "/developers/model-capabilities/video/image-to-video",
+        "/developers/model-capabilities/video/reference-to-video",
+        "/developers/model-capabilities/video/editing",
+        "/developers/model-capabilities/video/extension"
+      ],
+      "voice": [
+        "/developers/model-capabilities/audio/speech-to-text",
+        "/developers/model-capabilities/audio/speech-to-speech",
+        "/developers/model-capabilities/audio/text-to-speech"
+      ]
+    },
+    "default": {
+      "memory": "index",
+      "model": "grok-4.7",
+      "vision": true,
+      "image": true,
+      "edit": true,
+      "video": true,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://api.x.ai/v1/images/generations",
+        "default": "grok-imagine-image-2.0",
+        "models": [
+          "grok-imagine-image-2.0"
+        ]
+      }
+    },
+    "video": {
+      "t2v": {
+        "endpoint": "https://api.x.ai/v1/videos/generations",
+        "protocol": "async",
+        "default": "grok-imagine-video-1.5",
+        "models": [
+          "grok-imagine-video-1.5"
+        ]
+      },
+      "i2v": {
+        "endpoint": "https://api.x.ai/v1/videos/generations",
+        "protocol": "async",
+        "default": "grok-imagine-video-1.5",
+        "models": [
+          "grok-imagine-video-1.5"
+        ]
+      }
+    },
+    "voice": {
+      "tts": {
+        "endpoint": "https://api.x.ai/v1/tts"
+      },
+      "stt": {
+        "endpoint": "https://api.x.ai/v1/stt"
+      }
+    }
+  },
+  "zai_plan": {
+    "name": "Z.AI (Coding Plan)",
+    "status": "stable",
+    "api": "https://docs.z.ai/api-reference/introduction",
+    "url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+    "models": "https://api.z.ai/api/coding/paas/v4/models",
+    "auth": true,
+    "keys": "https://z.ai/manage-apikey/apikey-list",
+    "docs": {
+      "base": "https://docs.z.ai",
+      "intro": "/devpack/overview",
+      "models": "/devpack/latest-model",
+      "chat": "/devpack/quick-start"
+    },
+    "default": {
+      "memory": "index",
+      "model": "glm-5.3-flash",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    }
+  },
+  "zai": {
+    "name": "Z.AI (API)",
+    "status": "stable",
+    "api": "https://docs.z.ai/guides/develop/http/introduction",
+    "url": "https://api.z.ai/api/paas/v4/chat/completions",
+    "models": "https://api.z.ai/api/paas/v4/models",
+    "auth": true,
+    "keys": "https://z.ai/manage-apikey/apikey-list",
+    "docs": {
+      "base": "https://docs.z.ai",
+      "intro": "/guides/overview/quick-start",
+      "models": "/guides/overview/pricing",
+      "files": "/api-reference/agents/file-upload",
+      "chat": "/api-reference/llm/chat-completion",
+      "images": "/api-reference/image/generate-image",
+      "voice": "/api-reference/audio/audio-transcriptions",
+      "videos": "/api-reference/video/generate-video"
+    },
+    "default": {
+      "memory": "index",
+      "model": "glm-5.3-flashx",
+      "vision": true,
+      "image": true,
+      "edit": false,
+      "video": true,
+      "voice": false,
+      "speech": true,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://api.z.ai/api/paas/v4/images/generations",
+        "default": "glm-image",
+        "models": [
+          "glm-image"
+        ]
+      }
+    },
+    "video": {
+      "t2v": {
+        "endpoint": "https://api.z.ai/api/paas/v4/videos/generations",
+        "protocol": "async",
+        "default": "cogvideox-3",
+        "models": [
+          "cogvideox-3"
+        ]
+      },
+      "i2v": {
+        "endpoint": "https://api.z.ai/api/paas/v4/videos/generations",
+        "protocol": "async",
+        "default": "cogvideox-3",
+        "models": [
+          "cogvideox-3"
+        ]
+      }
+    },
+    "voice": {
+      "stt": {
+        "endpoint": "https://api.z.ai/api/paas/v4/audio/transcriptions",
+        "protocol": "multipart",
+        "default": "glm-asr-2512",
+        "models": [
+          "glm-asr-2512"
+        ]
+      }
+    }
+  }
+}

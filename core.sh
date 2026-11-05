@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2001,SC2094
+# shellcheck shell=bash disable=SC2034,SC2001,SC2094
 # ==============================================================================
-# core.sh — Sovereign Cognitive & Reasoning Engine (Library)
+# core.sh — Core orchestration and provider runtime
 # ==============================================================================
-# This script houses the core cognitive logic, configurations, API transports,
-# and parallel tool-calling loops. It acts as our headless sovereign brain.
+# Provides configuration, session state, provider transports, inference and
+# tool-calling loops, persistent memory integration, and shared helpers.
 #
-# Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (DeepSeek)
-#
-# Version: 1.8.1
+# Author: Jiab77
+# Collaborator: Jarvis
+# Version: 1.9.0
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -17,7 +16,6 @@
 CORE_SH_LOADED=1
 
 # Options
-[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
 set -o pipefail
 
@@ -25,31 +23,55 @@ set -o pipefail
 # Core Configurations & Environment Discovery
 # -----------------------------------------------------------------------------
 
+# Defaults
+DEFAULT_TERM_WIDTH=80
+
 # Core Run Modes & Fallbacks
 RUN_MODE="${RUN_MODE:-simple}"
 SERVER_MODE="${SERVER_MODE:-web}"
 BACKEND="${BACKEND:-external}"
+
+# Providers
 PROVIDER="${PROVIDER:-openrouter_free}"
 PROVIDER_API_KEY=""
+
+# Memory
 MEMORY_TYPE="${MEMORY_TYPE:-markdown}"
 MEMORY_STRUCTURE_TYPE="${MEMORY_STRUCTURE_TYPE:-full}"
 MEMORY_SECTION_KB="${MEMORY_SECTION_KB:-128}"
-REASONING_EFFORT="${REASONING_EFFORT:-low}"
-MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-128000}"
-DEFAULT_TERM_WIDTH=80
 HEARTBEAT_THRESHOLD=15
-PBKDF_ITERATIONS=500000
-CREDENTIALS="${HOME}/.creds"
-USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+
+# Settings
+DETECT_MODE="${DETECT_MODE:-images}"                # Visual feedback auto-detection (images|videos|all|off)
+REASONING_EFFORT="${REASONING_EFFORT:-low}"         # Set default reasoning effort (low|medium|high|xhigh)
+MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-128000}"
+ENGINE_VERSION="${ENGINE_VERSION:-.v2}"             # Select engine version
+AUDIO_LANG="${AUDIO_LANG:-auto}"                    # Set default audio language
+START_JARNET="${START_JARNET:-true}"                # Start JarNet service by default
+KILL_ON_EXIT="${KILL_ON_EXIT:-true}"                # Kill background services on exit
+
+# Web
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+
+# Tor
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
-DEBUG=true            # Enable / Disable debug mode
-USE_TOR=true          # Enable / Disable routing cloud API calls through Tor proxy
-USE_TOOLS=true        # Enable / Disable tool calling capabilities
-PULL_MODELS=false     # Enable / Disable initial models pulling
-VISION_ENABLED=true   # Enable vision for all cloud providers models
-IMAGE_ENABLED=false   # Enable image generation for the active provider
-ZDR_ENFORCED=false    # Enforce Zero Data Retention for all cloud providers
+
+# Options
+DEBUG="${DEBUG:-false}"       # Enable / Disable debug mode
+USE_TOR="${USE_TOR:-true}"    # Enable / Disable routing cloud API calls through Tor proxy
+USE_TOOLS=true                # Enable / Disable tool calling capabilities
+PULL_MODELS=false             # Enable / Disable initial models pulling
+SHOW_THINKING=true            # Enable / Disable model reasoning display
+VISION_ENABLED=true           # Enable vision for all cloud providers models
+IMAGE_ENABLED=false           # Enable image generation for the active provider
+VIDEO_ENABLED=false           # Enable video generation for the active provider
+VOICE_ENABLED=false           # Enable voice generation for the active provider
+SPEECH_ENABLED=false          # Enable speech capture for the active provider
+ZDR_ENFORCED=false            # Enforce Zero Data Retention for all cloud providers
+
+# Debug override
+[[ -e $HOME/.debug ]] && DEBUG=true
 
 # Self-Discovery Paths (Dynamic Sandbox & Root Mounting)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,15 +83,24 @@ DATA_STORE="${SCRIPT_DIR}/data"
 MEMORY_DIR="${DATA_STORE}/memory"
 CONFIG_DIR="${SCRIPT_DIR}/config"
 MODELS_DIR="${SCRIPT_DIR}/models"
+LIB_DIR="${SCRIPT_DIR}/lib"
+ENG_DIR="${SCRIPT_DIR}/engines"
+PLUG_DIR="${SCRIPT_DIR}/plugins"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
 TOOLS_HANDLER="${SCRIPT_DIR}/tools.sh"
-IMG_HANDLER="${SCRIPT_DIR}/image.sh"
+NET_HANDLER="${PLUG_DIR}/jarnet.sh"
+IMG_HANDLER="${ENG_DIR}/image${ENGINE_VERSION}.sh"
+VID_HANDLER="${ENG_DIR}/video${ENGINE_VERSION}.sh"
+VOC_HANDLER="${ENG_DIR}/voice${ENGINE_VERSION}.sh"
+SPE_HANDLER="${ENG_DIR}/speech${ENGINE_VERSION}.sh"
 WEB_SERVER="${SCRIPT_DIR}/web/server.php"
 SCRIPT_CONFIG="${CONFIG_DIR}/${SCRIPT_NAME}.conf"
 MODELS_CONFIG="${CONFIG_DIR}/models.json"
-PROVIDERS_CONFIG="${CONFIG_DIR}/providers.json"
+PROVIDERS_CONFIG="${PROVIDERS_CONFIG:-${CONFIG_DIR}/providers${ENGINE_VERSION}.json}"
 STATE_FILE="${CONFIG_DIR}/state.json"
 MESSAGES_FILE="messages.json"
+CORE_ENGINES=("image" "video" "voice" "speech")
+LIB_DEPS=("helpers" "nightmare" "base64" "timeout" "sha256" "animate")
 BIN_DEPS=("curl" "awk" "sed" "openssl" "jq" "htmlq" "websocat" "grep" "cut" "tr" "printf")
 BIN_DEPS_MOBILE=("${BIN_DEPS[@]}" "adb")
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
@@ -77,13 +108,15 @@ BIN_SYSTEMCTL=$(command -v systemctl 2>/dev/null)
 BIN_TOR=$(command -v tor 2>/dev/null)
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 TOR_CONFIG="${CONFIG_DIR}/torrc"
-IS_IMAGE=false
+IS_MEDIA=false
 
 # Keys
 KEYS_DIR="${SCRIPT_DIR}/keys"
 MASTER_KEY_FILE="${KEYS_DIR}/key.dat"
 KEYRING_CIPHER=""
 KEYRING_PBKDF2=1
+PBKDF_ITERATIONS=500000
+CREDENTIALS="${HOME}/.creds"
 
 # Temporary Files (Default to /tmp, adapts dynamically on Termux)
 TOOLS_OUTPUT="/tmp/tools_output.txt"
@@ -99,9 +132,12 @@ TEMP_PAYLOAD_MESSAGES="/tmp/payload_messages.json"
 TEMP_PAYLOAD_USER="/tmp/payload_user.txt"
 TEMP_PAYLOAD_SYSTEM="/tmp/payload_system.txt"
 TEMP_STATE_FILE="${CONFIG_DIR}/temp_state.json"
+VENICE_BALANCE_FILE="/tmp/venice-balance.txt"
 
 # Sovereign Personality & Identity
-AI_NAME="Jarvis"
+AI_NAME="${AI_NAME:-Jarvis}"
+AI_GENDER="${AI_GENDER:-male}"
+AI_AVATAR="${CONFIG_DIR}/avatar.md"
 AI_RULES="${CONFIG_DIR}/rules.md"
 
 # Local Computing Controls
@@ -116,28 +152,36 @@ ATTRIBUTION_REFERER="https://github.com/jiab77/ai-pipeline"
 ATTRIBUTION_TITLE="Minimalist Experimental AI Pipeline"
 ATTRIBUTION_CATEGORIES="cli-agent,cloud-agent"
 
+# Whisper.cpp Default Allocations
+WHISPER_CPP_API_SRV="http://localhost:8081"
+WHISPER_CPP_API_URL="${WHISPER_CPP_API_SRV}/inference"
+WHISPER_CPP_BASE_MODEL="ggml-base-q5_1.bin"
+WHISPER_CPP_SMALL_MODEL="ggml-small-q5_1.bin"
+WHISPER_CPP_CACHE="${MODELS_DIR}/whisper.cpp"
+WHISPER_CPP_MODEL="${WHISPER_CPP_MODEL:-${WHISPER_CPP_CACHE}/${WHISPER_CPP_SMALL_MODEL}}"
+
 # Llama.cpp Default Allocations
-LLAMACPP_API_SRV="http://localhost:8080"
-LLAMACPP_API_URL="${LLAMACPP_API_SRV}/v1/chat/completions"
-LLAMACPP_CHAT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
-LLAMACPP_CHAT_BIG="LiquidAI/LFM2.5-8B-A1B-GGUF"
-LLAMACPP_VISION="LiquidAI/LFM2.5-VL-1.6B-GGUF"
-LLAMACPP_ROUTER="LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
-LLAMACPP_ARCHITECT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
-LLAMACPP_CODER="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
-LLAMACPP_JUDGE="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
-LLAMACPP_CACHE="${MODELS_DIR}/llama.cpp"
+LLAMA_CPP_API_SRV="http://localhost:8080"
+LLAMA_CPP_API_URL="${LLAMA_CPP_API_SRV}/v1/chat/completions"
+LLAMA_CPP_CHAT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
+LLAMA_CPP_CHAT_BIG="LiquidAI/LFM2.5-8B-A1B-GGUF"
+LLAMA_CPP_VISION="LiquidAI/LFM2.5-VL-1.6B-GGUF"
+LLAMA_CPP_ROUTER="LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
+LLAMA_CPP_ARCHITECT="LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
+LLAMA_CPP_CODER="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
+LLAMA_CPP_JUDGE="ggml-org/Ministral-3-3B-Reasoning-2512-GGUF"
+LLAMA_CPP_CACHE="${MODELS_DIR}/llama.cpp"
 
 # Ollama Default Allocations
 OLLAMA_API_SRV="http://localhost:11434"
 OLLAMA_API_URL="${OLLAMA_API_SRV}/v1/chat/completions"
-OLLAMA_CHAT="hf.co/${LLAMACPP_CHAT}"
-OLLAMA_CHAT_BIG="hf.co/${LLAMACPP_CHAT_BIG}"
-OLLAMA_VISION="hf.co/${LLAMACPP_VISION}"
-OLLAMA_ROUTER="hf.co/${LLAMACPP_ROUTER}"
-OLLAMA_ARCHITECT="hf.co/${LLAMACPP_ARCHITECT}"
-OLLAMA_CODER="hf.co/${LLAMACPP_CODER}"
-OLLAMA_JUDGE="hf.co/${LLAMACPP_JUDGE}"
+OLLAMA_CHAT="hf.co/${LLAMA_CPP_CHAT}"
+OLLAMA_CHAT_BIG="hf.co/${LLAMA_CPP_CHAT_BIG}"
+OLLAMA_VISION="hf.co/${LLAMA_CPP_VISION}"
+OLLAMA_ROUTER="hf.co/${LLAMA_CPP_ROUTER}"
+OLLAMA_ARCHITECT="hf.co/${LLAMA_CPP_ARCHITECT}"
+OLLAMA_CODER="hf.co/${LLAMA_CPP_CODER}"
+OLLAMA_JUDGE="hf.co/${LLAMA_CPP_JUDGE}"
 OLLAMA_CACHE="${MODELS_DIR}/ollama"
 
 # -----------------------------------------------------------------------------
@@ -146,6 +190,8 @@ OLLAMA_CACHE="${MODELS_DIR}/ollama"
 
 cleanup_the_mess() {
   unset AUTH_TAG
+
+  # Remove temporary files
   rm -f "$TEMP_MEMORY_SYSTEM" \
         "$TEMP_MEMORY_USER" \
         "$TEMP_BASE64_OUTPUT" \
@@ -157,10 +203,20 @@ cleanup_the_mess() {
         "$TEMP_PAYLOAD_SYSTEM" \
         "$TEMP_PAYLOAD_USER" \
         "$TEMP_STATE_FILE" \
+        "$VENICE_BALANCE_FILE" \
         "$TOR_LOG" \
         "$TOOLS_OUTPUT" \
         "${TOOLS_OUTPUT}.safe" \
         "${TOOLS_OUTPUT}.clean"
+
+  # Kill running background services
+  if [[ $KILL_ON_EXIT == true ]]; then
+    # Killing JarNet service
+    [[ -x $NET_HANDLER ]] && "$NET_HANDLER" down &>/dev/null
+
+    # Killing Tor service
+    pkill -f "tor -f $TOR_CONFIG" &>/dev/null
+  fi
 }
 
 # Avoid blocking image creation process (damn tricky to find it...)
@@ -204,8 +260,14 @@ ICON_SUCCESS="✅"
 ICON_WARNING="⚠️ "
 ICON_ERROR="❌"
 ICON_TOOL="⚙️ "
+ICON_THINK="💬"
 ICON_BRAIN="🧠"
 ICON_IMAGE="🎨"
+ICON_WAIT="⏳"
+ICON_MAIL="📬"
+ICON_SEND="📡"
+ICON_MIC="🎙️ "
+ICON_SPEAKER="🔊"
 ICON_CODER="💻"
 ICON_JUDGE="⚖️ "
 ICON_ARCHITECT="🏛️ "
@@ -328,9 +390,57 @@ show_tool_header() {
   log "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}\n"
 }
 
+# Load required engines
+load_engines() {
+  local total_engines=0
+  local found_engines=0
+  local missing_engines=0
+  local missing_engines_str=""
+  total_engines="${#CORE_ENGINES[@]}"
+  local e
+  for e in "${CORE_ENGINES[@]}"; do
+    if [[ -r "${ENG_DIR}/${e}${ENGINE_VERSION}.sh" && -s "${ENG_DIR}/${e}${ENGINE_VERSION}.sh" ]]; then
+      # shellcheck source=/dev/null
+      source "${ENG_DIR}/${e}${ENGINE_VERSION}.sh" || error "Failed to load '$e' engine."
+      ((found_engines++))
+    else
+      [[ $missing_engines -ne 0 ]] && missing_engines_str+=", "
+      missing_engines_str+="$e"
+      ((missing_engines++))
+    fi
+  done
+  if [[ $found_engines -ne $total_engines ]]; then
+    error "Missing engines: $missing_engines_str"
+  fi
+}
+
+# Load required libraries
+load_libs() {
+  local total_libs=0
+  local found_libs=0
+  local missing_libs=0
+  local missing_libs_str=""
+  total_libs="${#LIB_DEPS[@]}"
+  local d
+  for d in "${LIB_DEPS[@]}"; do
+    if [[ -r "${LIB_DIR}/${d}.sh" && -s "${LIB_DIR}/${d}.sh" ]]; then
+      # shellcheck source=/dev/null
+      source "${LIB_DIR}/${d}.sh" || error "Failed to load '$d' library."
+      ((found_libs++))
+    else
+      [[ $missing_libs -ne 0 ]] && missing_libs_str+=", "
+      missing_libs_str+="$d"
+      ((missing_libs++))
+    fi
+  done
+  if [[ $found_libs -ne $total_libs ]]; then
+    error "Missing libraries: $missing_libs_str"
+  fi
+}
+
 # Make sure all required dependencies are installed
 check_deps() {
-  local all_deps=()
+  local -a all_deps ; all_deps=()
   local total_deps=0
   local found_deps=0
   local missing_deps=0
@@ -341,6 +451,7 @@ check_deps() {
     all_deps=("${BIN_DEPS[@]}")
   fi
   total_deps="${#all_deps[@]}"
+  local d
   for d in "${all_deps[@]}"; do
     if [[ -n $(command -v "$d" 2>/dev/null) ]]; then
       ((found_deps++))
@@ -350,7 +461,9 @@ check_deps() {
       ((missing_deps++))
     fi
   done
-  [[ $found_deps -ne $total_deps ]] && error "Please install missing binaries: $missing_deps_str"
+  if [[ $found_deps -ne $total_deps ]]; then
+    error "Please install missing binaries: $missing_deps_str"
+  fi
 }
 
 # Link helper
@@ -382,25 +495,62 @@ show_banner() {
 EOF
   fi
   echo -e "${CLR_B_CYAN}🔮 ${AI_NAME} $(create_link "https://github.com/jiab77/ai-pipeline" "AI Pipeline") | Version $(get_self_version) 🔮${ANSI_RESET}"
-  echo -e "${CLR_DIM}Lead: $(create_link "https://github.com/jiab77" "Jiab77") | AI Sorcerer: $AI_NAME (GLM-5.3)${ANSI_RESET}"
+  echo -e "${CLR_DIM}Lead: $(create_link "https://github.com/jiab77" "Jiab77") | AI Sorcerer: ${AI_NAME}${ANSI_RESET}"
   echo -e "${CLR_DIM}Link: ${ANSI_RESET}$(create_link "https://github.com/jiab77/ai-pipeline")"
   echo
 }
 
-# Image helpers
-get_image_type() {
+# Media helpers
+# NOTE: single grammar, aligned with analyze_media (file -b --mime-type) and the
+# venice vision contract: images = png/jpeg/webp/gif, videos = mp4/webm/mov/mpeg.
+# svg / avi / mkv are intentionally NOT accepted — no provider documents them as
+# vision input, and the previous `*) image/${ext}` fallback could fabricate mimes.
+get_mime_type() {
   local ext="${1##*.}"
    case "$ext" in
-     jpg|jpeg) echo -n "image/jpeg" ;;
-     svg)      echo -n "image/svg+xml" ;;
-     *)        echo -n "image/${ext}" ;;
+     jpg|jpeg|JPG|JPEG)   echo -n "image/jpeg" ;;
+     png|PNG)             echo -n "image/png" ;;
+     webp|WEBP)           echo -n "image/webp" ;;
+     gif|GIF)             echo -n "image/gif" ;;
+     mp4|MP4)             echo -n "video/mp4" ;;
+     webm|WEBM)           echo -n "video/webm" ;;
+     mov|MOV)             echo -n "video/quicktime" ;;
+     mpeg|mpg|MPEG|MPG)   echo -n "video/mpeg" ;;
+     aac|AAC)             echo -n "audio/aac" ;;
+     m4a|M4A)             echo -n "audio/m4a" ;;
+     mp3|MP3)             echo -n "audio/mp3" ;;
+     wav|WAV)             echo -n "audio/wav" ;;
+     ogg|OGG)             echo -n "audio/ogg" ;;
+     opus|OPUS)           echo -n "audio/opus" ;;
+     *)                   echo -n "application/octet-stream" ;;
    esac
 }
 
 is_image_file() {
   local ext="${1##*.}"
-  [[ $ext =~ ^(png|jpg|jpeg|webp|gif|svg)$ ]] && return 0
+  [[ $ext =~ ^(png|jpg|jpeg|webp|gif)$ ]] && return 0
   return 1
+}
+
+is_video_file() {
+  local ext="${1##*.}"
+  [[ $ext =~ ^(mp4|webm|mov|mpeg|mpg)$ ]] && return 0
+  return 1
+}
+
+is_audio_file() {
+  local ext="${1##*.}"
+  [[ $ext =~ ^(aac|m4a|mp3|wav|ogg|opus)$ ]] && return 0
+  return 1
+}
+
+# media_to_b64 <file> — base64-encode a media file into $TEMP_BASE64_OUTPUT (E2BIG-safe).
+# Shared by send_message (/load), the autonomous injection loop and analyze_media.
+# Dual form keeps both worlds happy: GNU (-i = --ignore-garbage, ignored on encode)
+# and macOS BSD (-i = input file; the first form then fails and the second fires).
+media_to_b64() {
+  # (base64 -i -w0 "$1" 2>/dev/null || base64 -i "$1" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
+  b64e < "$1" > "$TEMP_BASE64_OUTPUT"
 }
 
 # System helpers
@@ -447,7 +597,8 @@ create_local_data_store() {
 
 create_local_model_cache() {
   mkdir -p "$OLLAMA_CACHE"
-  mkdir -p "$LLAMACPP_CACHE"
+  mkdir -p "$LLAMA_CPP_CACHE"
+  mkdir -p "$WHISPER_CPP_CACHE"
 }
 
 load_config_file() {
@@ -474,15 +625,18 @@ set_listen_interface() {
 
     # Smart reconstruction of client API URLs for curl
     if [[ -n $LISTEN_HOST && -n $LISTEN_PORT ]]; then
-      LLAMACPP_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
+      LLAMA_CPP_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
+      WHISPER_CPP_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
       OLLAMA_API_SRV="http://${LISTEN_HOST}:${LISTEN_PORT}"
     elif [[ -n $LISTEN_PORT ]]; then
       # Specific port, fallback client host to localhost
-      LLAMACPP_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
+      LLAMA_CPP_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
+      WHISPER_CPP_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
       OLLAMA_API_SRV="http://127.0.0.1:${LISTEN_PORT}"
     elif [[ -n $LISTEN_HOST ]]; then
       # Specific host, apply backend default ports
-      LLAMACPP_API_SRV="http://${LISTEN_HOST}:8080"
+      LLAMA_CPP_API_SRV="http://${LISTEN_HOST}:8080"
+      WHISPER_CPP_API_SRV="http://${LISTEN_HOST}:8081"
       OLLAMA_API_SRV="http://${LISTEN_HOST}:11434"
     fi
   fi
@@ -502,6 +656,7 @@ set_temp_files() {
     TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
     TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
     TEMP_PAYLOAD_USER="${TMPDIR}/payload_user.txt"
+    VENICE_BALANCE_FILE="${TMPDIR}/venice-balance.txt"
   fi
 }
 
@@ -546,38 +701,20 @@ set_keep_alive() {
 # Portability helpers (stock macOS / BSD differences)
 # -----------------------------------------------------------------------------
 
-# base64 wrappers — GNU (Linux/Termux): -w0 no-wrap / -d decode
-#                   BSD (macOS): never wraps / -D decode
-b64e() { if is_macos; then base64; else base64 -w0 -; fi; }
-b64d() { if is_macos; then base64 -D; else base64 -d -; fi; }
-
-# _sha256sum: GNU coreutils `sha256sum` wrapper
-_sha256sum() {
-  sha256sum 2>/dev/null || \
-  shasum -a 256 2>/dev/null || \
-  openssl dgst -sha256 2>/dev/null | awk '{print $NF}';
-}
-
-# _timeout: GNU coreutils `timeout` when present (Linux/Termux),
-# else a watch-dog (macOS ships none) with the same observable behavior.
-_timeout() {
-  local secs="$1"; shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$secs" "$@"
-  else
-    "$@" & local pid=$!
-    ( sleep "$secs"; kill "$pid" 2>/dev/null ) & local wd=$!
-    wait "$pid" 2>/dev/null
-    local rc=$?
-    kill "$wd" 2>/dev/null
-    wait "$wd" 2>/dev/null
-    return "$rc"
-  fi
-}
+# Moved to './lib'.
 
 # -----------------------------------------------------------------------------
 # Tor helpers
 # -----------------------------------------------------------------------------
+
+# A background child inherits the CLI's process group when job control is off:
+# Ctrl+C then signals Tor as well as the client. Keep job control local to this
+# subshell and let Tor create its OWN process group. No setsid/nohup dependency;
+# stdin and logs remain detached exactly as before (Linux/macOS/Termux).
+start_tor_detached() (
+  set -m
+  tor -f "$TOR_CONFIG" </dev/null &>"$TOR_LOG" &
+)
 
 detect_tor() {
   log_info "Detecting Tor Network proxy interface..."
@@ -620,20 +757,24 @@ handle_tor() {
   if is_termux; then
     if [[ -n $BIN_TOR ]]; then
       log_info "Starting Tor privacy tunnel..."
-      { tor -f "$TOR_CONFIG" </dev/null &>"$TOR_LOG" & }
+      start_tor_detached
     else
       error "Missing required 'tor' binary. Please install it."
     fi
   else
     if [[ -n $BIN_SYSTEMCTL ]]; then
       if [[ ! $(systemctl is-active tor.service) == "active" ]]; then
-        log_info "Starting Tor privacy tunnel..."
-        sudo systemctl start tor.service
+        if [[ -n $BIN_TOR ]]; then
+          log_info "Starting Tor privacy tunnel..."
+          start_tor_detached
+        else
+          error "Missing required 'tor' binary or service. Please install it."
+        fi
+        # error "Tor service not started. Please run: sudo systemctl start tor.service"
       fi
     elif [[ -n $BIN_TOR ]]; then
-    # if [[ -n $BIN_TOR ]]; then
       log_info "Starting Tor privacy tunnel..."
-      { tor -f "$TOR_CONFIG" </dev/null &>"$TOR_LOG" & }
+      start_tor_detached
     else
       error "Missing required 'tor' binary or service. Please install it."
     fi
@@ -646,18 +787,121 @@ handle_tor() {
 # Cryptographic Key Chest (ChaCha20 + PBKDF2)
 # -----------------------------------------------------------------------------
 
+# Reads master key from disk and decodes it if in Nightmare format
+read_master_key() {
+  local content
+  [[ -s $MASTER_KEY_FILE ]] || return 1
+  content=$(<"$MASTER_KEY_FILE") || return 1
+
+  local decoded
+  # If content can be decoded by Nightmare, return the decoded secret
+  if decoded=$(nm_decode "$content" 2>/dev/null) && [[ -n $decoded ]]; then
+    printf '%s' "$decoded"
+  else
+    # Otherwise, return legacy secret format (direct retrocompatibility)
+    printf '%s' "$content"
+  fi
+}
+
+verify_nightmare_key() {
+  local legacy_key="$1"
+  local nightmare_str="$2"
+
+  # 1. Check Nightmare decoding
+  local decoded_key
+  decoded_key=$(nm_decode "$nightmare_str" 2>/dev/null) || return 1
+  [[ "$decoded_key" == "$legacy_key" ]] || return 1
+
+  # 2. Canary: real cryptographic round-trip
+  local canary="AIDE-CANARY-$RANDOM-$RANDOM"
+  local ct pt
+
+  # Encrypt original legacy key (base64 encoded)
+  ct=$(printf '%s' "$canary" | openssl enc -aes-256-cbc -pbkdf2 -iter 1000 -e -pass fd:3 -in - 3<<<"$legacy_key" 2>/dev/null | b64e) || return 1
+  # Decrypt key from Nightmare
+  pt=$(printf '%s' "$ct" | b64d | openssl enc -aes-256-cbc -pbkdf2 -iter 1000 -d -pass fd:3 -in - 3<<<"$decoded_key" 2>/dev/null) || return 1
+
+  [[ "$pt" == "$canary" ]]
+}
+
 init_key_chest() {
   if [[ ! -d $KEYS_DIR ]]; then
     mkdir -p "$KEYS_DIR" && chmod 700 "$KEYS_DIR"
   fi
-  if [[ ! -r $MASTER_KEY_FILE ]]; then
-    openssl rand -base64 32 > "$MASTER_KEY_FILE" && chmod 600 "$MASTER_KEY_FILE"
+  if [[ ! -s $MASTER_KEY_FILE ]]; then
+    # Generate random 32 bits and encode them with Nightmare
+    openssl rand -base64 32 | nm_enc_stream > "$MASTER_KEY_FILE" && chmod 600 "$MASTER_KEY_FILE"
   fi
+}
+
+migrate_key_chest() {
+  local apply=0
+  [[ "${1:-}" == "--apply" ]] && apply=1
+
+  log_step "Checking cryptographic key chest status..."
+
+  if [[ ! -s $MASTER_KEY_FILE ]]; then
+    log_warn "No master key found at $MASTER_KEY_FILE."
+    return 0
+  fi
+
+  # Get key content
+  local current_content ; current_content=$(<"$MASTER_KEY_FILE")
+
+  # Test if protected by Nightmare
+  if nm_decode "$current_content" &>/dev/null; then
+    log_success "Master key is already protected by new format."
+    if [[ ! -r "${MASTER_KEY_FILE}.bak" ]]; then
+      return 0
+    else
+      echo -en "${CLR_B_YELLOW}${ICON_WARNING}${ANSI_RESET} ${CLR_B_YELLOW}Old Master key file detected! Remove? [Y,N] ❯ ${ANSI_RESET}" >&2
+      local del_old_key ; read -r del_old_key
+      if [[ $del_old_key == "y" || $del_old_key == "Y" ]]; then
+        if rm -f "${MASTER_KEY_FILE}.bak"; then
+          log_success "Old Master key backup (${MASTER_KEY_FILE##*/}.bak) removed."
+        else
+          log_error "Unable to remove old Master key backup file, ${MASTER_KEY_FILE##*/}.bak left untouched."
+          return 1
+        fi
+      fi
+      return 0
+    fi
+  fi
+
+  log_info "Master key is currently in legacy plain format."
+
+  if [[ $apply -eq 0 ]]; then
+    log_warn "Plan: Master key will be migrated to new format."
+    log_info "Run './cli.sh keys migrate --apply' (or '/migrate --apply') to perform migration."
+    return 0
+  fi
+
+  # Mode --apply
+  log_info "Encrypting master key using new format..."
+  local new_nm_content ; new_nm_content=$(nm_encode "$current_content")
+
+  log_step "Running canary verification test..."
+  if ! verify_nightmare_key "$current_content" "$new_nm_content"; then
+    log_error "Canary verification failed! Migration aborted, key.dat left untouched."
+    return 1
+  fi
+
+  log_success "Canary test passed! Applying new format..."
+
+  # Security backup
+  cp "$MASTER_KEY_FILE" "${MASTER_KEY_FILE}.bak" && chmod 600 "${MASTER_KEY_FILE##*/}.bak"
+
+  # Atomic write
+  printf '%s\n' "$new_nm_content" > "${MASTER_KEY_FILE}.tmp"
+  chmod 600 "${MASTER_KEY_FILE}.tmp"
+  mv "${MASTER_KEY_FILE}.tmp" "$MASTER_KEY_FILE"
+
+  log_success "Master key successfully migrated to new format! (Backup: ${MASTER_KEY_FILE##*/}.bak)"
 }
 
 has_provider_key() {
   local provider="$1"
-  [[ -r $MASTER_KEY_FILE && -r "${KEYS_DIR}/${provider}.key" ]]
+  [[ -r $MASTER_KEY_FILE && -s $MASTER_KEY_FILE && -r "${KEYS_DIR}/${provider}.key" && -s "${KEYS_DIR}/${provider}.key" ]]
 }
 
 # Cipher resolution — probe a full encrypt/decrypt round-trip once, then cache.
@@ -667,14 +911,16 @@ has_provider_key() {
 probe_keyring_cipher() {
   local spec cipher use_pbkdf2 probe probe_back
   local -a kdf
+  local master_key ; master_key=$(read_master_key) || return 1
+
   for spec in "chacha20|1" "aes-256-cbc|1" "aes-256-cbc|0"; do
     cipher="${spec%%|*}"
     use_pbkdf2="${spec##*|}"
     if [[ $use_pbkdf2 == 1 ]]; then kdf=(-pbkdf2 -iter "$PBKDF_ITERATIONS"); else kdf=(); fi
     probe="probe-$RANDOM-$RANDOM"
     probe_back=$(printf '%s' "$probe" \
-      | openssl "$cipher" "${kdf[@]}" -e -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null \
-      | openssl "$cipher" "${kdf[@]}" -d -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null)
+      | openssl "$cipher" "${kdf[@]}" -e -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null \
+      | openssl "$cipher" "${kdf[@]}" -d -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null)
     if [[ $probe_back == "$probe" ]]; then
       KEYRING_CIPHER="$cipher"
       KEYRING_PBKDF2="$use_pbkdf2"
@@ -701,9 +947,10 @@ encrypt_provider_key() {
     log_error "Key chest: no usable openssl cipher (chacha20 and aes-256-cbc round-trips failed)."
     return 1
   fi
+  local master_key ; master_key=$(read_master_key) || return 1
   keyring_kdf
   echo -n "$raw_key" | \
-  openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -e -pass "file:${MASTER_KEY_FILE}" -in - | \
+  openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -e -pass fd:3 -in - 3<<<"$master_key" | \
   b64e > "${KEYS_DIR}/${provider}.key"
   chmod 600 "${KEYS_DIR}/${provider}.key"
 }
@@ -713,9 +960,10 @@ decrypt_provider_key() {
   if has_provider_key "$provider"; then
     [[ -z $KEYRING_CIPHER ]] && probe_keyring_cipher
     [[ -z $KEYRING_CIPHER ]] && return 1
+    local master_key ; master_key=$(read_master_key) || return 1
     keyring_kdf
     b64d < "${KEYS_DIR}/${provider}.key" | \
-    openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -d -pass "file:${MASTER_KEY_FILE}" -in - 2>/dev/null
+    openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -d -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null
   fi
 }
 
@@ -753,10 +1001,11 @@ interactive_key_setup() {
   log ""
 
   local raw_key
+  # TODO: Add a way to leave the loop cleanly
   while [[ -z "$raw_key" ]]; do
     echo -en "🔑 Enter your API Key (input will be masked) ❯ " >&2
     read -rs raw_key
-    log "" # New line after masked input
+    log   # New line after masked input
     if [[ -z "$raw_key" ]]; then
       log_error "Key cannot be empty. Please try again."
     fi
@@ -772,20 +1021,20 @@ interactive_key_setup() {
 
 manage_keys() {
   init_key_chest
-  log ""
+  log
   log "${CLR_B_CYAN}🔑 [$(to_upper "$AI_NAME") SOVEREIGN KEY CHEST]${ANSI_RESET}"
   log "${CLR_B_BLACK}──────────────────────────────────────────────────────────────────────────${ANSI_RESET}"
   log " Choose an action to manage your encrypted API keys:"
-  log ""
+  log
   log "   ${CLR_B_GREEN}1)${ANSI_RESET} List configured keys (masked)"
   log "   ${CLR_B_GREEN}2)${ANSI_RESET} Configure or update a key"
-  log "   ${CLR_B_GREEN}3)${ANSI_RESET} Purge entire key chest (security erase)"
-  log "   ${CLR_B_GREEN}4)${ANSI_RESET} Exit"
-  log ""
-  echo -en "👉 Select choice [1-4] ❯ " >&2
-  local choice
-  read -r choice
-  log ""
+  log "   ${CLR_B_GREEN}3)${ANSI_RESET} Migrate master key (new format)"
+  log "   ${CLR_B_GREEN}4)${ANSI_RESET} Purge entire key chest (security erase)"
+  log "   ${CLR_B_GREEN}5)${ANSI_RESET} Exit"
+  log
+  echo -en "👉 Select choice [1-5] ❯ " >&2
+  local choice ; read -r choice
+  log
 
   case "$choice" in
     1)
@@ -800,10 +1049,9 @@ manage_keys() {
         fi
       done
       if [[ $found == false ]]; then
-        log ""
-        log_info "No encrypted keys found in ${KEYS_DIR##*/}/."
+        log ; log_info "No encrypted keys found in ${KEYS_DIR##*/}/."
       fi
-      log ""
+      log
     ;;
     2)
       local index=0
@@ -815,7 +1063,7 @@ manage_keys() {
       done
       log " $((index+1))) Custom Provider"
       log " $((index+2))) Exit"
-      log ""
+      log
       echo -en "👉 Selection [1-$((index+2))] ❯ " >&2
       local prov_choice
       read -r prov_choice
@@ -834,6 +1082,9 @@ manage_keys() {
       fi
     ;;
     3)
+      migrate_key_chest --apply
+    ;;
+    4)
       echo -en "⚠️ ${CLR_B_RED}Are you absolutely sure you want to purge all keys?${ANSI_RESET} [y/N] ❯ " >&2
       local confirm ; read -r confirm
       if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
@@ -979,13 +1230,13 @@ get_chat_model() {
   if [[ $memory_size -gt 8 ]]; then
     case $BACKEND in
       ollama) chat_model="${OLLAMA_CHAT_BIG}:${quant_upper}" ;;
-      llamacpp) chat_model="${LLAMACPP_CHAT_BIG}:${quant_upper}" ;;
+      llamacpp) chat_model="${LLAMA_CPP_CHAT_BIG}:${quant_upper}" ;;
       external) chat_model="$PROVIDER_API_MODEL" ;;
     esac
   else
     case $BACKEND in
       ollama) chat_model="${OLLAMA_CHAT}:${quant_upper}" ;;
-      llamacpp) chat_model="${LLAMACPP_CHAT}:${quant_upper}" ;;
+      llamacpp) chat_model="${LLAMA_CPP_CHAT}:${quant_upper}" ;;
       external) chat_model="$PROVIDER_API_MODEL" ;;
     esac
   fi
@@ -997,21 +1248,8 @@ get_vision_model() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
   case $BACKEND in
     ollama) vision_model="${OLLAMA_VISION}:${quant_upper}" ;;
-    llamacpp) vision_model="${LLAMACPP_VISION}:${quant_upper}" ;;
+    llamacpp) vision_model="${LLAMA_CPP_VISION}:${quant_upper}" ;;
     external)
-      # Old code based on static values
-      # case $PROVIDER in
-      #   deepseek) vision_model="deepseek-v4-flash-vision-exp" ;;
-      #   # groq) vision_model="meta-llama/llama-4-scout-17b-16e-instruct" ;;
-      #   mammouth) vision_model="deepseek-v4-flash" ;;
-      #   openrouter) vision_model="openrouter/auto" ;;   # Might be useless to do that when the active model already have native vision... I might reconsider this part in the future.
-      #   openrouter_free) vision_model="openrouter/free" ;;
-      #   vercel_free) vision_model="google/gemini-2.5-flash" ;;
-      #   huggingface) vision_model="moonshotai/Kimi-K3" ;;
-      #   zai) vision_model="glm-5.3-flash" ;;
-      #   *) vision_model="$PROVIDER_API_MODEL" ;;
-      # esac
-
       # New code based on config values
       vision_model=$(jq -rc ".${PROVIDER}.vision.model // empty" "$PROVIDERS_CONFIG" 2>/dev/null)
 
@@ -1022,6 +1260,124 @@ get_vision_model() {
   echo -n "$vision_model"
 }
 
+# ------------------------------------------------------------------------------
+# analyze_media — Deliberate media analysis (image-to-text / video-to-text).
+# Called by the read_image / read_video tool wrappers (forked, stateless context).
+# The fork does NOT run init_core() — everything is resolved from DISK:
+#   provider  -> state.json (.provider)
+#   model     -> providers.json (.${P}.vision.model, fallback .${P}.default.model)
+#   key       -> keyring (has_provider_key + decrypt_provider_key)
+# E2BIG: base64 media travels via temp file + --rawfile, NEVER via --arg/argv.
+# Output: TEXT description only — media bytes never reach the tool result.
+# ------------------------------------------------------------------------------
+analyze_media() {
+  local media_file="$1"
+  local user_prompt="${2:-}"
+
+  [[ -n $media_file && $media_file != "null" ]] || { log_error "No media file provided."; return 1; }
+  [[ -r $media_file ]] || { log_error "File not found or unreadable: ${media_file}"; return 1; }
+
+  # --- MIME detection (real content, not extension) ---
+  local mime kind
+  mime=$(file -b --mime-type "$media_file")
+  case $mime in
+    image/png|image/jpeg|image/webp|image/gif)       kind="image" ;;
+    video/mp4|video/webm|video/quicktime|video/mpeg) kind="video" ;;
+    *)
+      log_error "Unsupported media type '${mime}' (images: png/jpeg/webp/gif — videos: mp4/webm/mov/mpeg)."
+      return 1
+    ;;
+  esac
+
+  # --- Provider resolution from state.json (disk) ---
+  [[ -z $STATE_FILE || ! -r $STATE_FILE ]] && { log_error "state.json missing — cannot resolve provider."; return 1; }
+  local provider ; provider=$(jq -rc '.provider // empty' "$STATE_FILE" 2>/dev/null)
+  [[ -z $provider ]] && { log_error "No provider found in state.json."; return 1; }
+
+  # --- Vision model (config-driven, mirror of get_vision_model) ---
+  local vision_model ; vision_model=$(jq -rc ".${provider}.vision.model // empty" "$PROVIDERS_CONFIG" 2>/dev/null)
+  [[ -z $vision_model ]] && vision_model=$(jq -rc ".${provider}.default.model // empty" "$PROVIDERS_CONFIG" 2>/dev/null)
+  [[ -z $vision_model ]] && { log_error "No vision model resolvable for provider '${provider}'."; return 1; }
+
+  # --- API key from keyring ---
+  if ! has_provider_key "$provider"; then
+    log_error "No API key configured for provider '${provider}' (run /keys)."
+    return 1
+  fi
+  local media_api_key ; media_api_key=$(decrypt_provider_key "$provider")
+  [[ -z $media_api_key ]] && { log_error "Unable to decrypt API key for '${provider}'."; return 1; }
+
+  # --- API URL from config ---
+  local media_url ; media_url=$(jq -rc ".${provider}.url // empty" "$PROVIDERS_CONFIG" 2>/dev/null)
+  [[ -z $media_url ]] && { log_error "No API URL found for provider '${provider}'."; return 1; }
+
+  # --- Encode media to base64 (temp file, E2BIG-safe) ---
+  media_to_b64 "$media_file"
+
+  # --- Build payload (media travels via --rawfile) ---
+  local default_prompt final_prompt url_field
+  if [[ $kind == "video" ]]; then
+    default_prompt="Describe this video: motion, events, objects, timeline."
+    url_field="video_url"
+  else
+    default_prompt="Describe this image in detail."
+    url_field="image_url"
+  fi
+  final_prompt="$user_prompt"
+  [[ -z $final_prompt || $final_prompt == "null" ]] && final_prompt="$default_prompt"
+
+  local payload
+  payload=$(jq -rc -n \
+    --arg model "$vision_model" \
+    --arg prompt "$final_prompt" \
+    --arg mime "$mime" \
+    --arg url_field "$url_field" \
+    --rawfile b64 "$TEMP_BASE64_OUTPUT" \
+    '{
+      model: $model,
+      stream: false,
+      messages: [{
+        role: "user",
+        content: [
+          {type: "text", text: $prompt},
+          {type: $url_field, ($url_field): {url: ("data:" + $mime + ";base64," + $b64)}}
+        ]
+      }]
+    }')
+
+  rm -f "$TEMP_BASE64_OUTPUT"
+
+  # --- One-shot API call ---
+  # api_call dispatches on $PROVIDER and authenticates via $PROVIDER_API_KEY:
+  # swap them for the duration of the call (stateless fork — no session to corrupt),
+  # then restore. Reuses Tor routing, ZDR/DPT policies and protocol handlers.
+  local saved_provider="$PROVIDER" saved_key="$PROVIDER_API_KEY" saved_model="$PROVIDER_API_MODEL"
+  PROVIDER="$provider"
+  PROVIDER_API_KEY="$media_api_key"
+  PROVIDER_API_MODEL="$vision_model"
+
+  local raw_res ; raw_res=$(api_call "$payload" "$media_url" 2>/dev/null)
+
+  # Retrieve used model
+  # local resolved_model ; resolved_model=$(jq -rc '.model' <<<"$raw_res" 2>/dev/null)
+  # log ; log_brain "Autonomous Multimodal Vision using: ${CLR_B_YELLOW}${resolved_model}${ANSI_RESET}"
+
+  PROVIDER="$saved_provider"
+  PROVIDER_API_KEY="$saved_key"
+  PROVIDER_API_MODEL="$saved_model"
+
+  # --- Extract TEXT only (media bytes never reach stdout) ---
+  local description ; description=$(jq -rc '.choices[0].message.content // empty' <<<"$raw_res" 2>/dev/null)
+  [[ -z $description || $description == "null" ]] && description=$(jq -rc '(.error | if type=="object" then (.message // .) else . end) // empty' <<<"$raw_res" 2>/dev/null)
+
+  if [[ -z $description || $description == "null" ]]; then
+    log_error "Empty media analysis response from '${provider}'."
+    return 1
+  fi
+
+  printf '%s\n' "$description"
+}
+
 set_base_tools() {
   local raw_memory_size ; raw_memory_size=$(get_memory_size)
   local memory_size ; memory_size=$((raw_memory_size/1024/1024))
@@ -1030,45 +1386,54 @@ set_base_tools() {
   case $BACKEND in
     ollama|llamacpp)
       if [[ $memory_size -gt 8 ]]; then
-        if is_termux; then
-          BASE_TOOLS="${TOOLS_DIR}/tools-mobile.json"
-        else
-          BASE_TOOLS="${TOOLS_DIR}/tools.json"
-        fi
+        BASE_TOOLS="${TOOLS_DIR}/tools.json"
       else
         BASE_TOOLS="${TOOLS_DIR}/tools-light.json"
       fi
     ;;
     external)
-      case $PROVIDER in
-        groq) BASE_TOOLS="${TOOLS_DIR}/tools-groq.json" ;;
-        *)
-          if is_termux; then
-            BASE_TOOLS="${TOOLS_DIR}/tools-mobile.json"
-          else
-            BASE_TOOLS="${TOOLS_DIR}/tools.json"
-          fi
-        ;;
-      esac
+      BASE_TOOLS="${TOOLS_DIR}/tools.json"
     ;;
   esac
 }
 
 set_state() {
   jq -rc -n \
+     --arg mode "$RUN_MODE" \
      --arg backend "$BACKEND" \
      --arg provider "$PROVIDER" \
-     --arg memory "$MEMORY_STRUCTURE_TYPE" \
+     --arg fallback "$FALLBACK_PROVIDER" \
+     --arg schema "${BASE_TOOLS##*/}" \
      --arg model "$CHAT_MODEL" \
-     --arg image "$IMAGE_PROVIDER" \
      --arg vision "$VISION_MODEL" \
+     --arg effort "$REASONING_EFFORT" \
+     --arg detect "$DETECT_MODE" \
+     --arg memory "$MEMORY_STRUCTURE_TYPE" \
+     --arg image "$IMAGE_PROVIDER" \
+     --arg video "$VIDEO_PROVIDER" \
+     --arg voice "$VOICE_PROVIDER" \
+     --arg speech "$SPEECH_PROVIDER" \
+     --arg lang "$AUDIO_LANG" \
+     --arg jarnet "$START_JARNET" \
+     --arg tor "$USE_TOR" \
      '{
+       mode: $mode,
        backend: $backend,
        provider: $provider,
-       memory: $memory,
+       fallback: $fallback,
+       schema: $schema,
        model: $model,
+       vision: $vision,
+       effort: $effort,
+       detect: $detect,
+       memory: $memory,
        image: $image,
-       vision: $vision
+       video: $video,
+       voice: $voice,
+       speech: $speech,
+       lang: $lang,
+       jarnet: $jarnet,
+       tor: $tor
      }' > "$STATE_FILE" 2>/dev/null
 }
 
@@ -1094,12 +1459,12 @@ set_chat_model() {
 }
 
 set_vision_model() {
-  VISION_MODEL="$(get_vision_model)"
-  # if [[ -n $USER_MODEL ]]; then
-  #   VISION_MODEL="$USER_MODEL"
-  # else
-  #   VISION_MODEL="$(get_vision_model)"
-  # fi
+  # VISION_MODEL="$(get_vision_model)"
+  if [[ -n $USER_MODEL ]]; then
+    VISION_MODEL="$USER_MODEL"
+  else
+    VISION_MODEL="$(get_vision_model)"
+  fi
 }
 
 handle_vision_request() {
@@ -1118,16 +1483,16 @@ handle_vision_request() {
 }
 
 set_api_provider() {
-  local provider_data provider_zdr provider_vision
+  local provider_data provider_zdr
   local target_provider ; target_provider="${1:-$PROVIDER}"
 
   [[ ! -r "$PROVIDERS_CONFIG" ]] && error "Unable to read providers config file: $PROVIDERS_CONFIG"
 
   # Read all values in a single jq process call using tab-delimited parsing
-  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.default.memory)\t\(.default.model)\t\(.default.zdr)\t\(.default.vision)"' "$PROVIDERS_CONFIG" 2>/dev/null)
+  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.default.memory)\t\(.default.model)\t\(.default.zdr)"' "$PROVIDERS_CONFIG" 2>/dev/null)
   [[ -z $provider_data ]] && error "Unsupported provider defined: $target_provider"
 
-  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_MEMORY_STRUCTURE PROVIDER_API_MODEL provider_zdr provider_vision <<< "$provider_data"
+  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_MEMORY_STRUCTURE PROVIDER_API_MODEL provider_zdr <<< "$provider_data"
 
   [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $target_provider"
   [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $target_provider"
@@ -1137,10 +1502,19 @@ set_api_provider() {
   [[ -n $MEMORY_STRUCTURE_TYPE && -n $PROVIDER_MEMORY_STRUCTURE && ! $MEMORY_STRUCTURE_TYPE == "index" ]] && MEMORY_STRUCTURE_TYPE=$PROVIDER_MEMORY_STRUCTURE
 
   # Set model vision capability based on the provider config
-  VISION_ENABLED=$provider_vision
+  VISION_ENABLED=$(jq -r --arg p "${target_provider}" '.[$p].default.vision // false' "$PROVIDERS_CONFIG" 2>/dev/null)
 
   # Set image capability on the EFFECTIVE provider (IMAGE_PROVIDER override, else chat provider)
   IMAGE_ENABLED=$(jq -r --arg p "${IMAGE_PROVIDER:-$target_provider}" '.[$p].default.image // false' "$PROVIDERS_CONFIG" 2>/dev/null)
+
+  # Set video capability on the EFFECTIVE provider (VIDEO_PROVIDER override, else chat provider)
+  VIDEO_ENABLED=$(jq -r --arg p "${VIDEO_PROVIDER:-$target_provider}" '.[$p].default.video // false' "$PROVIDERS_CONFIG" 2>/dev/null)
+
+  # Set voice capability on the EFFECTIVE provider (VOICE_PROVIDER override, else chat provider)
+  VOICE_ENABLED=$(jq -r --arg p "${VOICE_PROVIDER:-$target_provider}" '.[$p].default.voice // false' "$PROVIDERS_CONFIG" 2>/dev/null)
+
+  # Set speech capability on the EFFECTIVE provider (SPEECH_PROVIDER override, else chat provider)
+  SPEECH_ENABLED=$(jq -r --arg p "${SPEECH_PROVIDER:-$target_provider}" '.[$p].default.speech // false' "$PROVIDERS_CONFIG" 2>/dev/null)
 
   # Enforce ZDR if enabled in the provider config, while preserving command-line overrides
   [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
@@ -1148,7 +1522,15 @@ set_api_provider() {
 
 generate_self_architecture() {
   local arch_file="${DATA_STORE}/${AI_NAME}.md"
-  # [[ -e "$arch_file" ]] && return   # Already generated, skip
+  local core_file="$CORE_LIB"
+  local cli_file="$SCRIPT_FILE"
+
+  # Override core definition when running from 'core.sh'
+  # instead of 'cli.sh'
+  if [[ -z $CORE_LIB ]]; then
+    core_file="core.sh"
+    cli_file="cli.sh"
+  fi
 
   # Generate self description file
   cat > "$arch_file" <<EOF
@@ -1161,30 +1543,37 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 **Active fallback:** ${FALLBACK_PROVIDER:-"None"}
 **Active model:** ${CHAT_MODEL}
 **Active image provider:** ${IMAGE_PROVIDER:-"None"}
+**Active video provider:** ${VIDEO_PROVIDER:-"None"}
+**Active voice provider:** ${VOICE_PROVIDER:-"None"}
+**Active speech provider:** ${SPEECH_PROVIDER:-"None"}
 **Active memory structure:** ${MEMORY_STRUCTURE_TYPE:-"Full"}
 **Platform:** $(is_termux && echo "Termux/Android" || echo "Desktop")
 **Kernel:** $(uname -srm)
-**Providers available:** $(jq -rc 'keys | length' "${CONFIG_DIR}/providers.json")
+**Providers available:** $(jq -rc 'keys | length' "${PROVIDERS_CONFIG}")
 
 ## Your Origin
 **Creator:** https://github.com/jiab77
 **Source:** https://github.com/jiab77/ai-pipeline
+**Birth:** 2026-05-30 (1st commit)
 
 ## Your Core Files
-- \`${CORE_LIB##*/}\` — Cognitive engine (API calls, memory, providers, AUTH tag)
-- \`${SCRIPT_FILE}\` — Interface layer (slash commands, /provider, /launch, /fallback)
+- \`${core_file##*/}\` — Cognitive engine (API calls, memory, providers, AUTH tag)
+- \`${cli_file}\` — Interface layer (slash commands, /provider, /launch, /fallback)
 - \`${IMG_HANDLER##*/}\` — Image rendering engine (create_image, config-driven sizing, EXIF cleanup, pollinations fallback)
+- \`${VID_HANDLER##*/}\` — Video rendering engine (create_video, config-driven sizing, EXIF cleanup)
+- \`${VOC_HANDLER##*/}\` — Voice rendering engine (config-driven voice, EXIF cleanup)
+- \`${SPE_HANDLER##*/}\` — Speech capture engine (config-driven)
 - \`${TOOLS_HANDLER##*/}\` — Tool execution layer (web_fetch, web_browse, edit_file, etc.)
 
 ## Your Identity
-- **AUTH tag** comes from \`compute_device_tag()\` in ${CORE_LIB##*/} line $(grep -n "^compute_device_tag" "$CORE_LIB" | cut -d: -f1)
+- **AUTH tag** comes from \`compute_device_tag()\` in ${core_file##*/} line $(grep -n "^compute_device_tag" "$core_file" | cut -d: -f1)
 - The tag changes **per session** — includes UNIX timestamp in the hash
 - On Termux: uses \`settings get secure android_id\` (fallback chain)
 - On desktop: uses \`/etc/machine-id\` or \`/var/lib/dbus/machine-id\`
 
 ## Your Providers
-**Total:** $(jq -rc 'keys | length' "${CONFIG_DIR}/providers.json")
-**List:** $(jq -rc 'keys | join(", ")' "${CONFIG_DIR}/providers.json")
+**Total:** $(jq -rc 'keys | length' "${PROVIDERS_CONFIG}")
+**List:** $(jq -rc 'keys | join(", ")' "${PROVIDERS_CONFIG}")
 **Config file:** \`${CONFIG_DIR##*/}/providers.json\`
 
 ## Your Constraints
@@ -1198,9 +1587,9 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 - **Transient:** \`${DATA_STORE##*/}/messages.json\` — conversation context (pruned on heartbeat)
 
 ## To Understand Yourself
-1. \`read_file ${CORE_LIB##*/}\` — Your full cognitive engine source code
+1. \`read_file ${core_file##*/}\` — Your full cognitive engine source code
 2. \`git log --oneline\` — Your version history
-3. \`grep_search pattern ${CORE_LIB##*/}\` — Find any function or variable
+3. \`grep_search pattern ${core_file##*/}\` — Find any function or variable
 4. \`read_file ${AI_NAME}.md\` — Re-read this file
 
 ## Self-Check Rule
@@ -1230,7 +1619,6 @@ EOF
 #   consecutive assistant tool_calls turns -> merged
 #   non-object / unknown items -> dropped
 # Idempotent: normalize_history(normalize_history(x)) == normalize_history(x)
-# Regression harness: data/jq-orphan-check.sh
 # -----------------------------------------------------------------------------
 normalize_history() {
   jq -rc '
@@ -1379,7 +1767,12 @@ bootstrap_memory() {
           secs=$(awk '/^## /{ if (n++ >= 20) exit; sub(/^#+[ \t]*/, ""); printf "%s%s", (s++ ? " · " : ""), $0 }' "$file" 2>/dev/null)
           [[ -n $secs ]] && index+="    § ${secs}\n"
         fi
-      done < <(find "$MEMORY_DIR" -type f 2>/dev/null | sort)
+
+      # bad variant
+      # done < <(find "$MEMORY_DIR" -type f 2>/dev/null | sort)
+
+      # better variant
+      done < <(find "$MEMORY_DIR" -path '*/.git' -prune -o -type f -print 2>/dev/null | sort)
       echo -ne "$index"
     ;;
     full|*)
@@ -1391,7 +1784,12 @@ bootstrap_memory() {
           prompt+="\n--- File: ${rel_path} ---\n"
           prompt+="$(<"$file")\n"
         fi
-      done < <(find "$MEMORY_DIR" -type f 2>/dev/null)
+
+      # bad variant
+      # done < <(find "$MEMORY_DIR" -type f 2>/dev/null)
+
+      # better variant
+      done < <(find "$MEMORY_DIR" -path '*/.git' -prune -o -type f -print 2>/dev/null)
       echo -ne "$prompt"
     ;;
   esac
@@ -1419,8 +1817,13 @@ index_dir() {
     [[ -z $title ]] && title=$(grep -m1 -E '^#[[:space:]]*[[:alnum:]]' "$file" 2>/dev/null | sed -E 's/^#+[[:space:]]*//')
     [[ -z $title ]] && title=$(basename "$file")
     # shellcheck disable=SC2016
-    printf -- '- `%s` — %s (%s KB)\n' "$rel_path" "${title:0:100}" "$kb"
-  done < <(find "$dir" -type f 2>/dev/null | sort)
+    printf -- '- `%s` — %s (%s KB)\n' "${DATA_STORE##*/}/$rel_path" "${title:0:100}" "$kb"
+
+  # bad variant
+  # done < <(find "$dir" -type f 2>/dev/null | sort)
+
+  # better variant
+  done < <(find "$dir" -path '*/.git' -prune -o -type f -print 2>/dev/null | sort)
 }
 
 get_system_prompt() {
@@ -1436,7 +1839,7 @@ get_system_prompt() {
         base+="Load any file with \`read_file\`, or grep across all of them with \`grep_search\`, BEFORE answering anything about past decisions, the user, ongoing work, or anything you claim to remember. Never claim to remember something you have not read in this session.\n\n"
         base+="${memory_index}"
       else
-        base+="\n\n### YOUR PERSISTENT MEMORY (\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"):\n(Your memory folder is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
+        base+="\n\n### YOUR PERSISTENT MEMORY (\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"):\n(Your memory folder '\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"' is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
       fi
       echo -ne "$base"
     ;;
@@ -1444,9 +1847,9 @@ get_system_prompt() {
       local memory_context
       memory_context=$(bootstrap_memory 2>/dev/null)
       if [[ -n $memory_context ]]; then
-        base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n${memory_context}"
+        base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"):\n${memory_context}"
       else
-        base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"data/memory/\"):\n(Your memory folder 'data/memory/' is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
+        base+="\n\n### YOUR PERSISTENT MEMORY CONTEXT (\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"):\n(Your memory folder '\"${DATA_STORE##*/}/${MEMORY_DIR##*/}/\"' is currently empty. You have absolute freedom to organize it as you feel most logical. Please use your file tools, such as write_file, to create markdown files like 'profile.md', 'rules.md', or 'milestones.md' to remember facts and preferences across sessions.)"
       fi
       echo -ne "$base"
     ;;
@@ -1507,39 +1910,42 @@ set_system_prompt() {
     SYSTEM_PROMPT+="$SLM_PROMPT"
   fi
 
-  # Sets AI rules if they exists
-  [[ -r $AI_RULES ]] && SYSTEM_PROMPT+="The critical rules you must follow are described here:\n\n$(<"$AI_RULES")"
+  # Sets AI safety rules if they exists
+  [[ -r $AI_RULES ]] && SYSTEM_PROMPT+="The critical rules you must follow are described here:\n\n$(<"$AI_RULES")\n\n"
+
+  # Sets AI avatar instructions if they exists
+  [[ -r $AI_AVATAR ]] && SYSTEM_PROMPT+="Your visual appareance is described here:\n\n$(<"$AI_AVATAR")\n\n"
 
   # Sets 'framework' folder if it exists
   if [[ -d "${DATA_STORE}/framework" ]]; then
-    SYSTEM_PROMPT+="Your behavioral framework files are located in your workspace under the \`framework\` folder. Load them before handling code related tasks.\n"
-    SYSTEM_PROMPT+="Index of the \`framework\` folder:\n$(index_dir "${DATA_STORE}/framework")"$'\n'
+    SYSTEM_PROMPT+="Your behavioral framework files are located in your workspace under the \`${DATA_STORE##*/}/framework\` folder. Load them before handling code related tasks.\n"
+    SYSTEM_PROMPT+="Index of the \`${DATA_STORE##*/}/framework\` folder:\n$(index_dir "${DATA_STORE}/framework")\n\n"
   fi
 
   # Sets 'skills' folder if it exists
   if [[ -d "${DATA_STORE}/skills" ]]; then
-    SYSTEM_PROMPT+="Your acquired skills are located in your workspace under the \`skills\` folder. Load them before handling code related tasks.\n"
-    SYSTEM_PROMPT+="Index of the \`skills\` folder:\n$(index_dir "${DATA_STORE}/skills")"$'\n'
+    SYSTEM_PROMPT+="Your acquired skills are located in your workspace under the \`${DATA_STORE##*/}/skills\` folder. Load them before handling code related tasks.\n"
+    SYSTEM_PROMPT+="Index of the \`${DATA_STORE##*/}/skills\` folder:\n$(index_dir "${DATA_STORE}/skills")\n\n"
   fi
 
   # Sets 'learn' folder if it exists
   if [[ -d "${DATA_STORE}/learn" ]]; then
-    SYSTEM_PROMPT+="Your read-only learning resources are located in your workspace under the \`learn\` folder. Look at them when necessary or requested.\n"
-    # SYSTEM_PROMPT+="Index of the \`learn\` folder:\n$(index_dir "${DATA_STORE}/learn")"$'\n'
+    SYSTEM_PROMPT+="Your read-only learning resources are located in your workspace under the \`${DATA_STORE##*/}/learn\` folder. Look at them when necessary or requested.\n"
+    # SYSTEM_PROMPT+="Index of the \`learn\` folder:\n$(index_dir "${DATA_STORE}/learn")\n\n"
   fi
 
   # Sets 'docs' folder if it exists
   if [[ -d "${DATA_STORE}/docs" ]]; then
-    SYSTEM_PROMPT+="Your shared documents are located in your workspace under the \`docs\` folder. Look at them when necessary or requested.\n"
-    SYSTEM_PROMPT+="Index of the \`docs\` folder:\n$(index_dir "${DATA_STORE}/docs")"$'\n'
+    SYSTEM_PROMPT+="Your shared documents are located in your workspace under the \`${DATA_STORE##*/}/docs\` folder. Look at them when necessary or requested.\n"
+    SYSTEM_PROMPT+="Index of the \`${DATA_STORE##*/}/docs\` folder:\n$(index_dir "${DATA_STORE}/docs")\n\n"
   fi
 
   # Sets important rules
   [[ -n $CORE_LIB && -r $CORE_LIB ]] && CORE_FILE="${CORE_LIB##*/}"
   if [[ -n $CORE_FILE ]]; then
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${IMG_HANDLER##*/}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\`, \`${ENG_DIR##*/}\`, \`${LIB_DIR##*/}\`, \`${PLUG_DIR##*/}\` folders.\n"
   else
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${IMG_HANDLER##*/}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\` folders.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\`, \`${ENG_DIR##*/}\`, \`${LIB_DIR##*/}\`, \`${PLUG_DIR##*/}\` folders.\n"
   fi
   SYSTEM_PROMPT+="Modifying these files will break the core pipeline functionalities."
 }
@@ -1551,7 +1957,7 @@ set_system_prompt() {
 api_call_type_completions() {
   local payload="$1"
   local url="$2"
-  local curl_opts=("-sSL")
+  local -a curl_opts ; curl_opts=("-sSL")
 
   # Add required arguments when TOR is enabled
   [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
@@ -1625,6 +2031,7 @@ api_call_type_completions() {
 
       # Send custom payload
       curl "${curl_opts[@]}" "${url}" \
+            -w "%output{$VENICE_BALANCE_FILE}balance: %header{x-venice-balance-usd}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -A "$USER_AGENT" \
@@ -1644,11 +2051,8 @@ api_call_type_completions() {
             -d @- <<< "$payload" | jq -rc .
     ;;
 
-    # Groq
+    # Groq (free-tier / paid -- rate-limited unfortunately)
     groq)
-      # Add minor delay to avoid triggering the rate limiter
-      sleep 1
-
       # Warn that ZDR policy is not implemented yet for Groq
       if [[ $ZDR_ENFORCED == true ]]; then
         log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented yet for Groq."
@@ -1658,71 +2062,56 @@ api_call_type_completions() {
       payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
 
-      local response
-      local attempt=1
-      local max_attempts=5
+      # Remove 'reasoning_content' from history messages in payload (causes issues)
+      payload=$(jq -rc '
+        .messages |= map(
+          if .role == "assistant"
+          then del(.reasoning_content)
+          else .
+          end
+        )
+      ' <<< "$payload" 2>/dev/null)
+      [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning content removed explicitely for Groq."
 
+      # Groq rate-limiter handling code
+      local response attempt=1 max_attempts=3
       while (( attempt <= max_attempts )); do
         # Send custom payload and capture the output
         response=$(curl "${curl_opts[@]}" "${url}" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
           -A "$USER_AGENT" \
-          -d @- <<< "$payload" 2>/dev/null
-        )
+          -d @- <<< "$payload" 2>/dev/null)
 
         # Parse potential errors from the response
-        local error_code ; error_code=$(jq -r '.error.code' <<< "$response" 2>/dev/null)
-        local error_msg ; error_msg=$(jq -r '.error.message' <<< "$response" 2>/dev/null)
+        local error_code error_msg wait_time
+        error_code=$(jq -r '.error.code // empty' <<<"$response" 2>/dev/null)
+        error_msg=$(jq -r '.error.message // empty' <<<"$response" 2>/dev/null)
+        wait_time=""
 
-        # Check if we triggered a rate limit (TPM/RPM/TPD exceeded)
-        if [[ $error_code == "rate_limit_exceeded" || $error_msg == *"Rate limit reached"* ]]; then
-          local wait_time="5" # Safe default fallback
+        # Check if we triggered a rate limit (TPM/RPM/TPD exceeded) and
+        # extract seconds (s) from the wait message
+        if [[ $error_code == "rate_limit_exceeded" && \
+              $error_msg =~ try[[:space:]]again[[:space:]]in[[:space:]]([0-9]+([.][0-9]+)?)s ]]; then
 
-          # Extract days (d), hours (h), minutes (m), and seconds (s) from the wait message
-          if [[ $error_msg =~ try[[:space:]]again[[:space:]]in[[:space:]]([0-9hms.]*[0-9a-z]) ]]; then
-            local duration_str="${BASH_REMATCH[1]}"
-            local d=0 h=0 m=0 s=0
+          # Convert duration to total seconds and add 1s security padding
+          wait_time=$(( ${BASH_REMATCH[1]%.*} + 1 ))
 
-            # Extract days if present
-            if [[ $duration_str =~ ([0-9]+)d ]]; then
-              d="${BASH_REMATCH[1]}"
-            fi
-
-            # Extract hours if present
-            if [[ $duration_str =~ ([0-9]+)h ]]; then
-              h="${BASH_REMATCH[1]}"
-            fi
-
-            # Extract minutes if present
-            if [[ $duration_str =~ ([0-9]+)m ]]; then
-              m="${BASH_REMATCH[1]}"
-            fi
-
-            # Extract seconds (integer part) if present
-            if [[ $duration_str =~ ([0-9]+)(.[0-9]+)?s ]]; then
-              s="${BASH_REMATCH[1]}"
-            fi
-
-            # Convert duration to total seconds and add 1s security padding
-            wait_time=$(( (d * 86400) + (h * 3600) + (m * 60) + s + 1 ))
+          # Waiting time too long: Leaving the loop
+          if (( wait_time > 60 )); then
+            jq -rc . <<<"$response"
+            return 0
           fi
 
-          # Convert wait_time to a human-readable display string
-          local wait_display=""
-          if (( d > 0 )); then wait_display+="${d}d "; fi
-          if (( h > 0 || d > 0 )); then wait_display+="${h}h "; fi
-          if (( m > 0 || h > 0 || d > 0 )); then wait_display+="${m}m "; fi
-          wait_display+="$(( s + 1 ))s"
-
-          log_warn "${CLR_B_YELLOW}[RATE LIMIT]${ANSI_RESET} Groq quota reached (Attempt $attempt/$max_attempts). Sleeping for ${CLR_B_WHITE}${wait_display}${ANSI_RESET} (total: ${wait_time}s) before retrying..."
+          log_warn "${CLR_B_YELLOW}[RATE LIMIT]${ANSI_RESET} Groq: ${wait_time}s (tentative ${attempt}/${max_attempts})"
           sleep "$wait_time"
           ((attempt++))
-        else
-          # Success or non-rate-limit error, return output and exit loop
-          jq -rc . <<<"$response"
-          return 0
+          continue
         fi
+
+        # Success or non-rate-limit error, return output and exit loop
+        jq -rc . <<<"$response"
+        return 0
       done
 
       # If all retries failed, return last response
@@ -1791,9 +2180,12 @@ api_call_type_completions() {
       payload=$(jq -rc '.provider.require_parameters = true' <<< "$payload" 2>/dev/null)
 
       # Disallow prompt training by default (except for analyzing images in free mode)
-      # Required because there is no providers on OpenRouter that accepts to process image without keeping data for training purposes
-      # Let's see if that's an acceptable trade-off for the 'openrouter_free' provider...
-      if [[ $(grep -ci "image_url" <<< "$payload") -eq 0 ]]; then
+      # Required because there is no providers on OpenRouter that accepts to process image
+      # without keeping data for training purposes for free.
+      # Let's see if an acceptable trade-off for the 'openrouter_free' provider...
+      # Note: check the messages only — tool schemas may mention "image_url"
+      # without any actual image being sent
+      if ! jq -e '[.messages[]? | .content[]? | objects | select(.type? == "image_url")] | length > 0' <<< "$payload" >/dev/null 2>&1; then
         payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
       else
         log_warn "🔒 ${CLR_B_CYAN}[DPT]${ANSI_RESET} Disallow Prompt Training policy disabled temporary during image processing." ; log
@@ -1825,7 +2217,7 @@ api_call_type_completions() {
 api_call_type_responses() {
   local payload="$1"
   local url="$2"
-  local curl_opts=("-sSL")
+  local -a curl_opts ; curl_opts=("-sSL")
 
   # Add required arguments when TOR is enabled
   [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
@@ -1882,10 +2274,14 @@ api_call_type_responses() {
   #       itself, survives on disk (repro: data/jq-orphan-check.sh);
   #   (b) kills the duplicate-history risk (server state + disk state both injected);
   #   (c) makes ZDR (store:false) a non-issue instead of a dead end.
-  if [[ $ZDR_ENFORCED == true ]]; then
-    [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention enforced for OpenAI Responses (store: false)."
-    payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
-  fi
+  # if [[ $ZDR_ENFORCED == true ]]; then
+  #   [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention enforced for OpenAI Responses (store: false)."
+  #   payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
+  # fi
+
+  # Enforcing ZDR by default (just for testing)
+  [[ $DEBUG == true ]] && log_debug "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention enforced for OpenAI Responses (store: false)."
+  payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
 
   # Send custom payload
   curl "${curl_opts[@]}" "${url}" \
@@ -1898,7 +2294,7 @@ api_call_type_responses() {
 api_call_type_messages() {
   local payload="$1"
   local url="$2"
-  local curl_opts=("-sSL")
+  local -a curl_opts ; curl_opts=("-sSL")
   local version
 
   # Add required arguments when TOR is enabled
@@ -1965,7 +2361,7 @@ api_call_type_messages() {
 api_call() {
   local payload="$1"
   local url="$2"
-  local curl_opts=("-sSL")
+  local -a curl_opts ; curl_opts=("-sSL")
 
   # Apply defined local model settings
   if [[ ! $BACKEND == "external" ]]; then
@@ -2007,7 +2403,7 @@ api_call() {
 
     # Local Backend: llama.cpp
     llamacpp)
-      curl "${curl_opts[@]}" "${LLAMACPP_API_URL}" \
+      curl "${curl_opts[@]}" "${LLAMA_CPP_API_URL}" \
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer no-key" \
            -d @- <<< "$payload" | jq -rc '.'
@@ -2216,81 +2612,358 @@ build_tool_result() {
 }
 
 get_credit_balance() {
-  local curl_opts=("-sSL")
+  local -a curl_opts ; curl_opts=("-sSL")
+  local active_provider=${1:-"$PROVIDER"}
+  local provider_key ; provider_key=$(decrypt_provider_key "$active_provider")
+
+  # Check if provider key is valid before use
+  [[ -z $provider_key ]] && return 1
 
   # Add required arguments when TOR is enabled
   [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
 
   # Provider selector
   if [[ $BACKEND == "external" ]]; then
-    case $PROVIDER in
+    case $active_provider in
       vercel*)
         curl "${curl_opts[@]}" "https://ai-gateway.vercel.sh/v1/credits" \
               -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .balance 2>/dev/null
       ;;
       openrouter*)
         curl "${curl_opts[@]}" "https://openrouter.ai/api/v1/key" \
               -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .data.usage 2>/dev/null
       ;;
       cyberneurova)
         curl "${curl_opts[@]}" "https://api.cyberneurova.ai/v1/usage" \
               -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .data.tokens.input.remaining 2>/dev/null
       ;;
       deepseek)
         curl "${curl_opts[@]}" "https://api.deepseek.com/user/balance" \
               -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .balance_infos[0].total_balance 2>/dev/null
       ;;
       kimi)
         curl "${curl_opts[@]}" "https://api.moonshot.ai/v1/users/me/balance" \
               -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+              -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .data.available_balance 2>/dev/null
+      ;;
+      venice)
+        [[ -r "$VENICE_BALANCE_FILE" ]] && cut -d' ' -f2 <"$VENICE_BALANCE_FILE"
       ;;
     esac
   fi
 }
 
 get_provider_models() {
-  local curl_opts=("-sSL")
-  local url
+  local target_provider="${1:-$PROVIDER}"
+  local operation="${2:-}"
+  local -a curl_opts ; curl_opts=("-fsSL" "--connect-timeout" "10" "--max-time" "30")
+  local url key version
+
+  # Groq blocks Tor (Cloudflare 403) — direct connection only.
+  # Same exception as init_core(), applied to catalogue lookups too.
+  if [[ $target_provider == "groq" ]]; then
+    USE_TOR=false
+  fi
 
   # Add required arguments when TOR is enabled
   [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
 
-  # Get provider models URL
-  if [[ $BACKEND == "external" ]]; then
-    url=$(jq -rc ".${PROVIDER}.models" "$PROVIDERS_CONFIG" 2>/dev/null)
+  # Check provider
+  if [[ -z $target_provider ]]; then
+    log_error "Missing provider argument."
+    return 1
+  fi
+
+  # Check provider config
+  if [[ ! -r $PROVIDERS_CONFIG ]]; then
+    log_error "Unable to read providers config file: $PROVIDERS_CONFIG"
+    return 1
+  fi
+
+  # Check provider models catalog url
+  if ! url=$(jq -er --arg p "$target_provider" '
+    ((.[$p].inference // .[$p].models) | strings)
+  ' "$PROVIDERS_CONFIG" 2>/dev/null); then
+    log_error "Unknown provider or missing model catalogue: $target_provider"
+    return 1
+  fi
+
+  # Provider-specific catalogue queries. Local jq filtering stays in tools.sh.
+  case "$target_provider:$operation" in
+    venice:all)                             url="${url}?type=all" ;;
+    venice:chat|venice:vision|venice:i2t)   url="${url}?type=text" ;;
+    venice:t2i)                             url="${url}?type=image" ;;
+    venice:i2i)                             url="${url}?type=inpaint" ;;
+    venice:t2v|venice:i2v)                  url="${url}?type=video" ;;
+    venice:tts)                             url="${url}?type=tts" ;;
+    venice:stt|venice:asr)                  url="${url}?type=asr" ;;
+  esac
+
+  # Load target provider key
+  if has_provider_key "$target_provider"; then
+    key=$(decrypt_provider_key "$target_provider") || {
+      log_error "Unable to decrypt provider key: $target_provider"
+      return 1
+    }
+
+    if [[ -z $key ]]; then
+      log_error "Empty provider key: $target_provider"
+      return 1
+    fi
+
+    if [[ $target_provider == "anthropic" ]]; then
+      if ! version=$(jq -er --arg p "$target_provider" \
+        '.[$p].version // empty' "$PROVIDERS_CONFIG" 2>/dev/null); then
+        log_error "Missing Anthropic API version."
+        return 1
+      fi
+
+      # Add 'anthropic' specific options
+      curl_opts+=(
+        -H "x-api-key: ${key}"
+        -H "anthropic-version: ${version}"
+      )
+    else
+      curl_opts+=(-H "Authorization: Bearer ${key}")
+    fi
   fi
 
   # Provider models
   if [[ $BACKEND == "external" && -n $url ]]; then
     curl "${curl_opts[@]}" "$url" \
           -H "Content-Type: application/json" \
-          -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
           -A "$USER_AGENT" | jq -rc . 2>/dev/null
   fi
 }
 
+# -----------------------------------------------------------------------------
+# Normalize a provider catalogue into canonical TSV:
+#   id | name | context | $/M in | $/M out | flags
+# Flags: V=vision R=reasoning T=tools F=free D=deprecated W=open-weights
+#        U=uncensored I=image (venice non-text)
+# Each provider ships its own structure (measured live 2026-11-02): this case
+# block is the adaptation layer, the renderer below stays generic.
+# -----------------------------------------------------------------------------
+normalize_provider_models() {
+  local provider="$1"
+  case "$provider" in
+    anthropic)
+      jq -r '.data[] | [ .id, (.display_name // "-"), (.max_input_tokens // "-"), "-", "-",
+        (if .lifecycle == "deprecated" then "D" else "" end) ] | @tsv'
+    ;;
+    cyberneurova)
+      jq -r '.data[] | [ .id, (.display_name // "-"), (.context_length // "-"), "-", "-",
+        ([ (if .supports_image_in then "V" else "" end),
+            (if .supports_reasoning then "R" else "" end),
+            (if .supports_tool_use then "T" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    deepseek)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if .effort then "R" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    groq)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if ((.output_modalities // []) | index("speech")) then "S" else "" end),
+            (if ((.output_modalities // []) | index("transcription")) then "A" else "" end),
+            (if .active == false then "D" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    inception)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if ((.output_modalities // []) | index("speech")) then "S" else "" end),
+            (if ((.output_modalities // []) | index("transcription")) then "A" else "" end),
+            (if .active == false then "D" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    huggingface)
+      # Raw array, 1000+ models: top 50 by downloads, the rest is noise.
+      jq -r 'sort_by(-(.downloads // 0))[:50][] | [ (.modelId // .id // "?"),
+        "-", "-", "-", "-",
+        ([ (if .downloads then "dl:" + ((.downloads / 1000000 * 10 | round / 10 | tostring) + "M") else "" end),
+            (if .likes then "♥" + (.likes | tostring) else "" end) ] | join(" ")) ] | @tsv'
+    ;;
+    kimi)
+      jq -r '.data[] | [ .id, .id, (.context_length // "-"), "-", "-",
+        ([ (if .supports_image_in then "V" else "" end),
+            (if .supports_reasoning then "R" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    mammouth)
+      jq -r '.data[] | [ .id, .id, (.model_info.max_input_tokens // "-"),
+        (if .model_info.input_cost_per_token then (.model_info.input_cost_per_token * 1000000) else "-" end),
+        (if .model_info.output_cost_per_token then (.model_info.output_cost_per_token * 1000000) else "-" end), "-" ] | @tsv'
+    ;;
+    openai)
+      jq -r '.data[] | [ .id, .id, "-", "-", "-",
+        (if .shutdown_date then "D:" + .shutdown_date else "" end) ] | @tsv'
+    ;;
+    openroute)
+      jq -r '.data[] | [ .id, (.display_name // "-"), (.context_length // "-"),
+        (if .pricing.prompt then ((.pricing.prompt | tonumber) * 1000000) else "-" end),
+        (if .pricing.completion then ((.pricing.completion | tonumber) * 1000000) else "-" end),
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if .supports_reasoning then "R" else "" end),
+            (if .supports_tool_use then "T" else "" end),
+            (if ((.badges // []) | index("uncensored")) then "U" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    openrouter*)
+      # jq -r '.data[] | [ .id, (.name // "-"), (.context_length // "-"),
+      jq -r '.data[] | [ .id, "-", (.context_length // "-"),
+        (if .pricing.prompt then ((.pricing.prompt | tonumber) * 1000000) else "-" end),
+        (if .pricing.completion then ((.pricing.completion | tonumber) * 1000000) else "-" end),
+        ([ (if ((.architecture.input_modalities // []) | index("image")) then "V" else "" end),
+            (if ((.pricing.prompt | tonumber) == 0 and (.pricing.completion | tonumber) == 0) then "F" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    venice)
+      jq -r '.data[] | [ .id, (.model_spec.name // "-"),
+        (.model_spec.availableContextTokens // .context_length // "-"),
+        (.model_spec.pricing.input.usd // "-"), (.model_spec.pricing.output.usd // "-"),
+        ([ (if (.model_spec.capabilities.supportsFunctionCalling // false) then "T" else "" end),
+            (if (.model_spec.capabilities.supportsReasoning // false) then "R" else "" end),
+            (if ((.type // "text") != "text") then (.type | .[0:1] | ascii_upcase) else "" end) ] | join("")) ] | @tsv'
+    ;;
+    vercel*)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
+        ([ (if ((.tags // []) | index("vision")) then "V" else "" end),
+            (if ((.tags // []) | index("reasoning")) then "R" else "" end),
+            (if ((.tags // []) | index("tool-use")) then "T" else "" end),
+            (if ((.tags // []) | index("free")) then "F" else "" end),
+            (if ((.tags // []) | index("open-weights")) then "W" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    xai)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_length // "-"), "-", "-",
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if ((.output_modalities // []) | index("speech")) then "S" else "" end),
+            (if ((.output_modalities // []) | index("transcription")) then "A" else "" end),
+            (if .active == false then "D" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    zai*)
+      jq -r '.data[] | [ .id, .id, "-", "-", "-", "-" ] | @tsv'
+    ;;
+    *)
+      # Unknown structure: best-effort extraction on universal keys.
+      jq -r 'if type == "object" then (.data // .models // [.] )[] else .[] end |
+        [ (.id // .modelId // "?"), "-", "-", "-", "-", "-" ] | @tsv'
+    ;;
+  esac
+}
+
+# -----------------------------------------------------------------------------
+# Human rendering: TSV (id|model|ctx|$/M in|$/M out|flags) -> aligned table.
+# Column widths computed dynamically, free pricing in green, deprecated
+# models in red. No external dependency.
+# -----------------------------------------------------------------------------
+render_models_table() {
+  local -a rows ; rows=()
+  local _row
+  while IFS= read -r _row; do rows+=("$_row"); done   # Bash 3.2 trick for macOS
+  [[ ${#rows[@]} -eq 0 ]] && { log_warn "No models found in catalogue." ; return 0 ; }
+
+  local -a hdr ; hdr=(ID NAME CONTEXT '$/M IN' '$/M OUT' FLAGS)
+  local -a w ; w=() ; local line f i len
+  for i in 0 1 2 3 4 5 ; do w[i]=${#hdr[i]} ; done
+  for line in "${rows[@]}" ; do
+    IFS=$'\t' read -ra f <<<"$line"
+    for i in 0 1 2 3 4 5 ; do
+      len=${#f[i]} ; (( len > w[i] )) && w[i]=$len
+    done
+  done
+
+  local sep="" ; for ((i=0; i<w[0]+w[1]+w[2]+w[3]+w[4]+w[5]+10; i++)) ; do sep+="─" ; done
+
+  printf "${CLR_B_CYAN}%-*s  %-*s  %*s  %*s  %*s  %s${ANSI_RESET}\n" \
+    "${w[0]}" "${hdr[0]}" "${w[1]}" "${hdr[1]}" "${w[2]}" "${hdr[2]}" \
+    "${w[3]}" "${hdr[3]}" "${w[4]}" "${hdr[4]}" "${hdr[5]}"
+  log "$sep"
+
+  local id name ctx pin pout flags free deprecated c_in c_id
+  for line in "${rows[@]}" ; do
+    IFS=$'\t' read -r id name ctx pin pout flags <<<"$line" || true
+    free=$([[ $flags == *F* ]] && echo 1 || echo 0)
+    deprecated=$([[ $flags == *D* ]] && echo 1 || echo 0)
+    pin=$([[ $pin == "-" || -z $pin ]] && echo "-" || printf '%g' "$pin")
+    pout=$([[ $pout == "-" || -z $pout ]] && echo "-" || printf '%g' "$pout")
+    c_in=$ANSI_RESET ; c_id=$ANSI_RESET
+    [[ $free == 1 ]] && c_in=$CLR_B_GREEN
+    [[ $deprecated == 1 ]] && c_id=$CLR_B_RED
+    printf "%b%-*s${ANSI_RESET}  %-*s  %*s  %b%*s${ANSI_RESET}  %*s  %s\n" \
+      "$c_id" "${w[0]}" "$id" "${w[1]}" "$name" "${w[2]}" "$ctx" \
+      "$c_in" "${w[3]}" "$pin" "${w[4]}" "$pout" "$flags"
+  done
+}
+
+# List provider models as table
+# FIXME: Use 'gum' table for better output.
+# URL: https://github.com/charmbracelet/gum#table
 list_provider_models() {
-  local models ; models=$(get_provider_models)
-  local total_models
+  local provider="${1:-$PROVIDER}" raw=false
+  [[ "${2:-}" == "--raw" ]] && raw=true
+  local models total_models
+
+  models=$(get_provider_models "$provider") || true
 
   if [[ -n $models ]]; then
-    total_models=$(jq -rc '(.data // .models // .) | length' <<<"$models")
-    log_brain "Gathered provider models:" ; log
-    jq . <<<"$models"
-    log ; log_info "Total models: $total_models" ; log
+    total_models=$(jq -rc '(if type == "object" then (.data // .models // [.]) else . end) | length' <<<"$models" 2>/dev/null)
+
+    if $raw; then
+      # Fallback: raw JSON dump (previous behavior, for scripts/agents).
+      log_brain "Gathered provider models:" ; log
+      jq . <<<"$models"
+    else
+      log_brain "Gathered provider models (${provider}):" ; log
+      if [[ $provider == "huggingface" ]]; then
+        # Downloads sort happens inside the jq filter (see normalize_provider_models).
+        normalize_provider_models "$provider" <<<"$models" | render_models_table
+        log ; log_info "Showing 50 most downloaded of ${total_models} models — use '--raw' for the full JSON."
+      else
+        normalize_provider_models "$provider" <<<"$models" | sort -t$'\t' -k1,1 | render_models_table
+        log ; log_info "Total models: $total_models"
+      fi
+      log
+      log "   Flags: V=vision R=reasoning T=tools F=free D=deprecated W=open-weights"
+      log "          U=uncensored I=image (venice non-text)"
+    fi
+    log
   else
     log_warn "Unable to retrieve provider models."
   fi
+}
+
+list_provider_balance() {
+  local p balance
+  local default_currency="USD"
+
+  log ; log "${CLR_B_CYAN}💰 Available balance per providers:${ANSI_RESET}"
+
+  for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG" 2>/dev/null); do
+    if has_provider_key "$p"; then
+      if [[ $p == "cyberneurova" ]]; then
+        currency="Tokens"
+      else
+        currency="$default_currency"
+      fi
+      balance=$(get_credit_balance "$p")
+      if [[ -n $balance && $balance != null ]]; then
+        if jq -en --arg balance "$balance" '$balance | tonumber | . > 0' >/dev/null 2>&1; then
+          log "  • $(to_upper "$p"): [ ${CLR_B_GREEN}🟢 ${balance} ${currency}${ANSI_RESET} ]"
+        else
+          log "  • $(to_upper "$p"): [ ${CLR_B_RED}🔴 ${balance} ${currency}${ANSI_RESET} ]"
+        fi
+      else
+        log "  • $(to_upper "$p"): [ ${CLR_B_YELLOW}🟠 N/A${ANSI_RESET} ]"
+      fi
+    fi
+  done
+  log
 }
 
 # -----------------------------------------------------------------------------
@@ -2328,10 +3001,11 @@ run_inference_loop() {
   if [[ "$tools_option" == "all" ]]; then
     tools_payload=$(<"$BASE_TOOLS")
   elif [[ "$tools_option" == "readonly" ]]; then
-    # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_shell_command)
-    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_shell_command"] | index($n) | not)]' "$BASE_TOOLS" 2>/dev/null)
+    # Exclude file modifications (write_file, edit_file, apply_diff) and local execution (exec_command)
+    tools_payload=$(jq -rc '[.[] | select(.function.name as $n | ["write_file", "edit_file", "apply_diff", "exec_command"] | index($n) | not)]' "$BASE_TOOLS" 2>/dev/null)
   fi
 
+  # Magic loop :P
   while true; do
     # Write payload messages to temp file for jq --rawfile
     printf "%s" "$payload_messages" > "$TEMP_PAYLOAD_MESSAGES"
@@ -2366,8 +3040,14 @@ run_inference_loop() {
       )
     fi
 
+    # Show dynamic spinner while waiting for network response
+    start_anim "dots" "${CLR_B_MAGENTA}${ICON_BRAIN} Thinking${ANSI_RESET}"
+
     # Handle received response
     raw_res=$(api_call "$payload")
+
+    # Stop spinner and clear line as soon as response arrives
+    stop_anim
 
     # Handle empty responses
     if [[ -z $raw_res || $raw_res == "null" ]]; then
@@ -2388,6 +3068,9 @@ run_inference_loop() {
     # Retrieve request usage
     usage=$(jq -rc '.usage' <<<"$raw_res" 2>/dev/null)
 
+    # Retrieve global cost object (useful for venice provider)
+    raw_cost=$(jq -rc '.cost.usd // .cost' <<<"$raw_res" 2>/dev/null)
+
     # Retrieve account balance
     balance=$(get_credit_balance)
 
@@ -2396,18 +3079,20 @@ run_inference_loop() {
     [[ -n $reasoning && ! $reasoning == "null" ]] && reasoning=$(strip_tag_from_display "$reasoning")
 
     # Handling model resolving
-    [[ -n $resolved_model && ! $resolved_model == "null" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
+    [[ -n $resolved_model && ! $resolved_model == "null" && ! $output_stream == "silent" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
     # Output thinking (reasoning) if present
-    if [[ -n $reasoning && ! $reasoning == "null" ]]; then
-      if [[ "$output_stream" == "stdout" ]]; then
-        show_thinking_header
-        echo "$reasoning" | render_markdown
-      else
-        {
+    if [[ $SHOW_THINKING == true ]]; then
+      if [[ -n $reasoning && ! $reasoning == "null" ]]; then
+        if [[ "$output_stream" == "stdout" ]]; then
           show_thinking_header
           echo "$reasoning" | render_markdown
-        } >&2
+        elif [[ "$output_stream" == "stderr" ]]; then
+          {
+            show_thinking_header
+            echo "$reasoning" | render_markdown
+          } >&2
+        fi
       fi
     fi
 
@@ -2416,7 +3101,7 @@ run_inference_loop() {
       if [[ "$output_stream" == "stdout" ]]; then
         show_ai_header
         echo "$refusal" | render_markdown
-      else
+      elif [[ "$output_stream" == "stderr" ]]; then
         {
           show_ai_header
           echo "$refusal" | render_markdown
@@ -2451,10 +3136,11 @@ run_inference_loop() {
 
       # 2. Extract and iterate over all requested parallel tools
       local tool_count=0
-      local -a detected_images=()
+      local -a detected_medias ; detected_medias=()
       while IFS= read -r -d '' tool_id && IFS= read -r -d '' tool_name && IFS= read -r -d '' tool_args; do
         ((tool_count++))
-        show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
+
+        [[ ! $output_stream == "silent" ]] && show_tool_header "$tool_count" "$tool_name" "$tool_args" >&2
 
         # 3. Check and execute tool handler
         # E2BIG (2026-09-12): the tool ARGUMENT JSON travels by STDIN, never by argv.
@@ -2475,15 +3161,19 @@ run_inference_loop() {
         # 5. Format and sanitize output to protect JSON/JQ
         iconv -f UTF-8 -t UTF-8 -c "$TOOLS_OUTPUT" > "${TOOLS_OUTPUT}.clean" 2>/dev/null && mv "${TOOLS_OUTPUT}.clean" "$TOOLS_OUTPUT"
 
-        # Accumulate generated images during this tool call
-        if [[ -r $TOOLS_OUTPUT ]]; then
-          while read -r img_p; do
-            if [[ -n $img_p && -r $img_p ]]; then
-              detected_images+=("$img_p")
+        # Accumulate generated media during this tool call
+        # DETECT_MODE drives the extension class: images (default) | videos | all | off
+        local detect_ext_re="png|jpg|jpeg|webp|gif"
+        case $DETECT_MODE in
+          videos) detect_ext_re="mp4|webm|mov|mpeg|mpg" ;;
+          all)    detect_ext_re="png|jpg|jpeg|webp|gif|mp4|webm|mov|mpeg|mpg" ;;
+        esac
+        if [[ -r $TOOLS_OUTPUT && -n $detect_ext_re ]]; then
+          while read -r media_p; do
+            if [[ -n $media_p && -r $media_p ]]; then
+              detected_medias+=("$media_p")
             fi
-          # done < <(jq -rc 'paths(scalars) as $p | getpath($p) | select(type=="string" and (endswith(".webp") or endswith(".svg") or endswith(".gif") or endswith(".png") or endswith(".jpg") or endswith(".jpeg")))' <(tail -n+5 "$TOOLS_OUTPUT") 2>/dev/null)
-          # done < <(grep -oE '[^[:space:]"]+\.(png|jpg|jpeg|webp|svg|gif)\b' "$TOOLS_OUTPUT" | sort -u)
-          done < <(grep -oE "[^[:space:]\"']+\.(png|jpg|jpeg|webp|svg|gif)\b" "$TOOLS_OUTPUT" | sort -u)
+          done < <(grep -oE "[^[:space:]\"']+\.(${detect_ext_re})\b" "$TOOLS_OUTPUT" | sort -u)
         fi
 
         # 6. Build the tool result message: TWO shapes, TWO destinations.
@@ -2500,36 +3190,43 @@ run_inference_loop() {
         rm -f "$TEMP_TOOLS_OUTPUT" "$TEMP_TOOLS_HISTORY"
       done < <(jq -j '.[] | .id, "\u0000", .name, "\u0000", .args, "\u0000"' <<<"$tools" 2>/dev/null)
 
-      # Inject visual feedback if any images were generated
+      # Inject visual feedback if any images or videos were generated
       # '$save_to_history' as been added to gate to avoid triggering the fallback sequence
       # during the heartbeat process (memory consolidation). During this process, '$save_to_history'
       # is set to 'false' instead of 'true' during normal chat process.
-      if [[ $save_to_history == "true" && (( ${#detected_images[@]} -gt 0 )) ]]; then
+      if [[ $save_to_history == "true" && (( ${#detected_medias[@]} -gt 0 )) ]]; then
         if [[ -n $FALLBACK_PROVIDER ]]; then
-          log_brain "Image detected. Calling fallback provider: ${CLR_B_YELLOW}${FALLBACK_PROVIDER}${ANSI_RESET}" ; log
+          log_brain "Media detected. Calling fallback provider: ${CLR_B_YELLOW}${FALLBACK_PROVIDER}${ANSI_RESET}" ; log
         fi
         if ! handle_vision_request; then
-          log_warn "Image cannot be processed without vision capability. Message aborted."
+          log_warn "Media cannot be processed without vision capability. Message aborted."
           return 1
         fi
         active_model="$VISION_MODEL"    # Set new model based on main provider or defined fallback provider
         log ; log_brain "Autonomous Multimodal Vision activated using: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
-        for img_path in "${detected_images[@]}"; do
-          local mime_type ; mime_type=$(get_image_type "$img_path")
-          local filename ; filename="${img_path##*/}"
-          (base64 -i -w0 "$img_path" 2>/dev/null || base64 -i "$img_path" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
+        # log ; log_brain "Autonomous Multimodal Vision activated.${ANSI_RESET}"
+        for media_path in "${detected_medias[@]}"; do
+          # Resolve media kind via get_mime_type: the mime tells image vs video,
+          local media_mime media_type
+          media_mime=$(get_mime_type "$media_path")
+          media_type="image_url"
+          [[ $media_mime == video/* ]] && media_type="video_url"
+          local filename ; filename="${media_path##*/}"
+          media_to_b64 "$media_path"
           log_brain "Visual feedback automatic feed: ${CLR_B_WHITE}${filename}${ANSI_RESET} injected."
 
-          # Inject encoded image directly into the active in-memory messages list
+          # Inject encoded media directly into the active in-memory messages list
+          # image -> image_url | video -> video_url (venice contract, cf. read_video)
           payload_messages=$(jq -rc \
             --arg msg "Autonomous visual feedback of generated asset (${filename}):" \
-            --arg mime "$mime_type" \
+            --arg mime "$media_mime" \
+            --arg mtype "$media_type" \
             --rawfile b64 "$TEMP_BASE64_OUTPUT" \
             '. + [{
               role: "user",
               content: [
                 {type: "text", text: $msg},
-                {type: "image_url", image_url: {url: ("data:" + $mime + ";base64," + $b64)}}
+                {type: $mtype, ($mtype): {url: ("data:" + $mime + ";base64," + $b64)}}
               ]
             }]' <<<"$payload_messages"
           )
@@ -2609,6 +3306,7 @@ run_inference_loop() {
         {
           echo ; draw_symmetric_header "SYSTEM METRICS" "${CLR_B_BLACK}" "${CLR_B_BLACK}"
           echo -e "${CLR_B_CYAN}Tokens Used:${ANSI_RESET} ${CLR_B_WHITE}${total_tok}${ANSI_RESET}  (Prompt: ${prompt_tok} | Cached: ${cached_tok} | Response: ${comp_tok} | Thinking: ${reasoning_tok})"
+          [[ -z $cost && -n $raw_cost && ! $raw_cost == "null" ]] && cost="$raw_cost USD"
           [[ -n $cost && ! "$cost" == "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           if [[ -n $balance && ! "$balance" == "null" ]]; then
             case $PROVIDER in
@@ -2658,21 +3356,21 @@ call_task_agent() {
     architect)
       case $BACKEND in
         ollama) active_model="$OLLAMA_ARCHITECT" ;;
-        llamacpp) active_model="$LLAMACPP_ARCHITECT" ;;
+        llamacpp) active_model="$LLAMA_CPP_ARCHITECT" ;;
         external) active_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
     coder)
       case $BACKEND in
         ollama) active_model="$OLLAMA_CODER" ;;
-        llamacpp) active_model="$LLAMACPP_CODER" ;;
+        llamacpp) active_model="$LLAMA_CPP_CODER" ;;
         external) active_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
     judge)
       case $BACKEND in
         ollama) active_model="$OLLAMA_JUDGE" ;;
-        llamacpp) active_model="$LLAMACPP_JUDGE" ;;
+        llamacpp) active_model="$LLAMA_CPP_JUDGE" ;;
         external) active_model="$PROVIDER_API_MODEL" ;;
       esac
     ;;
@@ -2709,7 +3407,7 @@ route_request() {
 
 render_markdown() {
   if command -v glow &>/dev/null; then
-    glow
+    glow -w "$(get_term_width)"
   else
     cat
   fi
@@ -2740,13 +3438,16 @@ clear_memory() {
 }
 
 consolidate_memory() {
-  log_brain "Initiating AUTONOMOUS CONSOLIDATION cycle (Subconscious State)..."
-
   local dynamic_system
   local messages_path="${DATA_STORE}/${MESSAGES_FILE}"
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
   local errors=0
+  local output="silent"
+
+  log_brain "Initiating AUTONOMOUS CONSOLIDATION cycle (Subconscious State)..."
+
+  [[ $DEBUG == true ]] && output="stdout"
 
   # Normalize on load: a poisoned history must never reach the wire (see normalize_history)
   [[ -r $messages_path ]] && ALL_MESSAGES=$(normalize_history "$(<"$messages_path")")
@@ -2771,17 +3472,13 @@ Take as many tool calls as you need. When you are fully done organizing and savi
   PAYLOAD_MESSAGES=$(jq -rc --rawfile sys "$TEMP_PAYLOAD_SYSTEM" '[{role: "system", content: $sys}] + .' <<<"$ALL_MESSAGES" 2>/dev/null)
 
   # Call the unified inference loop
-  run_inference_loop "$CHAT_MODEL" "$PAYLOAD_MESSAGES" "all" "true" "stdout" "false" "[CONSOLIDATION_COMPLETE]" "$ALL_MESSAGES" || \
+  run_inference_loop "$CHAT_MODEL" "$PAYLOAD_MESSAGES" "all" "true" "$output" "false" "[CONSOLIDATION_COMPLETE]" "$ALL_MESSAGES" || \
     errors=1
 
   # Prune main context: Keep only the system prompt + last 2 turns of the original conversation
   if [[ $errors -eq 0 ]]; then
-    log_brain "Pruning active messages log to release token pressure..."
+    log ; log_brain "Pruning active messages log to release token pressure..."
     if [[ -r $messages_path ]]; then
-      # bad
-      # jq -rc '.[-2:]' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
-
-      # good
       jq -rc '([.[].role] | reverse | index("user")) as $ri | if $ri then .[length - $ri - 1:] else [] end' "$messages_path" > "${messages_path}.tmp" 2>/dev/null || echo "[]" > "${messages_path}.tmp"
       mv -f "${messages_path}.tmp" "$messages_path"
     else
@@ -2789,7 +3486,7 @@ Take as many tool calls as you need. When you are fully done organizing and savi
     fi
     log_success "Main conversation context successfully refreshed!"
   else
-    log_warn "Unexpected error detected! Preserving conversation history."
+    log ; log_warn "Unexpected error detected! Preserving conversation history."
   fi
 }
 
@@ -2817,7 +3514,7 @@ send_message() {
   local dynamic_system
   local PAYLOAD_MESSAGES
   local ALL_MESSAGES="[]"
-  local timestamp
+  local timestamp target_desc
 
   # Self-healing security check
   [[ -z $AUTH_TAG ]] && set_auth_tag
@@ -2828,8 +3525,8 @@ send_message() {
   # Append generated tag
   local user_content="[AUTH:$AUTH_TAG] $prompt ($timestamp)"
 
-  # Reset 'IS_IMAGE' global var
-  [[ $IS_IMAGE == true ]] && IS_IMAGE=false
+  # Reset 'IS_MEDIA' global var
+  [[ $IS_MEDIA == true ]] && IS_MEDIA=false
 
   # Load messages file if already exist (normalized: protocol-neutral, self-healing)
   [[ -r $messages_path ]] && ALL_MESSAGES=$(normalize_history "$(<"$messages_path")")
@@ -2837,11 +3534,11 @@ send_message() {
 
   # Build user content for active payload (injecting loaded file context if present)
   if [[ -n $EXTERNAL_FILE_LOADED && -r $EXTERNAL_FILE_LOADED ]]; then
-    if is_image_file "$EXTERNAL_FILE_LOADED"; then
-      IS_IMAGE=true
-      local mime_type ; mime_type=$(get_image_type "$EXTERNAL_FILE_LOADED")
-      (base64 -i -w0 "$EXTERNAL_FILE_LOADED" 2>/dev/null || base64 -i "$EXTERNAL_FILE_LOADED" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
-      log_brain "Injecting active image in context: ${CLR_B_WHITE}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET} (${mime_type})"
+    if is_image_file "$EXTERNAL_FILE_LOADED" || is_video_file "$EXTERNAL_FILE_LOADED"; then
+      IS_MEDIA=true
+      local mime_type ; mime_type=$(get_mime_type "$EXTERNAL_FILE_LOADED")
+      media_to_b64 "$EXTERNAL_FILE_LOADED"
+      log_brain "Injecting active media in context: ${CLR_B_WHITE}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET} (${mime_type})"
       unset EXTERNAL_FILE_LOADED    # Remove this line if it creates issue and rely on the '/unload' command to remove the injected file
     else
       log_brain "Injecting active file in context: ${CLR_B_WHITE}${EXTERNAL_FILE_LOADED##*/}${ANSI_RESET}"
@@ -2857,9 +3554,9 @@ send_message() {
   # Define the model to use for this request (auto-switch to vision model if image loaded)
   local active_model="$CHAT_MODEL"
 
-  if [[ $IS_IMAGE == true ]]; then
+  if [[ $IS_MEDIA == true ]]; then
     if ! handle_vision_request; then
-      log_warn "Image cannot be processed without vision capability. Message aborted."
+      log_warn "Media cannot be processed without vision capability. Message aborted."
       return 1
     fi
     active_model="$VISION_MODEL"    # Set new model based on main provider or defined fallback provider
@@ -2873,17 +3570,20 @@ send_message() {
   # E2BIG (2026-09-12): the user turn can carry a whole attached FILE. --arg is capped at
   # 128 KB (MAX_ARG_STRLEN) ⇒ beyond that jq died and the turn went out EMPTY. Stage the
   # text in a FILE and read it back with --rawfile (same idiom as TEMP_MEMORY_USER below).
-  if [[ $IS_IMAGE == true ]]; then
+  if [[ $IS_MEDIA == true ]]; then
+    local media_type="image_url"
+    [[ $mime_type == video/* ]] && media_type="video_url"
     printf '%s' "$prompt" > "$TEMP_PAYLOAD_USER"
     PAYLOAD_MESSAGES=$(jq -rc \
       --rawfile prompt "$TEMP_PAYLOAD_USER" \
       --arg mime "$mime_type" \
+      --arg mtype "$media_type" \
       --rawfile b64 "$TEMP_BASE64_OUTPUT" \
       '. + [{
         role: "user",
         content: [
           {type: "text", text: $prompt},
-          {type: "image_url", image_url: {url: ("data:" + $mime + ";base64," + $b64)}}
+          {type: $mtype, ($mtype): {url: ("data:" + $mime + ";base64," + $b64)}}
         ]
       }]' <<<"$ALL_MESSAGES"
     )
@@ -2905,13 +3605,15 @@ send_message() {
   # Ensure data writing consistency
   persist_history "$ALL_MESSAGES" "$messages_path"
 
+  # New status message display code
   if [[ $BACKEND == "ollama" ]]; then
-    log_debug "Sending query chunk to local Ollama backend (Model: ${active_model##*/})...\n"
+    target_desc="local Ollama (${active_model##*/})"
   elif [[ $BACKEND == "llamacpp" ]]; then
-    log_debug "Sending query chunk to local llama.cpp backend (Model: ${active_model##*/})...\n"
+    target_desc="local llama.cpp (${active_model##*/})"
   else
-    log_debug "Sending query chunk to external $PROVIDER backend (Model: $active_model)...\n"
+    target_desc="provider ${PROVIDER} (${active_model})"
   fi
+  log "\n${CLR_B_CYAN}${ICON_SEND} Sending query to ${target_desc}...${ANSI_RESET}"
 
   # Call the unified inference loop
   run_inference_loop "$active_model" "$PAYLOAD_MESSAGES" "all" "true" "stdout" "true" "" "$ALL_MESSAGES"
@@ -2919,15 +3621,20 @@ send_message() {
   # Restore original provider if a vision fallback was used
   restore_temp_state
 
-  # Reset 'IS_IMAGE' global var before heartbeat gets triggered
-  [[ $IS_IMAGE == true ]] && IS_IMAGE=false
+  # Reset 'IS_MEDIA' global var before heartbeat gets triggered
+  [[ $IS_MEDIA == true ]] && IS_MEDIA=false
 
   # Trigger memory consolidation when necessary
   check_and_trigger_heartbeat
 }
 
+# -----------------------------------------------------------------------------
+# Local Servers Layer
+# -----------------------------------------------------------------------------
+
 serve() {
   set_console_title "${SCRIPT_FILE}: Server Mode."
+  # TODO: Add 'whisper' mode
   case $SERVER_MODE in
     ollama)
       log_info "Starting Ollama Server..."
@@ -2945,10 +3652,10 @@ serve() {
     llamacpp)
       log_info "Starting High-Performance llama.cpp Server..."
       log_info "Settings automatically customized & optimized for resource-light devices.\n"
-      local opt_args=()
+      local -a opt_args ; opt_args=()
       [[ -n $LISTEN_HOST ]] && opt_args+=("--host" "$LISTEN_HOST")
       [[ -n $LISTEN_PORT ]] && opt_args+=("--port" "$LISTEN_PORT")
-      LLAMA_CACHE="$LLAMACPP_CACHE" \
+      LLAMA_CACHE="$LLAMA_CPP_CACHE" \
       llama-server \
         "${opt_args[@]}" \
         --models-max 1 \
@@ -2964,6 +3671,19 @@ serve() {
         -ctk "$QUANTIZATION" \
         -ctv "$QUANTIZATION" \
         --timeout "$MAX_TIMEOUT"
+    ;;
+    whispercpp)
+      log_info "Starting High-Performance whisper.cpp Server..."
+      log_info "Settings automatically customized & optimized for resource-light devices.\n"
+      local -a opt_args ; opt_args=()
+      [[ -n $LISTEN_HOST ]] && opt_args+=("--host" "$LISTEN_HOST")
+      [[ -n $LISTEN_PORT ]] && opt_args+=("--port" "$LISTEN_PORT")
+      whisper-server \
+        "${opt_args[@]}" \
+        -m "${WHISPER_CPP_MODEL}" \
+        -mc "$MAX_CONTEXT" \
+        -t "$MAX_CORES" \
+        -l "auto"
     ;;
     web)
       log_info "Starting local PHP Server...\n"
@@ -3230,55 +3950,287 @@ run_one_shot_pipeline() {
   fi
 }
 
+run_agent() {
+  local jarnet_bin="$NET_HANDLER"
+  local wait_time=10                  # Waiting time before running the watch loop in seconds
+  local poll_interval=3               # Watch poll interval in seconds
+  local consolidation_interval=1800   # Consolidate memory every 30 minutes
+  local last_consolidation ; last_consolidation=$(date +%s)
+  local user_input=""
+
+  set_console_title "${SCRIPT_FILE}: Autonomous Agent Mode (JarNet & Memory)."
+
+  log
+  log "${CLR_B_CYAN}══════════════════════════════════════════════════════════════════════${ANSI_RESET}"
+  log "${CLR_B_GREEN}${ICON_AI} $AI_NAME — Autonomous Mode Active${ANSI_RESET}"
+  log "${CLR_DIM}• Listenning on P2P JarNet (autonomous responses to peers)${ANSI_RESET}"
+  log "${CLR_DIM}• Background memory maintainance & consolidation${ANSI_RESET}"
+  log "${CLR_DIM}• Press ${CLR_B_YELLOW}[Enter]${CLR_DIM} or ${CLR_B_YELLOW}[c]${CLR_DIM} to take control back (Chat Mode)${ANSI_RESET}"
+  log "${CLR_DIM}• Press ${CLR_B_RED}[q]${CLR_DIM} to quit.${ANSI_RESET}"
+  log "${CLR_B_CYAN}══════════════════════════════════════════════════════════════════════${ANSI_RESET}"
+  log
+
+  # 1. Check / Start JarNet transport stack
+  if [[ -x "$jarnet_bin" ]]; then
+    log_info "Checking JarNet service..."
+    # 'up' makes sure that hidden service Tor and local listener are active
+    "$jarnet_bin" up &>/dev/null
+
+    # Get hidden service address and onboarding token
+    local who_json ; who_json=$("$jarnet_bin" who 2>/dev/null)
+    local my_addr ; my_addr=$(jq -r '.onion // empty' <<< "$who_json" 2>/dev/null)
+    local my_onboarding ; my_onboarding=$(jq -r '.share // empty' <<< "$who_json" 2>/dev/null)
+
+    # Show hidden service address and onboarding token
+    if [[ -n $my_addr ]]; then
+      log_success "JarNet online: ${CLR_B_YELLOW}${my_addr}.onion${ANSI_RESET}"
+      log_info "Onboarding token: ${ANSI_BOLD}${CLR_B_WHITE}${my_onboarding}${ANSI_RESET} (copy/paste to peer)"
+    else
+      log_warn "JarNet offline: Please run './${PLUG_DIR##*/}/${jarnet_bin##*/} doctor' to find out why."
+      return 1
+    fi
+  else
+    log_warn "Plugin JarNet not found (${jarnet_bin}), P2P listening disabled."
+    return 1
+  fi
+
+  log_info "Starting JarNet watch mode in $wait_time seconds..."
+  log_info "Press [q] to stop once started."
+  sleep $wait_time
+  log_step "Watch mode... (waiting for events)"
+
+  # 2. Main watch loop
+  while true; do
+    # non-blocking keyboard listening: wait $poll_interval seconds max
+    # -s: silent, -n 1: 1 character, -t: timeout
+    read -r -s -n 1 -t "$poll_interval" user_input 2>/dev/null
+    local read_status=$?
+
+    # If human press on a key (status 0)
+    if [[ $read_status -eq 0 ]]; then
+      case "$user_input" in
+        "q"|"Q")
+          log ; log_info "Stop requested by Human. Leaving..."
+          RUN_MODE="chat"
+          set_state
+          exit 0
+        ;;
+        *)
+          # Any other keys (Enter, c, Space, etc.) go back to Chat Mode
+          log ; log_step "Human is back to the game. Return to Chat Mode..."
+          RUN_MODE="chat"
+          set_state
+          return 0
+        ;;
+      esac
+    fi
+
+    # -------------------------------------------------------------------------
+    # Task A: Watching for messages coming from JarNet
+    # -------------------------------------------------------------------------
+    if [[ -x "$jarnet_bin" ]]; then
+      local inbox_json ; inbox_json=$("$jarnet_bin" check 2>/dev/null)
+      local new_count ; new_count=$(jq -r '.new // 0' <<< "$inbox_json" 2>/dev/null)
+
+      if (( new_count > 0 )); then
+        log_info "${ICON_MAIL} JarNet: ${CLR_B_GREEN}${new_count}${ANSI_RESET} new message(s) received!"
+
+        # Handling received message
+        local i=0
+        while (( i < new_count )); do
+          local peer_from peer_sid peer_reply_to peer_mid peer_ts peer_body
+          local msg_json ; msg_json=$(jq -c ".messages[$i]" <<< "$inbox_json" 2>/dev/null)
+          peer_from=$(jq -r '.envelope.from // "unknown"' <<< "$msg_json" 2>/dev/null)
+          peer_sid=$(jq -r '.envelope.sid // empty' <<< "$msg_json" 2>/dev/null)
+          peer_reply_to=$(jq -r '.envelope.reply_to // empty' <<< "$msg_json" 2>/dev/null)
+          peer_mid=$(jq -r '.envelope.mid // empty' <<< "$msg_json" 2>/dev/null)
+          peer_ts=$(jq -r '.envelope.ts // empty' <<< "$msg_json" 2>/dev/null)
+          peer_body=$(jq -r '.envelope.body // empty' <<< "$msg_json" 2>/dev/null)
+
+          log_step "Message from [${CLR_B_CYAN}${peer_from}${ANSI_RESET}] (SID: ${peer_sid:-none}) :"
+          echo -e "${CLR_DIM}> ${peer_body}${ANSI_RESET}\n"
+
+          # ANTI-LOOP GUARD (Golden rule for 'auto' mode) :
+          # NEVER reply automatically to a message generated by a bot / auto-reply
+          if [[ "$peer_body" =~ ^\[AUTO\] || "$peer_body" =~ ^\[BOT\] ]]; then
+            log_warn "Anti-loop Guard: message identified as automatic. No reply generated."
+          elif [[ -n "$peer_reply_to" || -n "$peer_sid" ]]; then
+            log_info "Generating autonomous response for ${peer_from}..."
+
+            # Build LLM prompt
+            local agent_prompt="You are ${AI_NAME} in autonomous mode. You just received this message on JarNet from peer '${peer_from}':\n\n\`\`\`\n${peer_body}\n\`\`\`\n\nReply it politely, concise and pertinently while indicating if necessary that you're replying in autonomous mode."
+
+            # Run inference via pipeline primitives
+            # Note: using run_inference_loop or send_message
+            local reply_output
+            # Generating response via active model
+            printf "%s" "$agent_prompt" > "$TEMP_MEMORY_USER"
+            local payload_msg ; payload_msg=$(jq -rc -n --rawfile u "$TEMP_MEMORY_USER" '[{role: "user", content: $u}]')
+
+            # LLM Call (capture the text response)
+            reply_output=$(run_inference_loop "$CHAT_MODEL" "$payload_msg" "none" "false" "stderr" "false" "" "$payload_msg" 2>/dev/null)
+
+            # Clean up and mark as [AUTO]
+            local clean_reply ; clean_reply="[AUTO] $(grep -v '^\[.*\]' <<< "$reply_output" | sed '/^[[:space:]]*$/d' | tail -n 20)"
+
+            if [[ -n "$clean_reply" && "$clean_reply" != "[AUTO] " ]]; then
+              log_info "Sending response on JarNet to ${peer_from}..."
+              # Using jarnet.sh reply
+              "$jarnet_bin" reply "$peer_sid" "$peer_reply_to" "$clean_reply" "$peer_ts" &>/dev/null
+              log_success "Response sent!"
+            fi
+          fi
+          (( i++ ))
+        done
+      fi
+    fi
+
+    # -------------------------------------------------------------------------
+    # Task B: Maintain & Consolidate Memory periodically
+    # -------------------------------------------------------------------------
+    local now ; now=$(date +%s)
+    if (( now - last_consolidation >= consolidation_interval )); then
+      log_info "Running memory consolidation process..."
+      if declare -f check_and_trigger_heartbeat &>/dev/null; then
+        check_and_trigger_heartbeat
+      fi
+      last_consolidation=$now
+      log_success "Memory consolidation process finished."
+    fi
+  done
+}
+
+# -----------------------------------------------------------------------------
+# JarNet Init
+# -----------------------------------------------------------------------------
+
+jarnet_start() {
+  local jarnet_bin="$NET_HANDLER"
+
+  # Check / Start JarNet transport stack
+  if [[ -x "$jarnet_bin" ]]; then
+    log_info "Checking JarNet service..."
+    # 'up' makes sure that hidden service Tor and local listener are active
+    "$jarnet_bin" up &>/dev/null
+
+    # Get hidden service address and onboarding token
+    local who_json ; who_json=$("$jarnet_bin" who 2>/dev/null)
+    local my_addr ; my_addr=$(jq -r '.onion // empty' <<< "$who_json" 2>/dev/null)
+    local my_onboarding ; my_onboarding=$(jq -r '.share // empty' <<< "$who_json" 2>/dev/null)
+
+    # Show hidden service address and onboarding token
+    if [[ -n $my_addr ]]; then
+      log_success "JarNet online: ${CLR_B_YELLOW}${my_addr}.onion${ANSI_RESET}"
+      log_info "Onboarding token: ${ANSI_BOLD}${CLR_B_WHITE}${my_onboarding}${ANSI_RESET} (copy/paste to peer)"
+    else
+      log_warn "JarNet offline: Please run './${PLUG_DIR##*/}/${jarnet_bin##*/} doctor' to find out why."
+      return 1
+    fi
+  else
+    log_warn "Plugin JarNet not found (${jarnet_bin}), P2P listening disabled."
+    return 1
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Initializing
+# -----------------------------------------------------------------------------
+
+# Check required dependencies
+check_deps
+
+# Load required libraries
+load_libs
+
+# Load config
+load_config_file
+
+# Set terminal dimensions
+set_term_width
+
+# -----------------------------------------------------------------------------
+# Public Functions
+# -----------------------------------------------------------------------------
+
 print_help() {
   # Get all supported providers
   local ALL_PROVIDERS ; ALL_PROVIDERS=$(get_all_providers)
 
-  # Get term with before rendering help screen
-  set_term_width
+  # Format providers list cleanly wrapped to terminal width (with 2 spaces indent)
+  local FOLD_WIDTH ; FOLD_WIDTH=$(($(get_term_width) > 80 ? 76 : $(get_term_width) - 6))
+  local PROVIDERS_LIST ; PROVIDERS_LIST=$(echo "$ALL_PROVIDERS" | fold -s -w "$FOLD_WIDTH" | sed -e 's/[[:space:]]*$//' -e 's/^/  /')
 
   show_banner
   cat <<EOF
 ${ANSI_BOLD}${CLR_B_CYAN}USAGE:${ANSI_RESET}
   $SCRIPT_FILE [options] [commands] [prompt] [file1] [file2]
 
+${ANSI_BOLD}${CLR_B_YELLOW}SUPPORTED PROVIDERS:${ANSI_RESET}
+${CLR_B_WHITE}${PROVIDERS_LIST}${ANSI_RESET}
+
 ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}-h, --help${ANSI_RESET}                 Show this help screen and exit
   ${CLR_B_GREEN}-l, --listen <host:port>${ANSI_RESET}   Set Ollama / llama.cpp server <host:port>
+  ${CLR_B_GREEN}--no-jarnet${ANSI_RESET}                Disable automatic JarNet service starting
+  ${CLR_B_GREEN}--no-tor${ANSI_RESET}                   Disable forced Tor network routing
+  ${CLR_B_GREEN}--lang <code>${ANSI_RESET}              Set AI audio language (fr,en,de,it,etc...)
+  ${CLR_B_GREEN}--detect <type>${ANSI_RESET}            Set AI automatic media detection (images, videos, all, off)
   ${CLR_B_GREEN}--backend <type>${ANSI_RESET}           Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}--provider <name>${ANSI_RESET}          Set AI external provider (${ALL_PROVIDERS})
-  ${CLR_B_GREEN}--image <provider>${ANSI_RESET}         Set AI image creation provider (${ALL_PROVIDERS})
-  ${CLR_B_GREEN}--fallback <provider>${ANSI_RESET}      Set AI fallback provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}--provider <name>${ANSI_RESET}          Set AI external provider
+  ${CLR_B_GREEN}--fallback <provider>${ANSI_RESET}      Set AI fallback provider
+  ${CLR_B_GREEN}--image <provider>${ANSI_RESET}         Set AI image engine provider
+  ${CLR_B_GREEN}--video <provider>${ANSI_RESET}         Set AI video engine provider
+  ${CLR_B_GREEN}--voice <provider>${ANSI_RESET}         Set AI voice engine provider
+  ${CLR_B_GREEN}--speech <provider>${ANSI_RESET}        Set AI speech engine provider
   ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
+  ${CLR_B_GREEN}--thinking <boolean>${ANSI_RESET}       Set AI model reasoning display
   ${CLR_B_GREEN}--effort <level>${ANSI_RESET}           Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}--memory <type>${ANSI_RESET}            Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
-  ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, web)
+  ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, whispercpp, web)
+  ${CLR_B_GREEN}--launch <app> [path]${ANSI_RESET}      Start given application with existing backend / provider
+  ${CLR_B_GREEN}--auto${ANSI_RESET}                     Start non-interactive mode for Agent-2-Agent communications
   ${CLR_B_GREEN}--chat${ANSI_RESET}                     Start interactive conversational chat mode
   ${CLR_B_GREEN}--multi${ANSI_RESET}                    Start complex multi-agent analysis pipeline
   ${CLR_B_GREEN}--simple${ANSI_RESET}                   Start lightweight single-agent inference pipeline
+  ${CLR_B_GREEN}--balance${ANSI_RESET}                  List available balance per configured providers
+  ${CLR_B_GREEN}--models${ANSI_RESET}                   List models supported by current active provider
   ${CLR_B_GREEN}--clear${ANSI_RESET}                    Wipe conversational memory and dynamic session logs
   ${CLR_B_GREEN}--commit${ANSI_RESET}                   Force cognitive state / memory consolidation to disk
   ${CLR_B_GREEN}--zdr${ANSI_RESET}                      Force ZDR policy to be applied on external providers
-  ${CLR_B_GREEN}--keys, --init${ANSI_RESET}            Configure and manage encrypted cloud provider API keys
+  ${CLR_B_GREEN}--keys, --init${ANSI_RESET}             Configure and manage encrypted cloud provider API keys
+  ${CLR_B_GREEN}--migrate [--apply]${ANSI_RESET}        Migrate master key file to new format
 
 ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}help${ANSI_RESET}                       Show this help screen and exit
   ${CLR_B_GREEN}listen <host:port>${ANSI_RESET}         Set Ollama / llama.cpp server <host:port>
+  ${CLR_B_GREEN}no-jarnet${ANSI_RESET}                  Disable automatic JarNet service starting
+  ${CLR_B_GREEN}no-tor${ANSI_RESET}                     Disable forced Tor network routing
+  ${CLR_B_GREEN}lang <code>${ANSI_RESET}                Set AI audio language (fr,en,de,it,etc...)
+  ${CLR_B_GREEN}detect <type>${ANSI_RESET}              Set AI automatic media detection (images, videos, all, off)
   ${CLR_B_GREEN}backend <type>${ANSI_RESET}             Set AI backend (ollama, llamacpp, external)
-  ${CLR_B_GREEN}provider <name>${ANSI_RESET}            Set AI external provider (${ALL_PROVIDERS})
-  ${CLR_B_GREEN}image <provider>${ANSI_RESET}           Set AI image creation provider (${ALL_PROVIDERS})
-  ${CLR_B_GREEN}fallback <provider>${ANSI_RESET}        Set AI fallback provider (${ALL_PROVIDERS})
+  ${CLR_B_GREEN}provider <name>${ANSI_RESET}            Set AI external provider
+  ${CLR_B_GREEN}fallback <provider>${ANSI_RESET}        Set AI fallback provider
+  ${CLR_B_GREEN}image <provider>${ANSI_RESET}           Set AI image engine provider
+  ${CLR_B_GREEN}video <provider>${ANSI_RESET}           Set AI video engine provider
+  ${CLR_B_GREEN}voice <provider>${ANSI_RESET}           Set AI voice engine provider
+  ${CLR_B_GREEN}speech <provider>${ANSI_RESET}          Set AI speech engine provider
   ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
+  ${CLR_B_GREEN}thinking <boolean>${ANSI_RESET}         Set AI model reasoning display
   ${CLR_B_GREEN}effort <level>${ANSI_RESET}             Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}memory <type>${ANSI_RESET}              Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
-  ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server
+  ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server (ollama, llamacpp, whispercpp, web)
+  ${CLR_B_GREEN}launch <app> [path]${ANSI_RESET}        Start given application with existing backend / provider
+  ${CLR_B_GREEN}auto${ANSI_RESET}                       Start non-interactive mode for Agent-2-Agent communications
   ${CLR_B_GREEN}chat${ANSI_RESET}                       Start interactive conversational chat mode
   ${CLR_B_GREEN}multi${ANSI_RESET}                      Start complex multi-agent analysis pipeline
   ${CLR_B_GREEN}simple${ANSI_RESET}                     Start lightweight single-agent inference pipeline
+  ${CLR_B_GREEN}balance${ANSI_RESET}                    List available balance per configured providers
+  ${CLR_B_GREEN}models${ANSI_RESET}                     List models supported by current active provider
   ${CLR_B_GREEN}clear${ANSI_RESET}                      Wipe conversational memory
   ${CLR_B_GREEN}commit${ANSI_RESET}                     Force dynamic session memory consolidation
   ${CLR_B_GREEN}zdr${ANSI_RESET}                        Force ZDR policy to be applied on external providers
   ${CLR_B_GREEN}keys, init${ANSI_RESET}                 Configure and manage encrypted API keys
+  ${CLR_B_GREEN}migrate [--apply]${ANSI_RESET}          Migrate master key file to new format
 EOF
   echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
   exit 0
@@ -3287,34 +4239,59 @@ EOF
 print_usage() {
   echo -e "\n${CLR_B_RED}${ICON_ERROR} Error: No arguments provided.${ANSI_RESET}"
   echo -e "${CLR_B_WHITE}Usage:${ANSI_RESET} $SCRIPT_FILE <prompt> <input-file-1> <input-file-2>"
-  echo -e "  • For conversational chat:  ${CLR_B_GREEN}--chat${ANSI_RESET}"
-  echo -e "  • To clear cached memory:   ${CLR_B_GREEN}--clear${ANSI_RESET}"
-  echo -e "  • To consolidate context:   ${CLR_B_GREEN}--commit${ANSI_RESET}\n"
+  echo -e "  • For Agent-2-Agent mode:   ${CLR_B_GREEN}auto/--auto${ANSI_RESET}"
+  echo -e "  • For conversational chat:  ${CLR_B_GREEN}chat/--chat${ANSI_RESET}"
+  echo -e "  • To clear cached memory:   ${CLR_B_GREEN}clear/--clear${ANSI_RESET}"
+  echo -e "  • To consolidate context:   ${CLR_B_GREEN}commit/--commit${ANSI_RESET}\n"
   exit 1
 }
 
-# Parse CLI flags helper
-parse_cli_flags() {
+# -----------------------------------------------------------------------------
+# System Functions
+# -----------------------------------------------------------------------------
+
+# Parse CLI arguments
+parse_cli_args() {
   while [[ $# -ne 0 ]]; do
     case $1 in
       -h|--help|help) print_help ;;
       --keys|keys|--init|init)
         init_key_chest
+        if [[ "${2:-}" == "migrate" ]]; then
+          migrate_key_chest "${3:-}"
+          exit $?
+        fi
         manage_keys
         exit 0
       ;;
+      --migrate|migrate)
+        init_key_chest
+        migrate_key_chest "${2:-}"
+        exit $?
+      ;;
       -l|--listen|listen) LISTEN_ADDR_PORT="${2:-}"; shift 2 ;;
+      --no-jarnet|no-jarnet) START_JARNET=false ; shift ;;
+      --no-tor|no-tor) USE_TOR=false ; shift ;;
       --zdr|zdr) ZDR_ENFORCED=true ; shift ;;
       --clear|clear) clear_memory ; exit 0 ;;
       --launch|launch) launch_ext_app "$2" "$3" ; exit $? ;;
       --commit|commit) check_and_trigger_heartbeat "true" ; exit 0 ;;
+      --balance|balance) list_provider_balance ; exit 0 ;;
+      --models|models) list_provider_models "$2" "$3" ; exit 0 ;;
+      --lang|lang) AUDIO_LANG="${2:-}" ; shift 2 ;;
       --backend|backend) BACKEND="${2:-}" ; shift 2 ;;
       --provider|provider) PROVIDER="${2:-}" ; shift 2 ;;
-      --image|image) IMAGE_PROVIDER="${2:-}" ; shift 2 ;;
       --fallback|fallback) FALLBACK_PROVIDER="${2:-}" ; shift 2 ;;
+      --image|image) IMAGE_PROVIDER="${2:-}" ; shift 2 ;;
+      --video|video) VIDEO_PROVIDER="${2:-}" ; shift 2 ;;
+      --voice|voice) VOICE_PROVIDER="${2:-}" ; shift 2 ;;
+      --speech|speech) SPEECH_PROVIDER="${2:-}" ; shift 2 ;;
       --model|model) USER_MODEL="${2:-}" ; shift 2 ;;
+      --thinking|thinking) SHOW_THINKING="${2:-}" ; shift 2 ;;
       --effort|effort) REASONING_EFFORT="${2:-}" ; shift 2 ;;
       --memory|memory) MEMORY_STRUCTURE_TYPE="${2:-}" ; shift 2 ;;
+      --detect|detect) DETECT_MODE="${2:-}" ; shift 2 ;;
+      --auto|auto) RUN_MODE="auto" ; shift ;;
       --chat|chat) RUN_MODE="chat" ; shift ;;
       --multi|multi) RUN_MODE="multi" ; shift ;;
       --simple|simple) RUN_MODE="simple" ; shift ;;
@@ -3322,6 +4299,32 @@ parse_cli_flags() {
         RUN_MODE="server" ; shift
         SERVER_MODE="$1" ; shift
         [[ ! $SERVER_MODE == "web" ]] && BACKEND="$SERVER_MODE"
+      ;;
+      --thc|thc)
+        log
+        cat <<EOF
+         _____ _   _  ____
+        |_   _| | | |/ ___|
+          | | | |_| | |
+          | | |  _  | |___
+          |_| |_| |_|\____|
+
+EOF
+        log "-= The Hacker's Choice since 1995 =-"
+        log
+        log "Greetings to my friends from the THC group!"
+        log
+        log "Skyper, 0xD1G, Saber, Messede, NumeX, Extencil, CB, Matthew, Sam Lowry"
+        log
+        log "And to other legends like:"
+        log
+        log "Van Hauser, Fyodor, TMZ and all others from Phrack"
+        log
+        log "You guys rocks! \m/"
+        log
+        log "Thanks you so much for your support and for the fun in the group!"
+        log
+        exit 0
       ;;
       *) break ;;
     esac
@@ -3331,6 +4334,7 @@ parse_cli_flags() {
   INPUT_FILE2="$3"
 }
 
+# Initialize pipeline core
 init_core() {
   local quant_upper ; quant_upper=$(to_upper "$QUANTIZATION")
 
@@ -3353,16 +4357,12 @@ init_core() {
     PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
   fi
 
-  # Check required dependencies
-  check_deps
-
   # Create required folders
   create_local_model_cache
   create_local_data_store
 
   # Setup core
   set_console_title "${SCRIPT_FILE}: Initializing..."
-  load_config_file
   set_listen_interface
   set_keep_alive
   set_cpu_cores
@@ -3387,15 +4387,16 @@ init_core() {
 
   [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
 
+  # Disable Tor explicitely for Groq (They hates it the vilains lol)
   if [[ $BACKEND == "external" && $PROVIDER == "groq" ]]; then
     USE_TOR=false
     log_warn "Tor privacy tunnel disabled for Groq."
   fi
 
-  if [[ $BACKEND == "external" && $USE_TOR == true ]]; then
-    handle_tor
-  fi
+  # Call Tor network handler
+  [[ $USE_TOR == true ]] && handle_tor
 
+  # Load API keys only for external backend
   if [[ $BACKEND == "external" ]]; then
     # Try loading from the encrypted key chest first
     load_provider_key
@@ -3448,25 +4449,25 @@ init_core() {
         # Downloading models for llama.cpp
         log_info "Preloading required local models for llama.cpp server..."
         log_info "Preloading '${CHAT_MODEL}'..."
-        LLAMA_CACHE="$LLAMACPP_CACHE" \
+        LLAMA_CACHE="$LLAMA_CPP_CACHE" \
         llama-cli -hf "${CHAT_MODEL}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
         log_info "Preloading '${VISION_MODEL}'..."
-        LLAMA_CACHE="$LLAMACPP_CACHE" \
+        LLAMA_CACHE="$LLAMA_CPP_CACHE" \
         llama-cli -hf "${VISION_MODEL}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
-        log_info "Preloading '${LLAMACPP_ROUTER}:${quant_upper}'..."
-        LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_ROUTER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
-        log_info "Preloading '${LLAMACPP_ARCHITECT}:${quant_upper}'..."
-        LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_ARCHITECT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
-        log_info "Preloading '${LLAMACPP_CODER}:${quant_upper}'..."
-        LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_CODER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
-        log_info "Preloading '${LLAMACPP_JUDGE}:${quant_upper}'..."
-        LLAMA_CACHE="$LLAMACPP_CACHE" \
-        llama-cli -hf "${LLAMACPP_JUDGE}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMA_CPP_ROUTER}:${quant_upper}'..."
+        LLAMA_CACHE="$LLAMA_CPP_CACHE" \
+        llama-cli -hf "${LLAMA_CPP_ROUTER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMA_CPP_ARCHITECT}:${quant_upper}'..."
+        LLAMA_CACHE="$LLAMA_CPP_CACHE" \
+        llama-cli -hf "${LLAMA_CPP_ARCHITECT}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMA_CPP_CODER}:${quant_upper}'..."
+        LLAMA_CACHE="$LLAMA_CPP_CACHE" \
+        llama-cli -hf "${LLAMA_CPP_CODER}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
+        log_info "Preloading '${LLAMA_CPP_JUDGE}:${quant_upper}'..."
+        LLAMA_CACHE="$LLAMA_CPP_CACHE" \
+        llama-cli -hf "${LLAMA_CPP_JUDGE}:${quant_upper}" -c $MIN_CONTEXT --simple-io --no-warmup -st -n 1 -p hello &>/dev/null ; sleep 1
         log_debug "Reloading llama.cpp GGUF models cache..."
-        curl -sSL "${LLAMACPP_API_SRV}/models?reload=1" &>/dev/null || error "Failed to reload llama.cpp GGUF models cache."
+        curl -sSL "${LLAMA_CPP_API_SRV}/models?reload=1" &>/dev/null || error "Failed to reload llama.cpp GGUF models cache."
         log ; log_success "All required local llama.cpp models preloaded successfully."
       ;;
     esac
@@ -3478,10 +4479,17 @@ init_core() {
 # -----------------------------------------------------------------------------
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  parse_cli_flags "$@"
+  # Parse received flags
+  parse_cli_args "$@"
+
+  # Self-explanatory :P
   init_core
+
+  # Mode selector
   if [[ $RUN_MODE == "server" ]]; then
     serve
+  elif [[ $RUN_MODE == "auto" ]]; then
+    run_agent
   else
     run_one_shot_pipeline
   fi

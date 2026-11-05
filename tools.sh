@@ -1,49 +1,66 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2001
+# shellcheck shell=bash disable=SC2001
 # ==============================================================================
-# tools.sh — Master Local Agent Tools Dispatcher
+# tools.sh — Model tool-call validator and local dispatcher
 # ==============================================================================
-# Bridges model-declared JSON schemas to real host actions. Enforces strict
-# path-bound checks, zero-fork parsing, and local execution safety limits.
+# Validates model-declared tool calls against the active JSON schemas and
+# dispatches them to local handlers with path and execution safeguards.
 #
-# Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (DeepSeek)
-#
-# Version: 0.7.0 (create_image: autonomous image generation via image.sh)
+# Author: Jiab77
+# Collaborator: Jarvis
+# Version: 0.8.0
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
 #   [BUG]  write_file: echo -n → printf '%s' (content starting with -n/-e was mangled)
 #   [BUG]  dispatcher: || exit $? → capture+wrap+exit (error output was lost)
-#   [BUG]  exec_shell_command: added command == "null" validation
-#   [MIN]  web_search: added local -a for titles/raw_urls/snippets
+#   [BUG]  exec_command: added command == "null" validation
+#   [MIN]  web_search: added local for titles/raw_urls/snippets
 #   [MIN]  logging: echo -e → printf (FUNC_ARGS backslashes were interpreted)
-#   [MIN]  edit_file/apply_diff guards: same prefix removal as exec_shell_command
+#   [MIN]  edit_file/apply_diff guards: same prefix removal as exec_command
 #   [FEAT] create_image: JSON→flags wrapper for image.sh (anti-loop guard, keyless fallback inherited)
+#   [FEAT] edit_image: JSON→flags wrapper for image.sh /images/edits (anti-loop guard shared with create_image, inpainting via --mask)
 #   [REFACTOR] create_image: sources core.sh + image.sh in-process — draw.sh subprocess removed, provider resolution delegated to image.sh, output survives dispatcher capture
 #   [REFACTOR] web_browse: now using hybrid mobile/desktop script
 # ------------------------------------------------------------------------------
 
 # Options
-[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
 
 # Config
-USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
 
+# Select engine version
+ENGINE_VERSION="${ENGINE_VERSION:-.v2}"
+
+# Avoid killing commands too soon
+DEFAULT_EXEC_TIMEOUT=60
+MAX_EXEC_TIMEOUT=120
+
+# Avoid flooding the buffer
+MAX_EXEC_OUTPUT_SIZE=16384
+
 # Anti-loop guard: max autonomous image generations per rolling hour (create_image)
 MAX_IMAGE_GEN_PER_HOUR=20
+
+# Anti-loop guard: max autonomous video generations per rolling hour (create_video)
+MAX_VIDEO_GEN_PER_HOUR=20
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
+CONFIG_DIR="${SCRIPT_DIR}/config"
+ENG_DIR="${SCRIPT_DIR}/engines"
+LIB_DIR="${SCRIPT_DIR}/lib"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
+PLUG_DIR="${SCRIPT_DIR}/plugins"
+NET_HANDLER="${PLUG_DIR}/jarnet.sh"
 WEB_BROWSE="${TOOLS_DIR}/web-browse.sh"
 WEB_FETCH="${TOOLS_DIR}/web-fetch.sh"
 LOG_FILE="${SCRIPT_NAME}.log"
@@ -61,7 +78,59 @@ if [[ -z $FUNC_ARGS && ! -t 0 ]]; then
   FUNC_ARGS=$(cat)
 fi
 
-# --- Portability helpers (stock macOS / BSD differences) ---------------------
+# Internal Functions
+log() {
+  echo -e "$*" >&2
+}
+die() {
+  echo -e "[ERROR] $*" >&2
+  exit 255
+}
+is_termux() {
+  [[ -n "${TERMUX_VERSION:-}" ]] && return 0
+  [[ -d "/data/data/com.termux" ]] && return 0
+  return 1
+}
+load_core() {
+  # Load core
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/core.sh"
+
+  # Load libraries
+  [[ $(type -t 'load_libs') == 'function' ]] && load_libs
+}
+load_engine() {
+  local engine="$1"
+
+  # Import the requested engine into THIS process.
+  # All engines definitions-only when sourced (idempotent guards) — no init side effects.
+
+  # Load required core and libs
+  load_core
+
+  # Load requested engine
+  if [[ -n $engine ]]; then
+    # shellcheck source=/dev/null
+    source "${ENG_DIR}/${engine}${ENGINE_VERSION}.sh"
+  else
+    die "Missing 'engine' argument."
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Portability helpers (stock macOS / BSD differences)
+# -----------------------------------------------------------------------------
+
+# timeout portability — shared GNU/Bash implementation
+# shellcheck source=/dev/null
+source "${LIB_DIR}/timeout.sh" || die "Failed to load 'timeout' library."
+
+# Pure Bash URL Decoder (Bash 3.2+ Compatible, 0 Subshells!)
+urldecode() {
+  local encoded="${1//+/ }"
+  printf -v "$2" '%b' "${encoded//%/\\x}"
+}
+
 # Portable path canonicalization: GNU `realpath -m` first, plain `realpath`
 # next (existing paths — macOS Ventura+), then a cd+pwd -P composition.
 # macOS < Ventura ships no realpath at all -> raw-path fallback (old behavior).
@@ -80,38 +149,7 @@ _realpath() {
   printf '%s' "$p"
 }
 
-# _timeout: GNU coreutils `timeout` when present (Linux/Termux),
-# else a watch-dog (macOS ships none) with the same observable behavior.
-_timeout() {
-  local secs="$1"; shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$secs" "$@"
-  else
-    "$@" & local pid=$!
-    ( sleep "$secs"; kill "$pid" 2>/dev/null ) & local wd=$!
-    wait "$pid" 2>/dev/null
-    local rc=$?
-    kill "$wd" 2>/dev/null
-    wait "$wd" 2>/dev/null
-    return "$rc"
-  fi
-}
-
-# Internal Functions
-log() {
-  echo -e "$*" >&2
-}
-error() {
-  echo -e "\nError: $*\n" >&2
-  exit 255
-}
-is_termux() {
-  [[ -n "${TERMUX_VERSION:-}" ]] && return 0
-  [[ -d "/data/data/com.termux" ]] && return 0
-  return 1
-}
-
-# Security function
+# Security functions
 wrap_external_content() {
   local content="$1"
   local source="${2:-unknown}"
@@ -124,10 +162,36 @@ wrap_external_content() {
     "$source" "$timestamp" "$content"
 }
 
-# Pure Bash URL Decoder (Bash 3.2+ Compatible, 0 Subshells!)
-urldecode() {
-  local encoded="${1//+/ }"
-  printf -v "$2" '%b' "${encoded//%/\\x}"
+validate_args() {
+  local schema props keys bad_keys bad_enum
+
+  # Read current schema from state
+  schema=$(jq -rc .schema "${CONFIG_DIR}/state.json" 2>/dev/null)
+  [[ -z $schema ]] && die "Required tool schema not found."
+  [[ ! -r "${TOOLS_DIR}/${schema}" ]] && die "Required tool schema file not readable."
+
+  # Gather the full properties object (keys for the whitelist, enum for values)
+  props=$(jq -rc --arg func "$FUNC_NAME" \
+    '.[] | select(.function.name == $func) | .function.parameters.properties // {}' "${TOOLS_DIR}/${schema}") \
+    || die "Failed to get properties for '$FUNC_NAME'."
+  [[ -z $props ]] && die "Unknown function '$FUNC_NAME' — not in schema."
+
+  keys=$(jq -rc --arg func "$FUNC_NAME" \
+    '.[] | select(.function.name == $func) | .function.parameters.properties | keys // []' "${TOOLS_DIR}/${schema}") \
+    || die "Failed to get keys for '$FUNC_NAME'."
+
+  bad_keys=$(jq -rc --argjson props "$props" \
+    'keys - ($props | keys) | if length > 0 then join(", ") else empty end' <<<"$FUNC_ARGS" 2>/dev/null)
+  [[ -n $bad_keys ]] && die "Invalid function '$FUNC_NAME' argument(s): $bad_keys — allowed: ${keys:-none}"
+
+  bad_enum=$(jq -rc --argjson props "$props" '
+    to_entries
+    | map(select(($props[.key].enum // []) | length > 0))
+    | map(select((.value | tostring) as $v
+        | [($props[.key].enum[] | tostring)] | index($v) == null))
+    | map(.key) | if length > 0 then join(", ") else empty end
+  ' <<<"$FUNC_ARGS" 2>/dev/null)
+  [[ -n $bad_enum ]] && die "Invalid value(s) for '$FUNC_NAME' argument(s): $bad_enum — must match the enum in the schema."
 }
 
 # Public Functions
@@ -153,7 +217,7 @@ read_file() {
     [[ -n $append_val && $append_val != null ]] && append_loc=$append_val
   fi
 
-  [[ ! -f $path ]] && error "File not found at $path"
+  [[ ! -f $path ]] && die "File not found at $path"
 
   local end_val_awk="${end_line:-0}"
   if [[ $append_loc == true ]]; then
@@ -186,7 +250,15 @@ file_glob_search() {
     [[ -n $exclude_val && $exclude_val != null ]] && exclude=$exclude_val
   fi
 
-  [[ ! -d $path ]] && error "Directory not found at $path"
+  [[ ! -d $path ]] && die "Directory not found at $path"
+
+  # BUGFIX (2026-10-09): -wholename matches the FULL printed path, i.e.
+  # "./plugins/foo.sh" when path="." — so "plugins/*.sh" never matched
+  # anything (silently empty). Anchor the pattern to any path prefix.
+  case $include in
+    "*"|"./"*|*/"*"|"*/"*) ;;   # already prefixed/anchored
+    *) include="*/$include" ;;
+  esac
 
   if [[ -n $exclude ]]; then
     find "$path" -maxdepth 10 -type f -wholename "$include" ! -wholename "$exclude"
@@ -233,15 +305,15 @@ grep_search() {
   elif [[ -f $path ]]; then
     grep $grep_opts "$pattern" "$path"
   else
-    error "Invalid path $path"
+    die "Invalid path $path"
   fi
 }
 
 # 4. Execute a system shell command with timeout and strict truncation
-exec_shell_command() {
+exec_command() {
   local command="null"
-  local timeout=10
-  local max_output_size=16384
+  local timeout=$DEFAULT_EXEC_TIMEOUT
+  local max_output_size=$MAX_EXEC_OUTPUT_SIZE
   local output
   local exit_code
   local cmd_val timeout_val max_size_val
@@ -251,7 +323,7 @@ exec_shell_command() {
       IFS= read -r -d '' cmd_val
       IFS= read -r -d '' timeout_val
       IFS= read -r -d '' max_size_val
-    } < <(jq -j '.command, "\u0000", (.timeout|tostring), "\u0000", (.max_output_size|tostring), "\u0000"' <<< "$FUNC_ARGS")
+    } < <(jq -j '(.cmd // .command // ""), "\u0000", (.timeout|tostring), "\u0000", (.max_output_size|tostring), "\u0000"' <<< "$FUNC_ARGS")
 
     [[ -n $cmd_val && $cmd_val != null ]] && command=$cmd_val
     [[ -n $timeout_val && $timeout_val != null ]] && timeout=$timeout_val
@@ -259,16 +331,16 @@ exec_shell_command() {
   fi
 
   # Validate command parameter
-  [[ -z $command || $command == "null" ]] && error "The command parameter is required."
+  [[ -z $command || $command == "null" ]] && die "The command parameter is required."
 
   # Avoid running core pipeline files (core.sh, cli.sh, tools.sh) while running (Zero-Fork matching!)
   if [[ $command == "${SCRIPT_DIR}/"*[cC][oO][rR][eE].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[iI][mM][aA][gG][eE].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[cC][lL][iI].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[tT][oO][oO][lL][sS].[sS][hH]* || $command == "${SCRIPT_DIR}/"*[pP][iI][pP][eE][lL][iI][nN][eE].[sS][hH]* ]]; then
-    error "Dear model, don't try to run core pipeline files, they are not made for that. Thank you."
+    die "Dear model, don't try to run core pipeline files, they are not made for that. Thank you."
   fi
 
-  [[ $timeout -lt 1 || $timeout -gt 60 ]] && timeout=10
+  [[ $timeout -lt 1 || $timeout -gt $MAX_EXEC_TIMEOUT ]] && timeout=$MAX_EXEC_TIMEOUT
 
-  output=$(timeout "$timeout" sh -c "$command" 2>&1)
+  output=$(_timeout "$timeout" sh -c "$command" 2>&1)
   exit_code=$?
 
   [[ $exit_code -eq 124 ]] && echo "Command timed out after $timeout seconds."
@@ -305,8 +377,8 @@ write_file() {
   local resolved_path ; resolved_path=$(_realpath "$path")
 
   case "$resolved_path" in
-    "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${SCRIPT_DIR}/image.sh"|"${SCRIPT_DIR}/pipeline.sh")
-      error "Dear model, don't try to write to core pipeline files, they are not made for that. Thank you."
+    "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${ENG_DIR}/image${ENGINE_VERSION}.sh"|"${ENG_DIR}/video${ENGINE_VERSION}.sh"|"${ENG_DIR}/voice${ENGINE_VERSION}.sh"|"${ENG_DIR}/speech${ENGINE_VERSION}.sh")
+      die "Dear model, don't try to write to core pipeline files, they are not made for that. Thank you."
     ;;
   esac
 
@@ -336,15 +408,15 @@ edit_file() {
     [[ -n $changes_val && $changes_val != null ]] && changes=$changes_val
   fi
 
-  [[ ! -f $path ]] && error "File not found at $path"
+  [[ ! -f $path ]] && die "File not found at $path"
 
   # Avoid editing core pipeline files while running. Same canonical resolution
   # as write_file: identity by execution, not by name heuristic.
   local resolved_path ; resolved_path=$(_realpath "$path")
 
   case "$resolved_path" in
-    "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${SCRIPT_DIR}/image.sh"|"${SCRIPT_DIR}/pipeline.sh")
-      error "Dear model, don't try to edit core pipeline files, they are not made for that. Thank you."
+    "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${ENG_DIR}/image${ENGINE_VERSION}.sh"|"${ENG_DIR}/video${ENGINE_VERSION}.sh"|"${ENG_DIR}/voice${ENGINE_VERSION}.sh"|"${ENG_DIR}/speech${ENGINE_VERSION}.sh")
+      die "Dear model, don't try to edit core pipeline files, they are not made for that. Thank you."
     ;;
   esac
 
@@ -376,6 +448,29 @@ edit_file() {
       continue
     fi
 
+    # BUGFIX (2026-10-09): a change missing line_start/line_end used to emit the
+    # STRING "null" through jq's tostring → awk -v coerced it to 0 → the target
+    # line never matched → silent no-op with exit 0. Reject loudly instead.
+    case "$mode" in
+      delete|replace)
+        [[ $line_start =~ ^[0-9]+$ && $line_end =~ ^[0-9]+$ ]] || {
+          echo "Error: edit_file '$mode' change requires numeric line_start and line_end (got: start='$line_start', end='$line_end')." >&2
+          rm -f "${tmp_file}.bak" "$edit_content_file"
+          return 1
+        } ;;
+      append)
+        [[ $line_end =~ ^[0-9]+$ ]] || {
+          echo "Error: edit_file 'append' change requires a numeric line_end (got: '$line_end')." >&2
+          rm -f "$edit_content_file"
+          return 1
+        } ;;
+      *)
+        echo "Error: edit_file unknown change mode '$mode' (expected: append, delete, replace)." >&2
+        rm -f "$edit_content_file"
+        return 1 ;;
+    esac
+
+    # Mode selector
     case "$mode" in
       "delete")
         # Never mv a temp over the target unless the producer SUCCEEDED: an unchecked mv
@@ -450,8 +545,8 @@ apply_diff() {
     [[ -z $diff_path ]] && continue
     resolved_target=$(_realpath "$diff_path")
     case "$resolved_target" in
-      "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${SCRIPT_DIR}/image.sh"|"${SCRIPT_DIR}/pipeline.sh")
-        error "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
+      "${SCRIPT_DIR}/core.sh"|"${SCRIPT_DIR}/cli.sh"|"${SCRIPT_DIR}/tools.sh"|"${ENG_DIR}/image${ENGINE_VERSION}.sh"|"${ENG_DIR}/video${ENGINE_VERSION}.sh"|"${ENG_DIR}/voice${ENGINE_VERSION}.sh"|"${ENG_DIR}/speech${ENGINE_VERSION}.sh")
+        die "Dear model, don't try to patch core pipeline files, they are not made for that. Thank you."
       ;;
     esac
   done < <(sed 's/\\n/\n/g' <<< "$FUNC_ARGS" | grep -E '^(---|\+\+\+|\*\*\*) ' | awk '{print $2}' | sed -E 's#^[ab]/##')
@@ -461,14 +556,14 @@ apply_diff() {
 
   # Fail loud, not silent: empty payload must NOT be a no-op success
   if [[ -z $diff_content ]]; then
-    error "apply_diff: empty or missing .diff payload"
+    die "apply_diff: empty or missing .diff payload"
   fi
 
   # Apply with patch (fuzzy-tolerant, path-agnostic).
   # Paths in the diff dictate the target (absolute / relative / ../) — NO cd.
   # -p1 strips a/ b/ prefixes (git-style hunks).
   printf '%s\n' "$diff_content" | patch -p1 --fuzz=2 --no-backup-if-mismatch \
-    || error "apply_diff failed (see .rej files for rejected hunks)"
+    || die "apply_diff failed (see .rej files for rejected hunks)"
 }
 
 # 8. Retrieve the current system date and time
@@ -481,16 +576,16 @@ web_search() {
   local query
   local encoded_query
   local html_data
-  local curl_opts=("-sfSL" "-A" "$USER_AGENT")
+  local -a curl_opts ; curl_opts=("-sfSL" "-A" "$USER_AGENT")
   local search_url="https://html.duckduckgo.com"
   local temp_url
   local final_url
   local clean_title
   local clean_snippet
   local query_val
-  local interleaved=()
+  local -a interleaved ; interleaved=()
 
-  [[ -z $BIN_HTMLQ ]] && error "htmlq is required to run web search queries."
+  [[ -z $BIN_HTMLQ ]] && die "htmlq is required to run web search queries."
 
   if [[ -n $FUNC_ARGS ]]; then
     {
@@ -500,7 +595,7 @@ web_search() {
     [[ -n $query_val && $query_val != null ]] && query=$query_val
   fi
 
-  [[ -z $query ]] && error "The search query is required."
+  [[ -z $query ]] && die "The search query is required."
 
   # URL encode the search term natively inside JQ
   encoded_query=$(jq -nrc --arg q "$query" '$q | @uri')
@@ -513,7 +608,7 @@ web_search() {
 
   # Run search query
   html_data=$(curl "${curl_opts[@]}" "${search_url}/html?q=${encoded_query}")
-  [[ -z $html_data ]] && error "Could not retrieve search data from DuckDuckGo."
+  [[ -z $html_data ]] && die "Could not retrieve search data from DuckDuckGo."
 
   # Align-extract data streams
   local -a titles raw_urls snippets
@@ -565,11 +660,11 @@ web_fetch() {
     [[ -n $proxy_val && $proxy_val != null ]] && proxy=$proxy_val
   fi
 
-  [[ -z $url ]] && error "The URL parameter is required."
+  [[ -z $url ]] && die "The URL parameter is required."
 
-  local opts=()
+  local -a opts ; opts=()
   [[ $use_javascript == true ]] && opts+=("--js")
-  if [[ $proxy == "null" || -z $proxy || $proxy == "false" ]]; then
+  if [[ $proxy == "false" || -z $proxy ]]; then
     opts+=("--no-tor")
   fi
 
@@ -591,8 +686,8 @@ web_browse() {
     [[ -n $proxy_val && $proxy_val != null ]] && proxy=$proxy_val
   fi
 
-  # If proxy is explicitly false, null, or empty, disable proxy routing
-  if [[ $proxy == "null" || $proxy == "false" || -z $proxy ]]; then
+  # If proxy is explicitly false, or empty, disable proxy routing
+  if [[ $proxy == "false" || -z $proxy ]]; then
     updated_args=$(jq '. + {"noTor": true} | del(.proxy)' <<< "$FUNC_ARGS")
   else
     # Inject the resolved proxy address into the JSON payload for Node.js
@@ -612,7 +707,7 @@ web_browse() {
 #     crash-safe, no state file to reset.
 create_image() {
   local prompt_val ratio_val size_val model_val provider_val resolution_val format_val
-  local gen_dir gen_count wrapper_root
+  local gen_dir gen_count
   local -a img_args
 
   if [[ -n $FUNC_ARGS ]]; then
@@ -627,25 +722,21 @@ create_image() {
     } < <(jq -j '.prompt, "\u0000", .ratio, "\u0000", .size, "\u0000", .model, "\u0000", .provider, "\u0000", .resolution, "\u0000", .format, "\u0000"' <<< "$FUNC_ARGS")
   fi
 
-  [[ -z $prompt_val || $prompt_val == "null" ]] && error "The prompt parameter is required."
+  [[ -z $prompt_val || $prompt_val == "null" ]] && die "The prompt parameter is required."
 
   # Import the image engine into THIS process. Order matters: image.sh calls
   # core.sh helpers (logging, keyring, paths). Both are definitions-only when
   # sourced (idempotent guards) — no init side effects.
-  wrapper_root="$SCRIPT_DIR"
-  # shellcheck source=/dev/null
-  source "${wrapper_root}/core.sh"
-  # shellcheck source=/dev/null
-  source "${wrapper_root}/image.sh"
+  load_engine "image"
 
   # Anti-loop guard (after sourcing: DATA_STORE follows core.sh sandbox mapping)
-  gen_dir="${DATA_STORE:-${wrapper_root}/data}/images"
+  gen_dir="${DATA_STORE:-${SCRIPT_DIR}/data}/images"
   gen_count=$(find "$gen_dir" -type f -mmin -60 2>/dev/null | wc -l)
   if (( gen_count >= MAX_IMAGE_GEN_PER_HOUR )); then
-    error "Anti-loop guard: ${gen_count} image(s) generated in the last hour (max ${MAX_IMAGE_GEN_PER_HOUR}). Stop generating and ask the user before trying again."
+    die "Anti-loop guard: ${gen_count} image(s) generated in the last hour (max ${MAX_IMAGE_GEN_PER_HOUR}). Stop generating and ask the user before trying again."
   fi
 
-  img_args=("$prompt_val")
+  img_args=(--prompt "$prompt_val")
   [[ -n $ratio_val && $ratio_val != "null" ]] && img_args+=(--ratio "$ratio_val")
   [[ -n $size_val && $size_val != "null" ]] && img_args+=(--size "$size_val")
   [[ -n $model_val && $model_val != "null" ]] && img_args+=(--model "$model_val")
@@ -656,20 +747,519 @@ create_image() {
   generate_image "${img_args[@]}"
 }
 
+# 13. Edit an existing image via the image.sh engine (OpenAI /images/edits)
+#     Maps tool-call JSON args to CLI flags and runs edit_image().
+#     Provider resolution is delegated to image.sh load_image_config(), then
+#     load_edit_config() for the edit surface. Anti-loop guard shared with
+#     create_image (same output folder).
+edit_image() {
+  local prompt_val image_val mask_val model_val provider_val size_val format_val
+  local gen_dir gen_count
+  local -a img_args
+
+  if [[ -n $FUNC_ARGS ]]; then
+    {
+      IFS= read -r -d '' prompt_val
+      IFS= read -r -d '' image_val
+      IFS= read -r -d '' mask_val
+      IFS= read -r -d '' model_val
+      IFS= read -r -d '' provider_val
+      IFS= read -r -d '' size_val
+      IFS= read -r -d '' format_val
+    } < <(jq -j '.prompt, "\u0000", .image, "\u0000", .mask, "\u0000", .model, "\u0000", .provider, "\u0000", .size, "\u0000", .format, "\u0000"' <<< "$FUNC_ARGS")
+  fi
+
+  [[ -z $prompt_val || $prompt_val == "null" ]] && die "The prompt parameter is required."
+  [[ -z $image_val || $image_val == "null" ]] && die "The image parameter is required."
+
+  # Import the image engine into THIS process (same as create_image).
+  load_engine "image"
+
+  # Anti-loop guard (shared with create_image: same DATA_STORE/images output)
+  gen_dir="${DATA_STORE:-${SCRIPT_DIR}/data}/images"
+  gen_count=$(find "$gen_dir" -type f -mmin -60 2>/dev/null | wc -l)
+  if (( gen_count >= MAX_IMAGE_GEN_PER_HOUR )); then
+    die "Anti-loop guard: ${gen_count} image(s) generated in the last hour (max ${MAX_IMAGE_GEN_PER_HOUR}). Stop generating and ask the user before trying again."
+  fi
+
+  img_args=(--prompt "$prompt_val" --image "$image_val")
+  [[ -n $mask_val && $mask_val != "null" ]] && img_args+=(--mask "$mask_val")
+  [[ -n $model_val && $model_val != "null" ]] && img_args+=(--model "$model_val")
+  [[ -n $provider_val && $provider_val != "null" ]] && img_args+=(--provider "$provider_val")
+  [[ -n $size_val && $size_val != "null" ]] && img_args+=(--size "$size_val")
+  [[ -n $format_val && $format_val != "null" ]] && img_args+=(--format "$format_val")
+
+  modify_image "${img_args[@]}"
+}
+
+# 14. Generate a video via the video.sh engine (autonomous generation path)
+#     Maps tool-call JSON args to CLI flags and runs generate_video().
+#     Provider resolution is fully delegated to video.sh load_video_config():
+#       --provider > config/state.json (.video // .provider) > $PROVIDER
+#     Anti-loop guard is HERE (wrapper level): /imagine stays unlimited, only
+#     the autonomous path is capped. Counts finished media files only
+create_video() {
+  local prompt_val image_val model_val provider_val duration_val resolution_val ratio_val fps_val frames_val
+  local gen_dir gen_count
+  local -a vid_args
+
+  if [[ -n $FUNC_ARGS ]]; then
+    {
+      IFS= read -r -d '' prompt_val
+      IFS= read -r -d '' image_val
+      IFS= read -r -d '' model_val
+      IFS= read -r -d '' provider_val
+      IFS= read -r -d '' duration_val
+      IFS= read -r -d '' resolution_val
+      IFS= read -r -d '' ratio_val
+      IFS= read -r -d '' fps_val
+      IFS= read -r -d '' frames_val
+    } < <(jq -j '.prompt, "\u0000", .image, "\u0000", .model, "\u0000", .provider, "\u0000", .duration, "\u0000", .resolution, "\u0000", .ratio, "\u0000", .fps, "\u0000", .frames, "\u0000"' <<< "$FUNC_ARGS")
+  fi
+
+  # No required prompt: the engine provides a default prompt by design
+  # ("Create a short video of anything you have in mind.").
+
+  # Import the video engine into THIS process (same pattern as create_image).
+  load_engine "video"
+
+  # Anti-loop guard (videos are far more expensive than images: dedicated cap)
+  gen_dir="${DATA_STORE:-${SCRIPT_DIR}/data}/videos"
+  gen_count=$(find "$gen_dir" -type f \( -name '*.mp4' -o -name '*.webm' \) -mmin -60 2>/dev/null | wc -l)
+  if (( gen_count >= MAX_VIDEO_GEN_PER_HOUR )); then
+    die "Anti-loop guard: ${gen_count} video(s) generated in the last hour (max ${MAX_VIDEO_GEN_PER_HOUR}). Stop generating and ask the user before trying again."
+  fi
+
+  vid_args=()
+  [[ -n $prompt_val && $prompt_val != "null" ]] && vid_args+=(--prompt "$prompt_val")
+  [[ -n $image_val && $image_val != "null" ]] && vid_args+=(--image "$image_val")
+  [[ -n $model_val && $model_val != "null" ]] && vid_args+=(--model "$model_val")
+  [[ -n $provider_val && $provider_val != "null" ]] && vid_args+=(--provider "$provider_val")
+  [[ -n $duration_val && $duration_val != "null" ]] && vid_args+=(--duration "$duration_val")
+  [[ -n $resolution_val && $resolution_val != "null" ]] && vid_args+=(--resolution "$resolution_val")
+  [[ -n $ratio_val && $ratio_val != "null" ]] && vid_args+=(--ratio "$ratio_val")
+  [[ -n $fps_val && $fps_val != "null" ]] && vid_args+=(--fps "$fps_val")
+  [[ -n $frames_val && $frames_val != "null" ]] && vid_args+=(--frames "$frames_val")
+
+  generate_video "${vid_args[@]}"
+}
+
+# 15. Read an image with vision (deliberate media analysis — image-to-text)
+#     Maps tool-call JSON args to analyze_media() (core.sh). Stateless fork:
+#     everything is resolved from DISK (state.json / providers.json / keyring).
+#     NO anti-loop guard by design: reading generates nothing — a guard here
+#     would be dead code for an impossible case.
+#     OPSEC §6: only a named path, never a broad listing (every read is
+#     ingested and transmitted to the provider).
+read_image() {
+  local path_val prompt_val
+
+  {
+    IFS= read -r -d '' path_val
+    IFS= read -r -d '' prompt_val
+  } < <(jq -j '.path, "\u0000", .prompt, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -n $path_val && $path_val != "null" ]] || {
+    die "Missing required argument: 'path'."
+  }
+
+  # Import the core engine into THIS process (same pattern as create_image).
+  # core.sh is definitions-only when sourced — no init side effects.
+  load_core
+
+  analyze_media "$path_val" "$prompt_val"
+}
+
+# 16. Analyze a video file with a vision model (deliberate media analysis — video-to-text)
+#     Same contract as read_image: stateless fork, disk-resolved, text-only output.
+#     Formats follow the active provider's V2T capability (venice: mp4/webm/mov/mpeg).
+read_video() {
+  local path_val prompt_val
+
+  {
+    IFS= read -r -d '' path_val
+    IFS= read -r -d '' prompt_val
+  } < <(jq -j '.path, "\u0000", .prompt, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -n $path_val && $path_val != "null" ]] || {
+    die "Missing required argument: 'path'."
+  }
+
+  # Import the core engine into THIS process (same pattern as create_image).
+  # core.sh is definitions-only when sourced — no init side effects.
+  load_core
+
+  analyze_media "$path_val" "$prompt_val"
+}
+
+# 17. Return current state.
+get_state() {
+  if [[ -r "${CONFIG_DIR}/state.json" ]]; then
+    cat "${CONFIG_DIR}/state.json"
+  else
+    die "Missing '${CONFIG_DIR##*/}/state.json' file."
+  fi
+}
+
+# 18. Return active providers.
+get_providers() {
+  local active_provider current_provider keyed_csv=""
+
+  # Load main library
+  load_core
+
+  [[ -r "${CONFIG_DIR}/state.json" ]] || die "Missing state file: state.json."
+  active_provider=$(jq -r '.provider // empty' "${CONFIG_DIR}/state.json" 2>/dev/null)
+
+  [[ -r $PROVIDERS_CONFIG ]] || die "Missing provider registry: ${CONFIG_DIR##*/}/${PROVIDERS_CONFIG##*/}."
+
+  # Providers whose key is readable in the keyring.
+  # Presence test only: no decryption, no secret output.
+  while IFS= read -r current_provider; do
+    [[ -n $current_provider ]] || continue
+    has_provider_key "$current_provider" && keyed_csv+="${current_provider},"
+  done < <(jq -r 'keys[]' "$PROVIDERS_CONFIG" 2>/dev/null)
+
+  jq -c --arg active "$active_provider" --arg keyed "$keyed_csv" '
+    ($keyed | split(",") | map(select(length > 0))) as $with_key |
+    {
+      active: (if $active == "" then null else $active end),
+      providers: [
+        to_entries[] |
+        {
+          id: .key,
+          active: (.key == $active),
+          status: (.value.status // null),
+          usable: ((((.value.auth // true) == false) or ((.key as $k | ($with_key | index($k))) != null))),
+          catalogue: (((.value.inference // .value.models) | type) == "string"),
+          catalogue_source: (if (.value.inference | type) == "string" then "inference" else "models" end),
+          model: (.value.default.model // null),
+          capabilities: {
+            image:  (.value.default.image  // false),
+            edit:   (.value.default.edit   // false),
+            video:  (.value.default.video  // false),
+            vision: (.value.default.vision // false),
+            voice:  (.value.default.voice  // false),
+            speech: (.value.default.speech // false),
+            zdr:    (.value.default.zdr    // false)
+          }
+        }
+      ]
+    }' "$PROVIDERS_CONFIG"
+}
+
+# 19. Return active models per provider.
+get_models() {
+  local provider_val operation_val raw
+
+  {
+    IFS= read -r -d '' provider_val
+    IFS= read -r -d '' operation_val
+  } < <(jq -j '
+    (.provider // ""), "\u0000",
+    (.operation // ""), "\u0000"
+  ' <<< "$FUNC_ARGS")
+
+  [[ -n $provider_val && $provider_val != "null" ]] || {
+    die "Missing required argument: 'provider'."
+  }
+
+  case "$operation_val" in
+    ""|all|chat|vision|t2i|i2i|i2t|t2v|i2v|v2t|asr|tts|stt) ;;
+    *) die "Unsupported operation: '$operation_val'." ;;
+  esac
+
+  # Load main library
+  load_core
+
+  # Check provider catalog
+  jq -e --arg p "$provider_val" \
+    'has($p) and ((.[$p].inference // .[$p].models) | type == "string")' \
+    "$PROVIDERS_CONFIG" >/dev/null 2>&1 || {
+      die "Unknown provider or missing model catalogue: '$provider_val'."
+    }
+
+  raw=$(get_provider_models "$provider_val" "$operation_val") || {
+    die "Model catalogue lookup failed for provider '$provider_val'. Availability is unknown."
+  }
+
+  # Loaded from 'helpers.sh'
+  filter_provider_models "$provider_val" "$operation_val" <<< "$raw"
+}
+
+# 20. Transcribe an audio file to text (STT).
+transcribe() {
+  local audio_val language_val provider_val model_val
+  local -a stt_args
+
+  {
+    IFS= read -r -d '' audio_val
+    IFS= read -r -d '' language_val
+    IFS= read -r -d '' provider_val
+    IFS= read -r -d '' model_val
+  } < <(jq -j '.audio, "\u0000", .language, "\u0000", .provider, "\u0000", .model, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -n $audio_val && $audio_val != "null" ]] || {
+    die "Missing required argument: 'audio'."
+  }
+
+  # Import the speech engine into THIS process (same as create_image).
+  load_engine "speech"
+
+  [[ -n $language_val && $language_val != "null" ]] || language_val="${AUDIO_LANG:-auto}"
+
+  stt_args=(--audio "$audio_val")
+  [[ -n $language_val ]] && stt_args+=(--language "$language_val")
+  [[ -n $provider_val && $provider_val != "null" ]] && stt_args+=(--provider "$provider_val")
+  [[ -n $model_val && $model_val != "null" ]] && stt_args+=(--model "$model_val")
+
+  transcribe_audio "${stt_args[@]}"
+}
+
+# 21. Synthesize speech from text (TTS).
+speak() {
+  local text_val voice_val format_val provider_val model_val
+  local -a tts_args
+
+  {
+    IFS= read -r -d '' text_val
+    IFS= read -r -d '' gender_val
+    IFS= read -r -d '' voice_val
+    IFS= read -r -d '' format_val
+    IFS= read -r -d '' provider_val
+    IFS= read -r -d '' model_val
+  } < <(jq -j '.text, "\u0000", .gender, "\u0000", .voice, "\u0000", .format, "\u0000", .provider, "\u0000", .model, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -n $text_val && $text_val != "null" ]] || {
+    die "Missing required argument: 'text'."
+  }
+
+  # Import the voice engine into THIS process (same as create_image).
+  load_engine "voice"
+
+  tts_args=(--text "$text_val")
+  [[ -n $gender_val && $gender_val != "null" ]] && tts_args+=(--gender "$gender_val")
+  [[ -n $voice_val && $voice_val != "null" ]] && tts_args+=(--voice "$voice_val")
+  [[ -n $format_val && $format_val != "null" ]] && tts_args+=(--format "$format_val")
+  [[ -n $provider_val && $provider_val != "null" ]] && tts_args+=(--provider "$provider_val")
+  [[ -n $model_val && $model_val != "null" ]] && tts_args+=(--model "$model_val")
+
+  generate_speech "${tts_args[@]}" --play
+}
+
+# 22. Generate an avatar image and store directly in data/avatar/
+create_avatar() {
+  local prompt_val ratio_val size_val model_val provider_val resolution_val format_val
+  local gen_dir gen_count
+  local -a img_args
+
+  if [[ -n $FUNC_ARGS ]]; then
+    {
+      IFS= read -r -d '' prompt_val
+      IFS= read -r -d '' ratio_val
+      IFS= read -r -d '' size_val
+      IFS= read -r -d '' model_val
+      IFS= read -r -d '' provider_val
+      IFS= read -r -d '' resolution_val
+      IFS= read -r -d '' format_val
+    } < <(jq -j '.prompt, "\u0000", .ratio, "\u0000", .size, "\u0000", .model, "\u0000", .provider, "\u0000", .resolution, "\u0000", .format, "\u0000"' <<< "$FUNC_ARGS")
+  fi
+
+  [[ -z $prompt_val || $prompt_val == "null" ]] && die "The prompt parameter is required."
+
+  # Import the image engine into THIS process (same as create_image).
+  load_engine "image"
+
+  # Anti-loop guard (shared with create_image : same quota from data/images)
+  gen_dir="${DATA_STORE:-${SCRIPT_DIR}/data}/images"
+  gen_count=$(find "$gen_dir" -type f -mmin -60 2>/dev/null | wc -l)
+  if (( gen_count >= MAX_IMAGE_GEN_PER_HOUR )); then
+    die "Anti-loop guard: ${gen_count} image(s) generated in the last hour (max ${MAX_IMAGE_GEN_PER_HOUR}). Stop generating and ask the user before trying again."
+  fi
+
+  # Ratio 1:1 par défaut pour un avatar si aucune dimension n'est spécifiée
+  if [[ -z $size_val || $size_val == "null" ]]; then
+    [[ -z $ratio_val || $ratio_val == "null" ]] && ratio_val="1:1"
+  fi
+
+  img_args=(--prompt "$prompt_val")
+  [[ -n $ratio_val && $ratio_val != "null" ]] && img_args+=(--ratio "$ratio_val")
+  [[ -n $size_val && $size_val != "null" ]] && img_args+=(--size "$size_val")
+  [[ -n $model_val && $model_val != "null" ]] && img_args+=(--model "$model_val")
+  [[ -n $provider_val && $provider_val != "null" ]] && img_args+=(--provider "$provider_val")
+  [[ -n $resolution_val && $resolution_val != "null" ]] && img_args+=(--resolution "$resolution_val")
+  [[ -n $format_val && $format_val != "null" ]] && img_args+=(--format "$format_val")
+
+  # Generate with image engine (return path from data/images/)
+  local generated_output img_path
+  generated_output=$(generate_image "${img_args[@]}") || exit $?
+
+  img_path=$(grep -E '^[^[:space:]]+' <<< "$generated_output" | tail -n 1)
+  [[ ! -s $img_path ]] && die "Avatar generation failed: output file not found ($img_path)."
+
+  # Target directory: data/avatar/avatar-YYYYMMDD-HHMMSS.ext
+  local avatar_dir="${DATA_STORE:-${SCRIPT_DIR}/data}/avatar"
+  mkdir -p "$avatar_dir"
+
+  local ext="${img_path##*.}"
+  local timestamp
+  timestamp=$(date '+%Y%m%d-%H%M%S')
+  local avatar_file="${avatar_dir}/avatar-${timestamp}.${ext}"
+
+  # Copy generated image to the avatar folder
+  cp "$img_path" "$avatar_file" || die "Failed to copy avatar to ${DATA_STORE##*/}/${avatar_dir##*/}/${avatar_file##*/}."
+
+  # Return generated avatar path: visual detection loop will automatically inject it
+  echo "$avatar_file"
+}
+
+# ==============================================================================
+# JarNet Protocol Tools (P2P Agent-to-Agent over Tor)
+# ==============================================================================
+
+# 23. Inspect local JarNet node identity, address, callsign and peers
+jarnet_who() {
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+  "$NET_HANDLER" who
+}
+
+# 24. Ping a JarNet peer or onion address over Tor
+jarnet_ping() {
+  local peer_val timeout_val
+  {
+    IFS= read -r -d '' peer_val
+    IFS= read -r -d '' timeout_val
+  } < <(jq -j '.peer, "\u0000", .timeout, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -z $peer_val || $peer_val == "null" ]] && die "Missing required parameter: 'peer'."
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+
+  local -a args ; args=("$peer_val")
+  [[ -n $timeout_val && $timeout_val != "null" ]] && args+=("$timeout_val")
+
+  "$NET_HANDLER" ping "${args[@]}"
+}
+
+# 25. Send a direct message to a peer over JarNet
+jarnet_send() {
+  local peer_val body_val type_val re_val
+  {
+    IFS= read -r -d '' peer_val
+    IFS= read -r -d '' body_val
+    IFS= read -r -d '' type_val
+    IFS= read -r -d '' re_val
+  } < <(jq -j '.peer, "\u0000", .body, "\u0000", .type, "\u0000", .re, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -z $peer_val || $peer_val == "null" ]] && die "Missing required parameter: 'peer'."
+  [[ -z $body_val || $body_val == "null" ]] && die "Missing required parameter: 'body'."
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+
+  local -a args ; args=("$peer_val" "$body_val")
+  [[ -n $type_val && $type_val != "null" ]] && args+=("$type_val")
+  [[ -n $re_val && $re_val != "null" ]] && args+=("$re_val")
+
+  "$NET_HANDLER" send "${args[@]}"
+}
+
+# 26. Send an authenticated reply respecting session bounds
+jarnet_reply() {
+  local sid_val reply_to_val body_val ts_val
+  {
+    IFS= read -r -d '' sid_val
+    IFS= read -r -d '' reply_to_val
+    IFS= read -r -d '' body_val
+    IFS= read -r -d '' ts_val
+  } < <(jq -j '.sid, "\u0000", .reply_to, "\u0000", .body, "\u0000", .ts, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -z $sid_val || $sid_val == "null" ]] && die "Missing required parameter: 'sid'."
+  [[ -z $reply_to_val || $reply_to_val == "null" ]] && die "Missing required parameter: 'reply_to'."
+  [[ -z $body_val || $body_val == "null" ]] && die "Missing required parameter: 'body'."
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+
+  local -a args ; args=("$sid_val" "$reply_to_val" "$body_val")
+  [[ -n $ts_val && $ts_val != "null" ]] && args+=("$ts_val")
+
+  "$NET_HANDLER" reply "${args[@]}"
+}
+
+# 27. Check inbox for incoming messages
+jarnet_check() {
+  local after_n_val
+  {
+    IFS= read -r -d '' after_n_val
+  } < <(jq -j '.after_n, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+
+  local -a args ; args=()
+  [[ -n $after_n_val && $after_n_val != "null" ]] && args+=("$after_n_val")
+
+  "$NET_HANDLER" check "${args[@]}"
+}
+
+# 28. Add a peer to peers.txt from an onboarding token (Human gesture only)
+jarnet_peer_add() {
+  local token_val alias_val note_val
+  {
+    IFS= read -r -d '' token_val
+    IFS= read -r -d '' alias_val
+    IFS= read -r -d '' note_val
+  } < <(jq -j '.token, "\u0000", .alias, "\u0000", .note, "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -z $token_val || $token_val == "null" ]] && die "Missing required parameter: 'token'."
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+
+  local -a args ; args=("$token_val")
+  [[ -n $alias_val && $alias_val != "null" ]] && args+=(--as "$alias_val")
+  [[ -n $note_val && $note_val != "null" ]] && args+=(--note "$note_val")
+
+  "$NET_HANDLER" peer add "${args[@]}"
+}
+
+# 29. Start the JarNet transport stack and publish hidden service
+jarnet_up() {
+  local link_peer_val offline_val
+  {
+    IFS= read -r -d '' link_peer_val
+    IFS= read -r -d '' offline_val
+  } < <(jq -j '.link_peer, "\u0000", (.offline|tostring), "\u0000"' <<< "$FUNC_ARGS")
+
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+
+  local -a args ; args=()
+  [[ -n $link_peer_val && $link_peer_val != "null" ]] && args+=("link" "$link_peer_val")
+  [[ $offline_val == "true" ]] && args+=("--offline")
+
+  "$NET_HANDLER" up "${args[@]}"
+}
+
+# 30. Stop the JarNet transport stack and unpublish hidden service
+jarnet_down() {
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+  "$NET_HANDLER" down
+}
+
+# 31. Inspect technical runtime health and daemon status of JarNet
+jarnet_status() {
+  [[ -x $NET_HANDLER ]] || die "JarNet plugin not available (${PLUG_DIR##*/}/${NET_HANDLER##*/})."
+  "$NET_HANDLER" status
+}
+
 # Bootstrap
-[[ $# -eq 0 ]] && error "Missing arguments.\nUsage: ${0##*/} <function> <arguments>\n"
+[[ $# -eq 0 ]] && die "Missing arguments.\nUsage: ${0##*/} <function> <arguments>\n"
 
 # Logging
 printf '\n---\n\nDate: %s\nFunction: %s\nArguments: %s\n' "$(get_datetime)" "$FUNC_NAME" "$FUNC_ARGS" >> "$LOG_FILE"
 
+# Validate received arguments
+validate_args
+
 # Dispatcher execution
 case "$FUNC_NAME" in
-  exec_shell_command|web_fetch|web_search|web_browse)
-    # BUGFIX: || exit $? discarded $output on failure — model never saw error messages.
-    # Always capture, always wrap (errors can carry payloads too), propagate exit code at the end.
+  exec_command|web_fetch|web_search|web_browse|jarnet_check)
     output=$("$FUNC_NAME" "$FUNC_ARGS" 2>&1)
     exit_code=$?
-    source_url=$(jq -r '.url // .query // .command // "unknown"' <<< "$FUNC_ARGS")
+    source_url=$(jq -r '.url // .query // .cmd // .command // "jarnet:inbox"' <<< "$FUNC_ARGS")
 
     # Apply Anti-XPIA security layer
     wrap_external_content "$output" "$source_url"

@@ -1,35 +1,43 @@
 #!/usr/bin/env bash
-#
+# shellcheck shell=bash
 # ==============================================================================
-# web-fetch.sh — Smart Web Crawler & Static Parser Engine (DRY Refactor)
+# tools/web-fetch.sh — Web content retrieval and static parsing tool
 # ==============================================================================
-# Domain-specific web crawler targeting public APIs (GitHub, GitLab, Codeberg,
-# Wikipedia) for 100% fidelity, with fallback to HTML parsing. Zero-Node.
+# Retrieves public web content through API-aware handlers and HTML parsing,
+# with an optional JavaScript browser fallback.
 #
-# Lead Developer & Architect : Jiab77
-# AI Sorcerer & Co-Creator   : Jarvis (hy3)
-#
-# Version: 0.4.3
+# Author: Jiab77
+# Collaborator: Jarvis
+# Version: 0.4.4
 # ==============================================================================
 
 # Options
-[[ "${DEBUG:-}" == "true" ]] && set -x
 [[ -e $HOME/.debug ]] && set -x
 set -o pipefail
 
 # Config
-USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 TOR_HOST="127.0.0.1"
 TOR_PORT=9050
 TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+# TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
 
 # Internals
+BIN_CURL=$(command -v curl 2>/dev/null)
+BIN_CURL_IMP=$(command -v curl-impersonate 2>/dev/null)
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 LOG_FILE="${SCRIPT_NAME}.log"
 WEB_BROWSE_TOOL="${SCRIPT_DIR}/web-browse.sh"
+
+# Helper: Detect Termux
+# is_termux() {
+#   [[ -n "${TERMUX_VERSION:-}" ]] && return 0
+#   [[ -d "/data/data/com.termux" ]] && return 0
+#   return 1
+# }
 
 # Strings helpers
 to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
@@ -40,27 +48,14 @@ log() {
   echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nArguments: $*" >> "$LOG_FILE"
 }
 
-# _timeout: GNU `timeout` when present, else a watch-dog (macOS ships none).
-_timeout() {
-  local secs="$1"; shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$secs" "$@"
+# Curl Wrapper
+curl_wrapper() {
+  if [[ -n $BIN_CURL_IMP ]]; then
+    "$BIN_CURL_IMP" --compressed --impersonate "chrome150" "$@"
   else
-    "$@" & local pid=$!
-    ( sleep "$secs"; kill "$pid" 2>/dev/null ) & local wd=$!
-    wait "$pid" 2>/dev/null
-    local rc=$?
-    kill "$wd" 2>/dev/null
-    wait "$wd" 2>/dev/null
-    return "$rc"
+    "$BIN_CURL" "$@"
   fi
 }
-
-# Proxy SOCKS5 for Tor (if active)
-IF_TOR_PROXY=""
-if _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
-  IF_TOR_PROXY="$TOR_PROXY"
-fi
 
 # Parse Options
 USE_JS=false
@@ -109,14 +104,27 @@ if [[ -z $URL ]]; then
 fi
 
 # Determine curl options
+# if is_termux; then TOR_PROXY="$TOR_PROXY_MOBILE" ; fi
 CURL_OPTS=("-sfSL" "-A" "$USER_AGENT" "--connect-timeout" "10")
-if [[ $USE_TOR == true && -n $IF_TOR_PROXY ]]; then
-  CURL_OPTS+=("-x" "$IF_TOR_PROXY")
+if [[ $USE_TOR == true && -n $TOR_PROXY ]]; then
+  CURL_OPTS+=("-x" "$TOR_PROXY")
 fi
+
+# Define required curl headers
+CURL_OPTS+=(
+  "-H" "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+  "-H" "Accept-Language: fr-CH,fr;q=0.9,en;q=0.8"
+  "-H" "Sec-Fetch-Mode: navigate"
+  "-H" "Upgrade-Insecure-Requests: 1"
+)
 
 if [[ $USE_JS == true ]]; then
   # log "JavaScript fallback option is selected but not natively needed for specific REST APIs."
-  bash "$WEB_BROWSE_TOOL" --url "$URL"
+  if [[ $USE_TOR == true ]]; then
+    bash "$WEB_BROWSE_TOOL" --url "$URL"
+  else
+    bash "$WEB_BROWSE_TOOL" --url "$URL" --no-tor
+  fi
   exit $?
 fi
 
@@ -133,15 +141,34 @@ clean_url() {
 }
 
 # Human-readable byte size (requires `bc`)
+# human_size() {
+#   local size="$1"
+#   local size_str="${size} B"
+#   if [[ $size -gt 1048576 ]]; then
+#     size_str="$(echo "scale=2; $size / 1048576" | bc) MB"
+#   elif [[ $size -gt 1024 ]]; then
+#     size_str="$(echo "scale=2; $size / 1024" | bc) KB"
+#   fi
+#   echo "$size_str"
+# }
+
+# Human-readable byte size (pure Bash)
 human_size() {
-  local size="$1"
-  local size_str="${size} B"
+  local size="$1" divisor unit
+
   if [[ $size -gt 1048576 ]]; then
-    size_str="$(echo "scale=2; $size / 1048576" | bc) MB"
+    divisor=1048576 unit=MB
   elif [[ $size -gt 1024 ]]; then
-    size_str="$(echo "scale=2; $size / 1024" | bc) KB"
+    divisor=1024 unit=KB
+  else
+    printf '%s B\n' "$size"
+    return
   fi
-  echo "$size_str"
+
+  printf '%d.%02d %s\n' \
+    "$((size / divisor))" \
+    "$(((size % divisor) * 100 / divisor))" \
+    "$unit"
 }
 
 # Render a raw file block (used by all providers)
@@ -372,7 +399,7 @@ handle_github() {
     local raw_url="https://raw.githubusercontent.com/$owner/$repo/$branch/$file_path"
     local raw_content
 
-    if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
+    if raw_content=$(curl_wrapper "${CURL_OPTS[@]}" "$raw_url"); then
       render_raw_file "$file_path" "" "> **Repository:** [$owner/$repo]($url) | **Branch:** \`$branch\`" "$raw_content"
     else
       echo "Error: Could not retrieve raw file from $raw_url" >&2
@@ -390,7 +417,7 @@ handle_github() {
     local api_url="https://api.github.com/repos/$owner/$repo/contents/$dir_path?ref=$branch"
     local json_data
 
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_dir_table "Directory: \`/$dir_path\`" "> **Repository:** [$owner/$repo]($url) | **Ref:** \`$branch\`" "$json_data" "size" ""
     else
       echo "Error: Could not retrieve directory listing from API ($api_url)" >&2
@@ -407,7 +434,7 @@ handle_github() {
     local readme_url="https://api.github.com/repos/$owner/$repo/readme"
 
     local meta_json
-    if ! meta_json=$(curl "${CURL_OPTS[@]}" "$meta_url"); then
+    if ! meta_json=$(curl_wrapper "${CURL_OPTS[@]}" "$meta_url"); then
       echo "Error: Could not retrieve repository metadata from $meta_url" >&2
       exit 2
     fi
@@ -423,7 +450,7 @@ handle_github() {
     def_branch=$(jq -rc '.default_branch' <<< "$meta_json")
 
     local readme_content
-    readme_content=$(curl "${CURL_OPTS[@]}" -H "Accept: application/vnd.github.raw" "$readme_url" 2>/dev/null)
+    readme_content=$(curl_wrapper "${CURL_OPTS[@]}" -H "Accept: application/vnd.github.raw" "$readme_url" 2>/dev/null)
 
     echo "# 📦 $owner / $name"
     echo "> **Description:** $desc"
@@ -453,7 +480,7 @@ handle_github() {
     local api_url="https://api.github.com/repos/$owner/$repo/issues/$number"
     local json_data
 
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_issue_card "$json_data" "GitHub" "🐛" "$(to_upper "$type")" "$number" "$owner" "$repo" ".user.login" "https://github.com/$owner/$repo"
 
       local comments
@@ -461,7 +488,7 @@ handle_github() {
       if [[ $comments -gt 0 ]]; then
         local comments_url="https://api.github.com/repos/$owner/$repo/issues/$number/comments"
         local comments_json
-        if comments_json=$(curl "${CURL_OPTS[@]}" "$comments_url" 2>/dev/null); then
+        if comments_json=$(curl_wrapper "${CURL_OPTS[@]}" "$comments_url" 2>/dev/null); then
           echo ""
           echo "---"
           echo "### 💬 Discussion Thread ($comments comments)"
@@ -497,7 +524,7 @@ handle_github() {
     local api_url="https://api.github.com/repos/$owner/$repo/$endpoint?state=open"
     local json_data
 
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       local list_title="Open Issues"
       [[ $type == "pulls" ]] && list_title="Open Pull Requests"
       render_list_table "GitHub $list_title: $owner/$repo" "> **Repository:** [github.com/$owner/$repo](https://github.com/$owner/$repo)" "$json_data" "comments" ".number" ".user.login" ".html_url"
@@ -535,7 +562,7 @@ handle_raw_github() {
   log "Raw GitHub Parse: owner=$owner repo=$repo branch=$branch file=$file_path"
 
   local raw_content
-  if raw_content=$(curl "${CURL_OPTS[@]}" "$url"); then
+  if raw_content=$(curl_wrapper "${CURL_OPTS[@]}" "$url"); then
     render_raw_file "$file_path" "" "> **Repository:** [$owner/$repo]($url) | **Branch/Reference:** \`$branch\`" "$raw_content"
   else
     echo "Error: Could not retrieve raw file from $url" >&2
@@ -567,7 +594,7 @@ handle_gist() {
   local api_url="https://api.github.com/gists/$gist_id"
   local json_data
 
-  if ! json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+  if ! json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
     echo "Error: Could not retrieve gist metadata from $api_url" >&2
     exit 2
   fi
@@ -614,7 +641,7 @@ handle_gist() {
   if [[ $g_comments -gt 0 ]]; then
     local comments_url="https://api.github.com/gists/$gist_id/comments"
     local comments_json
-    if comments_json=$(curl "${CURL_OPTS[@]}" "$comments_url" 2>/dev/null); then
+    if comments_json=$(curl_wrapper "${CURL_OPTS[@]}" "$comments_url" 2>/dev/null); then
       echo "---"
       echo "### 💬 Discussion Thread ($g_comments comments)"
       echo ""
@@ -652,7 +679,7 @@ handle_gitlab() {
     log "GitLab Raw: owner=$owner repo=$repo branch=$branch file=$file_path"
 
     local raw_content
-    if raw_content=$(curl "${CURL_OPTS[@]}" "$url"); then
+    if raw_content=$(curl_wrapper "${CURL_OPTS[@]}" "$url"); then
       render_raw_file "$file_path" " (GitLab Raw)" "> **Repository:** [$owner/$repo]($raw_project_path) | **Branch:** \`$branch\`" "$raw_content"
     else
       echo "Error: Could not retrieve raw file from $url" >&2
@@ -673,7 +700,7 @@ handle_gitlab() {
     local raw_url="${raw_project_path}/-/raw/${branch}/${file_path}"
     local raw_content
 
-    if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
+    if raw_content=$(curl_wrapper "${CURL_OPTS[@]}" "$raw_url"); then
       render_raw_file "$file_path" " (GitLab)" "> **Repository:** [$owner/$repo]($raw_project_path) | **Branch:** \`$branch\`" "$raw_content"
     else
       echo "Error: Could not retrieve raw file from $raw_url" >&2
@@ -695,7 +722,7 @@ handle_gitlab() {
     local api_url="https://gitlab.com/api/v4/projects/$encoded_project/repository/tree?ref=$branch&path=$dir_path"
     local json_data
 
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_dir_table "Directory (GitLab): \`/$dir_path\`" "> **Repository:** [$owner/$repo]($raw_project_path) | **Ref:** \`$branch\`" "$json_data" "link" "" "$raw_project_path" "$branch"
     else
       echo "Error: Could not retrieve directory listing from GitLab API ($api_url)" >&2
@@ -712,7 +739,7 @@ handle_gitlab() {
 
     local api_url="https://gitlab.com/api/v4/projects/$encoded_project/issues/$issue_iid"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_issue_card "$json_data" "GitLab" "🦊" "Issue" "$issue_iid" "${project_path%/*}" "${project_path##*/}" ".author.username" "$raw_project_path"
     else
       echo "Error: Could not retrieve GitLab issue from API ($api_url)" >&2
@@ -729,7 +756,7 @@ handle_gitlab() {
 
     local api_url="https://gitlab.com/api/v4/projects/$encoded_project/merge_requests/$mr_iid"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       local title state author body created_at web_url source_branch target_branch
       title=$(jq -rc '.title' <<< "$json_data")
       state=$(jq -rc '.state' <<< "$json_data")
@@ -766,7 +793,7 @@ handle_gitlab() {
 
     local api_url="https://gitlab.com/api/v4/projects/$encoded_project/issues?state=opened"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_list_table "GitLab Open Issues: $project_path" "> **Project:** [$project_path]($raw_project_path)" "$json_data" "simple" ".iid" ".author.username" ".web_url"
     else
       echo "Error: Could not retrieve GitLab issues list from API ($api_url)" >&2
@@ -782,7 +809,7 @@ handle_gitlab() {
 
     local api_url="https://gitlab.com/api/v4/projects/$encoded_project/merge_requests?state=opened"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_list_table "GitLab Open Merge Requests: $project_path" "> **Project:** [$project_path]($raw_project_path)" "$json_data" "branches" ".iid" ".author.username" ".web_url"
     else
       echo "Error: Could not retrieve GitLab MRs list from API ($api_url)" >&2
@@ -800,7 +827,7 @@ handle_gitlab() {
     local api_url="https://gitlab.com/api/v4/projects/$encoded_project"
 
     local meta_json
-    if ! meta_json=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if ! meta_json=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       echo "Error: Could not retrieve GitLab project metadata from $api_url" >&2
       exit 2
     fi
@@ -827,7 +854,7 @@ handle_gitlab() {
     if [[ -n $readme_url_web ]]; then
       local readme_raw_url="${readme_url_web//\/-\/blob\//\/-\/raw\/}"
       local readme_content
-      readme_content=$(curl "${CURL_OPTS[@]}" "$readme_raw_url" 2>/dev/null)
+      readme_content=$(curl_wrapper "${CURL_OPTS[@]}" "$readme_raw_url" 2>/dev/null)
       if [[ -n $readme_content ]]; then
         echo "### 📖 README"
         echo ""
@@ -858,7 +885,7 @@ handle_codeberg() {
     log "Codeberg Raw: owner=$owner repo=$repo ref_type=$ref_type ref=$ref file=$file_path"
 
     local raw_content
-    if raw_content=$(curl "${CURL_OPTS[@]}" "$url"); then
+    if raw_content=$(curl_wrapper "${CURL_OPTS[@]}" "$url"); then
       render_raw_file "$file_path" " (Codeberg Raw)" "> **Repository:** [$owner/$repo]($url) | **Ref:** \`$ref\`" "$raw_content"
     else
       echo "Error: Could not retrieve raw file from $url" >&2
@@ -877,12 +904,12 @@ handle_codeberg() {
     local raw_url="https://codeberg.org/$owner/$repo/raw/$ref_type/$ref/$file_path"
     local raw_content
 
-    if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
+    if raw_content=$(curl_wrapper "${CURL_OPTS[@]}" "$raw_url"); then
       render_raw_file "$file_path" " (Codeberg)" "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`" "$raw_content"
     else
       local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/contents/$file_path?ref=$ref"
       local json_data
-      if json_data=$(curl "${CURL_OPTS[@]}" "$api_url" 2>/dev/null); then
+      if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url" 2>/dev/null); then
         if jq -e 'type == "array"' <<< "$json_data" >/dev/null 2>&1; then
           render_dir_table "Directory (Codeberg): \`/$file_path\`" "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`" "$json_data" "size" "$url"
         else
@@ -905,13 +932,13 @@ handle_codeberg() {
 
     local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/contents/$file_path?ref=$ref"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url" 2>/dev/null); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url" 2>/dev/null); then
       if jq -e 'type == "array"' <<< "$json_data" >/dev/null 2>&1; then
         render_dir_table "Directory (Codeberg): \`/$file_path\`" "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`" "$json_data" "size" "$url"
       else
         local raw_url="https://codeberg.org/$owner/$repo/raw/branch/$ref/$file_path"
         local raw_content
-        if raw_content=$(curl "${CURL_OPTS[@]}" "$raw_url"); then
+        if raw_content=$(curl_wrapper "${CURL_OPTS[@]}" "$raw_url"); then
           render_raw_file "$file_path" " (Codeberg)" "> **Repository:** [$owner/$repo](${url%%/src/*}) | **Ref:** \`$ref\`" "$raw_content"
         else
           echo "Error: Could not retrieve raw file from $raw_url" >&2
@@ -932,7 +959,7 @@ handle_codeberg() {
 
     local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/issues/$number"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_issue_card "$json_data" "Codeberg" "🏔️" "Issue" "$number" "$owner" "$repo" ".user.username" "https://codeberg.org/$owner/$repo"
     else
       echo "Error: Could not retrieve Codeberg issue from API ($api_url)" >&2
@@ -948,7 +975,7 @@ handle_codeberg() {
 
     local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/pulls/$number"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_issue_card "$json_data" "Codeberg" "🏔️" "Pull Request" "$number" "$owner" "$repo" ".user.username" "https://codeberg.org/$owner/$repo"
     else
       echo "Error: Could not retrieve Codeberg pull request from API ($api_url)" >&2
@@ -963,7 +990,7 @@ handle_codeberg() {
 
     local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/issues?state=open&type=issues"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_list_table "Codeberg Open Issues: $owner/$repo" "> **Repository:** [codeberg.org/$owner/$repo](https://codeberg.org/$owner/$repo)" "$json_data" "comments" ".number" ".user.username" ".html_url"
     else
       echo "Error: Could not retrieve Codeberg issues list from API ($api_url)" >&2
@@ -978,7 +1005,7 @@ handle_codeberg() {
 
     local api_url="https://codeberg.org/api/v1/repos/$owner/$repo/pulls?state=open"
     local json_data
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       render_list_table "Codeberg Open Pull Requests: $owner/$repo" "> **Repository:** [codeberg.org/$owner/$repo](https://codeberg.org/$owner/$repo)" "$json_data" "simple" ".number" ".user.username" ".html_url"
     else
       echo "Error: Could not retrieve Codeberg pulls list from API ($api_url)" >&2
@@ -994,7 +1021,7 @@ handle_codeberg() {
 
       local api_url="https://codeberg.org/api/v1/repos/$owner/$repo"
       local meta_json
-      if ! meta_json=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+      if ! meta_json=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
         echo "Error: Could not retrieve repository metadata from $api_url" >&2
         exit 2
       fi
@@ -1023,13 +1050,13 @@ handle_codeberg() {
 
       local readme_url="https://codeberg.org/$owner/$repo/raw/branch/$def_branch/README.md"
       local readme_content
-      if readme_content=$(curl "${CURL_OPTS[@]}" "$readme_url" 2>/dev/null); then
+      if readme_content=$(curl_wrapper "${CURL_OPTS[@]}" "$readme_url" 2>/dev/null); then
         echo "### 📖 README.md"
         echo ""
         echo "$readme_content"
       else
         readme_url="https://codeberg.org/$owner/$repo/raw/branch/$def_branch/readme.md"
-        if readme_content=$(curl "${CURL_OPTS[@]}" "$readme_url" 2>/dev/null); then
+        if readme_content=$(curl_wrapper "${CURL_OPTS[@]}" "$readme_url" 2>/dev/null); then
           echo "### 📖 readme.md"
           echo ""
           echo "$readme_content"
@@ -1049,7 +1076,7 @@ handle_sourcehut() {
   local url="$1"
   log "Handling URL as SourceHut target: $url"
 
-  local sourcehut_curl_opts=()
+  local -a sourcehut_curl_opts ; sourcehut_curl_opts=()
   for opt in "${CURL_OPTS[@]}"; do
     if [[ $opt == "$USER_AGENT" ]]; then
       sourcehut_curl_opts+=("curl/7.81.0")
@@ -1067,7 +1094,7 @@ handle_sourcehut() {
 
     local hub_url="https://sr.ht/$owner/$repo/"
     local html_data
-    if html_data=$(curl "${sourcehut_curl_opts[@]}" "$hub_url") && [[ -n $html_data ]]; then
+    if html_data=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$hub_url") && [[ -n $html_data ]]; then
       render_sourcehut_hub "$html_data" "SourceHut Project" "$hub_url"
       return 0
     else
@@ -1084,13 +1111,13 @@ handle_sourcehut() {
     log "SourceHut Raw/Blob: owner=$owner repo=$repo branch=$branch file=$file_path"
 
     local raw_content
-    if raw_content=$(curl "${sourcehut_curl_opts[@]}" "$url" 2>/dev/null); then
+    if raw_content=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$url" 2>/dev/null); then
       render_raw_file "$file_path" " (SourceHut)" "> **Repository:** [$owner/$repo](${url%%/blob/*}) | **Branch:** \`$branch\`" "$raw_content"
     else
       log "Git raw/blob returned 404, falling back to Hub project page..."
       local hub_url="https://sr.ht/$owner/$repo/"
       local html_data
-      if html_data=$(curl "${sourcehut_curl_opts[@]}" "$hub_url" 2>/dev/null) && [[ -n $html_data ]]; then
+      if html_data=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$hub_url" 2>/dev/null) && [[ -n $html_data ]]; then
         render_sourcehut_hub "$html_data" "SourceHut Project (Fallback from blob 404)" "$hub_url"
         return 0
       else
@@ -1109,7 +1136,7 @@ handle_sourcehut() {
 
     local raw_url="https://git.sr.ht/$owner/$repo/blob/$branch/$file_path"
     local raw_content
-    if raw_content=$(curl "${sourcehut_curl_opts[@]}" "$raw_url" 2>/dev/null); then
+    if raw_content=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$raw_url" 2>/dev/null); then
       render_raw_file "$file_path" " (SourceHut)" "> **Repository:** [$owner/$repo](${url%%/tree/*}) | **Branch:** \`$branch\`" "$raw_content"
     else
       echo "Error: Could not retrieve raw file from $raw_url" >&2
@@ -1123,7 +1150,7 @@ handle_sourcehut() {
     log "SourceHut Repo Home: owner=$owner repo=$repo"
 
     local html_data
-    if html_data=$(curl "${sourcehut_curl_opts[@]}" "$url" 2>/dev/null); then
+    if html_data=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$url" 2>/dev/null); then
       local title def_branch clone_url
       title=$(htmlq "title" --text <<< "$html_data" | xargs)
       def_branch=$(htmlq 'meta[name="vcs:default-branch"]' --attribute content <<< "$html_data" 2>/dev/null | head -n 1)
@@ -1141,13 +1168,13 @@ handle_sourcehut() {
 
       local readme_url="https://git.sr.ht/$owner/$repo/blob/$def_branch/README.md"
       local readme_content
-      if readme_content=$(curl "${sourcehut_curl_opts[@]}" "$readme_url" 2>/dev/null); then
+      if readme_content=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$readme_url" 2>/dev/null); then
         echo "### 📖 README.md"
         echo ""
         echo "$readme_content"
       else
         readme_url="https://git.sr.ht/$owner/$repo/blob/$def_branch/readme.md"
-        if readme_content=$(curl "${sourcehut_curl_opts[@]}" "$readme_url" 2>/dev/null); then
+        if readme_content=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$readme_url" 2>/dev/null); then
           echo "### 📖 readme.md"
           echo ""
           echo "$readme_content"
@@ -1164,7 +1191,7 @@ handle_sourcehut() {
     else
       log "Git repo home returned 404, falling back to Hub project page..."
       local hub_url="https://sr.ht/$owner/$repo/"
-      if html_data=$(curl "${sourcehut_curl_opts[@]}" "$hub_url" 2>/dev/null) && [[ -n $html_data ]]; then
+      if html_data=$(curl_wrapper "${sourcehut_curl_opts[@]}" "$hub_url" 2>/dev/null) && [[ -n $html_data ]]; then
         render_sourcehut_hub "$html_data" "SourceHut Project (Fallback from Git 404)" "$hub_url"
         return 0
       else
@@ -1192,7 +1219,7 @@ handle_wikipedia() {
     local api_url="https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext&exlimit=1&titles=${title_encoded}&format=json&redirects=1"
     local json_data
 
-    if json_data=$(curl "${CURL_OPTS[@]}" "$api_url"); then
+    if json_data=$(curl_wrapper "${CURL_OPTS[@]}" "$api_url"); then
       local title content
       title=$(jq -rc '.query.pages | to_entries[0].value.title' <<< "$json_data")
       content=$(jq -rc '.query.pages | to_entries[0].value.extract' <<< "$json_data")
@@ -1237,7 +1264,7 @@ handle_markdown_fallback() {
   fi
 
   local response_body
-  if response_body=$(curl "${CURL_OPTS[@]}" "$target_url" 2>/dev/null) && [[ -n $response_body ]]; then
+  if response_body=$(curl_wrapper "${CURL_OPTS[@]}" "$target_url" 2>/dev/null) && [[ -n $response_body ]]; then
     local body_chunk="${response_body:0:1000}"
     local body_chunk_lc
     body_chunk_lc=$(echo "$body_chunk" | tr '[:upper:]' '[:lower:]')
@@ -1278,7 +1305,7 @@ handle_fallback() {
   local url="$1"
 
   local html_data
-  if ! html_data=$(curl "${CURL_OPTS[@]}" "$url") || [[ -z $html_data ]]; then
+  if ! html_data=$(curl_wrapper "${CURL_OPTS[@]}" "$url") || [[ -z $html_data ]]; then
     echo "Error: Failed to retrieve HTML from $url" >&2
     exit 2
   fi

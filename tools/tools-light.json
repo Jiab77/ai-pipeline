@@ -616,17 +616,14 @@
     "type": "function",
     "function": {
       "name": "jarnet_send",
-      "description": "Send a direct message to a peer over the secure JarNet P2P Tor network.",
+      "description": "Send a direct message to a peer over the secure JarNet P2P Tor network (protocol type must be 'msg' by default).",
       "parameters": {
         "type": "object",
-        "required": [
-          "peer",
-          "body"
-        ],
+        "required": ["peer", "body"],
         "properties": {
           "peer": {
             "type": "string",
-            "description": "Recipient peer alias or raw 56-char v3 .onion address."
+            "description": "Recipient peer alias (e.g. 'russet-crane', 'hakim') or raw 56-character v3 .onion address."
           },
           "body": {
             "type": "string",
@@ -634,7 +631,8 @@
           },
           "type": {
             "type": "string",
-            "description": "Optional MIME type (default: 'text/plain')."
+            "description": "JARNET protocol message type. Must be one of: 'msg' (default for normal messages), 'eta', or 'bye'.",
+            "enum": ["msg", "eta", "bye"]
           },
           "re": {
             "type": "string",

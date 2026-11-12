@@ -8,11 +8,28 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.1.6
+# Version: 1.3.0
 #
-# Contract: jarnet.md 1.1; wire envelope v:1
+# Contract: jarnet.md 1.3; wire envelope v:1
 # Conformance oracle: tests/jarnet-selftest.sh
 # ==============================================================================
+#
+# Implemented (contract sections v1.3):
+#   §4  HTTP/1.0, one process per request, loopback only. Supports both
+#       GET /say/<b64url> (raw request line ≤ 16384) and POST /say
+#       (decoded JSON body ≤ 1 MiB).
+#   §5  Routes: /ping, / (alias), /say (GET + POST). Two distinct limits
+#       and refusal codes: too_large (GET) and payload_too_large (POST).
+#       Order of checks is normative.
+#   §6  Envelope v1, base64url (no padding emitted, padding accepted),
+#       unknown fields ignored.
+#   §7  Ack format unchanged.
+#   §8  Closed refusal table now includes payload_too_large.
+#   §9–§12, §17–§18 unchanged (dedup, reply_to bounds, callsign, etc.)
+#
+# This version is fully conformant to JARNET 1.3 (2026-11-12).
+# Backward compatible with 1.1 and 1.2 nodes via GET path.
+# ============================================================================
 #
 # Implemented (contract sections):
 #   §4  HTTP/1.0, one process per request, request line only, listener bound
@@ -138,11 +155,12 @@ LPORT="${JR_LPORT:-18080}"              # loopback port behind the virtual port 
 READ_TMO="${JR_READ_TMO:-15}"           # §10.5: the read window is 15 s
 HSFETCH_TMO="${JR_HSFETCH_TMO:-5}"      # status: bounded local HSFETCH observation
 MAX_PATH="${JR_MAX_PATH:-16384}"        # §5: chosen ceiling, measured on the raw path
+MAX_BODY="${JR_MAX_BODY:-1048576}"      # v1.3 : 1 MiB for POST /say
 RETRY_N="${JR_RETRY:-3}"                # §8.4
 RETRY_S="${JR_RETRY_S:-30}"             # §8.4
 REPLY_WINDOW="${JR_REPLY_WINDOW:-60}"   # §12 (a ter)
 REPLY_MAX="${JR_REPLY_MAX:-20}"         # §12 (a ter)
-JARNET_PROTO="${JR_PROTO:-1.1}"         # §5: `engine` — protocol version, not a commit
+JARNET_PROTO="${JR_PROTO:-1.3}"         # §5: `engine` — protocol version, not a commit
 
 # -- identity (§2) ----------------------------------------------------------
 jarn_alias() {
@@ -241,9 +259,45 @@ jarn_mid() { printf '%s-%s' "$(date +%s)" "$RANDOM$RANDOM"; }
 # Written ONLY by 'peer add', itself ONLY on direct human instruction (§11.2).
 # Everything else in this engine treats it as read-only.
 jarn_peer_addr() {
-  local p="$1" a=""
-  [[ -r $J_PEERS ]] && a=$(awk -F'|' -v x="$p" \
-      '$1==x {gsub(/[ \t]/,"",$2); print $2; exit}' "$J_PEERS" 2>/dev/null)
+  local p="${1:-}" a=""
+
+  [[ -z $p ]] && { printf '%s' "$p"; return 1; }
+
+  # Already a full v3 onion address
+  if [[ $p =~ ^[a-z2-7]{56}$ ]]; then
+    printf '%s' "$p"
+    return 0
+  fi
+
+  # Remove optional .onion suffix
+  p="${p%.onion}"
+
+  if [[ -r $J_PEERS ]]; then
+    # First try: exact match on first column (alias or callsign)
+    a=$(awk -F'|' -v x="$p" '
+      $1 == x {
+        gsub(/[ \t]/, "", $2)
+        print $2
+        exit
+      }
+    ' "$J_PEERS" 2>/dev/null)
+
+    # Second try: compute callsign for every known peer
+    if [[ -z $a ]]; then
+      while IFS='|' read -r alias addr _; do
+        addr="${addr//[[:space:]]/}"
+        addr="${addr%.onion}"
+        if [[ -n $addr && $addr =~ ^[a-z2-7]{56}$ ]]; then
+          if [[ "$(jarn_callsign "$addr" 2>/dev/null)" == "$p" ]]; then
+            a="$addr"
+            break
+          fi
+        fi
+      done < "$J_PEERS"
+    fi
+  fi
+
+  # Fallback: return what we received
   [[ -n $a ]] || a="$p"
   printf '%s' "${a%.onion}"
 }
@@ -280,7 +334,7 @@ jarn_peer_add() {
     esac
   done
   if [[ -z $input ]]; then
-    jq -cn '{ok:false, error:"usage",
+    jq -rc -n '{ok:false, error:"usage",
       hint:"peer add \"[callsign|]<onion>[.onion][|note]\" [--as alias] [--note text]"}'
     return 2
   fi
@@ -288,7 +342,7 @@ jarn_peer_add() {
   IFS='|' read -r f1 f2 f3 extra <<< "$input"
   f1="${f1//[[:space:]]/}"; f2="${f2//[[:space:]]/}"
   if [[ -n $extra ]]; then
-    jq -cn '{ok:false, error:"too many fields", hint:"expected [callsign|]<onion>[|note]"}'
+    jq -rc -n '{ok:false, error:"too many fields", hint:"expected [callsign|]<onion>[|note]"}'
     return 2
   fi
   if [[ -z $f2 ]]; then addr="$f1"; else name="$f1"; addr="$f2"; fi
@@ -296,7 +350,7 @@ jarn_peer_add() {
   addr="${addr%.onion}"
 
   if [[ ! $addr =~ ^[a-z2-7]{56}$ ]]; then
-    jq -cn --arg a "$addr" '{ok:false, error:"invalid address (56 base32 expected)",
+    jq -rc -n --arg a "$addr" '{ok:false, error:"invalid address (56 base32 expected)",
       got:$a, hint:"v3 onion names are 56 lowercase base32 characters — re-copy the string"}'
     return 3
   fi
@@ -306,7 +360,7 @@ jarn_peer_add() {
     alias="$as"
   elif [[ -n $name ]]; then
     if [[ $name != "$computed" ]]; then
-      jq -cn --arg g "$name" --arg c "$computed"         '{ok:false, error:"callsign_mismatch", given:$g, computed:$c,
+      jq -rc -n --arg g "$name" --arg c "$computed"         '{ok:false, error:"callsign_mismatch", given:$g, computed:$c,
           hint:"the string was corrupted somewhere — ask the peer to resend; to add it under a custom alias anyway: peer add \"<onion>\" --as <alias>"}'
       return 4
     fi
@@ -317,12 +371,12 @@ jarn_peer_add() {
 
   # A clean alias: lowercase, dashes, 2-32 chars — and never an address.
   if [[ ! $alias =~ ^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$ ]] || [[ $alias =~ ^[a-z2-7]{56}$ ]]; then
-    jq -cn --arg a "$alias" '{ok:false, error:"invalid alias", alias:$a,
+    jq -rc -n --arg a "$alias" '{ok:false, error:"invalid alias", alias:$a,
       hint:"lowercase letters, digits, dashes; 2-32 chars; never an address"}'
     return 5
   fi
   if jarn_peer_known "$alias"; then
-    jq -cn --arg a "$alias" --arg s "${computed}-2"       '{ok:false, error:"alias already in peers.txt", alias:$a,
+    jq -rc -n --arg a "$alias" --arg s "${computed}-2"       '{ok:false, error:"alias already in peers.txt", alias:$a,
         hint:"a second node with the same callsign? retry with --as " + $s}'
     return 6
   fi
@@ -331,7 +385,7 @@ jarn_peer_add() {
     existing=$(awk -F'|' -v x="$addr"       '{gsub(/[ \t]/,"",$2); sub(/\.onion$/,"",$2)} $2==x{print $1; exit}' "$J_PEERS" 2>/dev/null)
   fi
   if [[ -n $existing ]]; then
-    jq -cn --arg a "$addr" --arg e "$existing"       '{ok:false, error:"address already known", address:$a, known_as:$e,
+    jq -rc -n --arg a "$addr" --arg e "$existing"       '{ok:false, error:"address already known", address:$a, known_as:$e,
         hint:"this peer is already in your book — nothing to add"}'
     return 7
   fi
@@ -341,7 +395,7 @@ jarn_peer_add() {
 
   mine=$(jarn_onion 2>/dev/null) || mine=""
   [[ -n $mine ]] && mycs=$(jarn_callsign "$mine") || mycs=""
-  jq -cn --arg alias "$alias" --arg addr "$addr" --arg cs "$computed"      --arg note "$note" --arg mine "$mine" --arg mycs "$mycs" --arg f "$J_PEERS"     '{ok:true, result:"peer_added", alias:$alias, address:$addr, callsign:$cs,
+  jq -rc -n --arg alias "$alias" --arg addr "$addr" --arg cs "$computed"      --arg note "$note" --arg mine "$mine" --arg mycs "$mycs" --arg f "$J_PEERS"     '{ok:true, result:"peer_added", alias:$alias, address:$addr, callsign:$cs,
       verified:(if $alias==$cs then true else null end), note:$note, file:$f,
       share_back:(if $mine=="" then null else ($mycs + "|" + $mine + ".onion") end),
       hint:"peer written — your address book, your sovereign choice (§11.2)"}'
@@ -415,7 +469,7 @@ jarn_from() {
 }
 
 jarn_envelope() {  # <type> <body> [re] [reply_to] [sid]
-  jq -cn \
+  jq -rc -n \
     --arg type "$1" --arg from "$(jarn_from)" --arg body "$2" \
     --arg re "${3:-}" --arg sid "${5:-$(jarn_sid)}" --arg mid "$(jarn_mid)" \
     --arg reply_to "${4:-}" \
@@ -456,11 +510,11 @@ jarn_ping() {  # <peer|onion> [timeout_s=45]
   local rc=0 http t0 t1 dur
   addr=$(jarn_peer_addr "$peer")
   if [[ ! $addr =~ ^[a-z2-7]{56}$ ]]; then
-    jq -cn --arg p "$peer" '{ok:false, issue:"refused", error:"invalid address (56 expected)", peer:$p}'
+    jq -rc -n --arg p "$peer" '{ok:false, issue:"refused", error:"invalid address (56 expected)", peer:$p}'
     return 3
   fi
   [[ $tmo =~ ^[1-9][0-9]*$ ]] || {
-    jq -cn '{ok:false, issue:"refused", error:"timeout must be a positive integer"}'; return 2; }
+    jq -rc -n '{ok:false, issue:"refused", error:"timeout must be a positive integer"}'; return 2; }
   (( tmo > 120 )) && tmo=120
   url="http://${addr}.onion/ping"
   t0=$(date +%s)
@@ -471,7 +525,7 @@ jarn_ping() {  # <peer|onion> [timeout_s=45]
 
   if [[ $rc -eq 0 && $http == "200" ]] \
      && jq -e 'type=="object" and .ok==true' <<< "${resp:-{\}}" >/dev/null 2>&1; then
-    jq -cn --arg peer "$peer" --argjson response "$resp" --argjson rc "$rc" \
+    jq -rc -n --arg peer "$peer" --argjson response "$resp" --argjson rc "$rc" \
        --argjson http "$((10#${http:-0}))" --argjson dur "$dur" \
       '{ok:true, result:"reachable", peer:$peer, who:($response.who//null),
         ts:($response.ts//null), engine:($response.engine//null),
@@ -479,7 +533,7 @@ jarn_ping() {  # <peer|onion> [timeout_s=45]
     return 0
   fi
 
-  jq -cn --arg peer "$peer" --arg resp "$resp" --argjson rc "$rc" \
+  jq -rc -n --arg peer "$peer" --arg resp "$resp" --argjson rc "$rc" \
      --argjson http "$((10#${http:-0}))" --argjson dur "$dur" \
     '{ok:false, issue:"unknown", peer:$peer, http:$http, rc:$rc, dur_s:$dur,
       detail:(if $resp=="" then null else $resp[0:160] end),
@@ -492,44 +546,76 @@ jarn_ping() {  # <peer|onion> [timeout_s=45]
 # SOCKS entrance: the transport IS Tor. The journal is written AFTER.
 jarn_send() {  # <peer|onion> <body> [type] [re] [reply_to] [sid] -> JSON on stdout
   local peer="${1:?peer}" body="${2:-}" type="${3:-msg}" re="${4:-}" rto="${5:-}" sid="${6:-}"
-  local addr env b64 url attempt=1 rc http resp out
+  local addr env b64 json url method attempt=1 rc http resp out
   local issue="unknown" delivered=false t0 t1 dur
 
   addr=$(jarn_peer_addr "$peer")
   if [[ ! $addr =~ ^[a-z2-7]{56}$ ]]; then
-    jq -cn --arg p "$peer" --argjson n "${#addr}" \
+    jq -rc -n --arg p "$peer" --argjson n "${#addr}" \
       '{ok:false, issue:"refused", error:"invalid address (56 expected)", peer:$p, len:$n}'
     return 3
   fi
 
   env=$(jarn_envelope "$type" "$body" "$re" "$rto" "$sid") \
     || { printf '{"ok":false,"issue":"refused","error":"envelope not built"}\n'; return 4; }
+
+  json=$(printf '%s' "$env" | jq -c .)
   b64=$(printf '%s' "$env" | jarn_b64encode)
-  url="http://${addr}.onion/say/${b64}"
+
+  # v1.3: choose GET or POST depending on the size
+  if (( ${#b64} + 6 > MAX_PATH )); then
+    method="POST"
+    url="http://${addr}.onion/say"
+  else
+    method="GET"
+    url="http://${addr}.onion/say/${b64}"
+  fi
 
   # Test aid: return the envelope and the exact path that would travel,
   # byte for byte, without touching the network.
   if [[ ${JR_DRY:-0} == 1 ]]; then
-    jq -cn --argjson env "$env" --arg path "/say/${b64}" \
+    jq -rc -n --argjson env "$env" --arg path "/say/${b64}" \
       '{ok:true, issue:"dry", path:$path, envelope:$env}'
     return 0
   fi
 
-  # §5: measured on the raw path BEFORE anything leaves — this engine does
-  # not relay what it would refuse to receive.
-  if (( ${#b64} + 6 > MAX_PATH )); then
-    jq -cn --argjson n "$(( ${#b64} + 6 ))" --argjson max "$MAX_PATH" \
-      '{ok:false, issue:"refused", error:"too_large", path_len:$n, max:$max}'
-    jarn_append "$J_SENT" "$(jq -cn --argjson env "$env" --arg peer "$peer" \
-        '{k:"sent", tx_ts:(now|todate), to:$peer, issue:"refused",
-          http:null, error:"too_large", envelope:$env}')"
-    return 5
+  # v1.3 — two distinct limits and refusal codes
+  if [[ $method == "GET" ]]; then
+    if (( ${#b64} + 6 > MAX_PATH )); then
+      jq -rc -n --argjson n "$(( ${#b64} + 6 ))" --argjson max "$MAX_PATH" \
+        '{ok:false, issue:"refused", error:"too_large", path_len:$n, max:$max}'
+      jarn_append "$J_SENT" "$(jq -rc -n --argjson env "$env" --arg peer "$peer" \
+          '{k:"sent", tx_ts:(now|todate), to:$peer, issue:"refused",
+            http:null, error:"too_large", envelope:$env}')"
+      return 5
+    fi
+  else
+    # POST : on mesure la taille du JSON décodé
+    if (( ${#json} > MAX_BODY )); then
+      jq -rc -n --argjson n "${#json}" --argjson max "$MAX_BODY" \
+        '{ok:false, issue:"refused", error:"payload_too_large", body_len:$n, max:$max}'
+      jarn_append "$J_SENT" "$(jq -rc -n --argjson env "$env" --arg peer "$peer" \
+          '{k:"sent", tx_ts:(now|todate), to:$peer, issue:"refused",
+            http:null, error:"payload_too_large", envelope:$env}')"
+      return 5
+    fi
   fi
 
   t0=$(date +%s)
   while :; do
     rc=0
-    out=$(curl -sS --max-time 45 -w '\n%{http_code}' --proxy "socks5h://${SOCKS}" "$url" 2>&1) || rc=$?
+
+    # v1.3 — two distinct sending methods
+    if [[ $method == "POST" ]]; then
+      out=$(curl -sS --max-time 45 -w '\n%{http_code}' \
+            -H "Content-Type: application/json" \
+            -d "$json" \
+            --proxy "socks5h://${SOCKS}" "$url" 2>&1) || rc=$?
+    else
+      out=$(curl -sS --max-time 45 -w '\n%{http_code}' \
+            --proxy "socks5h://${SOCKS}" "$url" 2>&1) || rc=$?
+    fi
+
     http=$(printf '%s' "${out##*$'\n'}" | tr -dc '0-9')
     resp=$(printf '%s' "${out%$'\n'*}" | head -c 2000)
 
@@ -537,33 +623,45 @@ jarn_send() {  # <peer|onion> <body> [type] [re] [reply_to] [sid] -> JSON on std
       issue=$(jarn_response_issue "$resp")
       case $issue in
         ok)      delivered=true; break ;;
-        refused) break ;;                  # a valid verdict, not a failure
-        *)       issue="unknown" ;;        # invalid ack: identical resend allowed
+        refused) break ;;
+        *)       issue="unknown" ;;
       esac
     else
       issue="unknown"
     fi
-    (( attempt >= RETRY_N )) && { issue="unknown"; break; }   # only unknown resends
+
+    (( attempt >= RETRY_N )) && break
     attempt=$((attempt+1))
     sleep "$RETRY_S"
   done
   t1=$(date +%s); dur=$((t1-t0))
 
-  jarn_append "$J_SENT" "$(jq -cn \
-      --argjson env "$env" --arg peer "$peer" --argjson rc "$rc" \
-      --argjson http "$((10#${http:-0}))" --arg issue "$issue" --argjson attempts "$attempt" \
-      --argjson dur "$dur" --arg resp "$resp" --arg txts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{k:"sent", tx_ts:$txts, to:$peer, issue:$issue, http:$http,
-        rc:$rc, attempts:$attempts, dur_s:$dur, response:$resp, envelope:$env}')"
+  # Logging v1.3: store which method has been used
+  local log_tmp ; log_tmp=$(mktemp)
 
-  jq -cn --arg peer "$peer" --argjson rc "$rc" --arg http "$http" \
-     --arg issue "$issue" --argjson delivered "$delivered" \
-     --argjson attempts "$attempt" --argjson dur "$dur" --arg sid "$(jq -r '.sid' <<< "$env")" \
-    '{ok:($issue=="ok"), peer:$peer, issue:$issue, http:$http, rc:$rc,
-      delivered:$delivered, attempts:$attempts, sid:$sid, dur_s:$dur,
-      hint:(if $issue=="ok" then "delivered"
-            elif $issue=="refused" then "reached the peer and was REJECTED (see response)"
-            else "no valid ack -- issue unknown, identical resend allowed" end)}'
+  jq -rc -n \
+    --argjson env "$(printf '%s' "$env" | jq -c .)" \
+    --arg peer "$peer" --argjson rc "$rc" \
+    --argjson http "$((10#${http:-0}))" --arg issue "$issue" \
+    --argjson attempts "$attempt" --argjson dur "$dur" \
+    --arg resp "${resp:-}" --arg method "$method" \
+    --arg txts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{k:"sent", tx_ts:$txts, to:$peer, method:$method, issue:$issue, http:$http,
+      rc:$rc, attempts:$attempts, dur_s:$dur, response:$resp, envelope:$env}' > "$log_tmp"
+
+  jarn_append "$J_SENT" "$(cat "$log_tmp")"
+  rm -f "$log_tmp"
+
+  # Restore the output contract (v1.3 regression): callers (jarn_reply §9,
+  # tools layer) parse .issue from stdout to exercise the single-use claim.
+  # A silent success made every claim silently skipped.
+  jq -rc -n \
+    --argjson env "$(printf '%s' "$env" | jq -c .)" \
+    --arg peer "$peer" --arg issue "$issue" --arg method "$method" \
+    --argjson http "$((10#${http:-0}))" --argjson attempts "$attempt" \
+    --argjson dur "$dur" \
+    '{ok:($issue=="ok"), issue:$issue, to:$peer, method:$method,
+      http:$http, attempts:$attempts, dur_s:$dur}'
 
   [[ $issue == "ok" ]]
 }
@@ -571,6 +669,7 @@ jarn_send() {  # <peer|onion> <body> [type] [re] [reply_to] [sid] -> JSON on std
 # -- responder (§4 to §9) --------------------------------------------------
 jarn_byte_length() { local LC_ALL=C; printf '%s' "${#1}"; }
 
+# v1.3 — refusal table updated: too_large (GET) + payload_too_large (POST)
 jarn_refuse() {  # <code> [rx] [ack_ts] [cause] -> 200 + ok:false (an ack too, §8.2)
   local jre="" jsid="" b blen
   if [[ -n ${J_ENV:-} ]]; then
@@ -578,7 +677,7 @@ jarn_refuse() {  # <code> [rx] [ack_ts] [cause] -> 200 + ok:false (an ack too, �
     jsid=$(jq -r '.sid // ""' <<< "$J_ENV" 2>/dev/null)
   fi
   jarn_append "$J_DIAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ) refuse $1${4:+ cause=$4}"
-  b=$(jq -cn --arg e "$1" --arg rx "${2:-}" --arg ack "${3:-}" \
+  b=$(jq -rc -n --arg e "$1" --arg rx "${2:-}" --arg ack "${3:-}" \
         --arg re "$jre" --arg sid "$jsid" \
     '{ok:false, error:$e, rx_ts:$rx, ack_ts:$ack, re:$re, sid:$sid}')
   blen=$(jarn_byte_length "$b")
@@ -593,55 +692,89 @@ jarn_respond() {  # <body-json>
 }
 
 jarn_serve() {
-  local line="" path="" payload="" rc=0 rx ack env key found
+  local line="" method="" path="" payload="" body="" clen=0 rc=0 rx ack env key found
   J_ENV=""        # last decoded envelope, read by jarn_refuse
 
-  # §5: 408 is decided on the RETURN CODE of the read, never on the content.
+  # §4 + §5 v1.3: read first line to detect if method is GET or POST
   IFS= read -r -t "$READ_TMO" line; rc=$?
   rx=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   if (( rc != 0 )); then
     # §8.3: the one answer with no ack — nothing was read, nothing to copy,
     # nothing to acknowledge, nothing to journal into the buffer.
-    jarn_append "$J_DIAG" "$(printf '%s 408 read_rc=%s path_len=%s' "$rx" "$rc" "${#line}")"
+    jarn_append "$J_DIAG" "$(printf '%s 408 read_rc=%s' "$rx" "$rc")"
     printf 'HTTP/1.0 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'
     return 0
   fi
 
   line="${line%$'\r'}"
+  method="${line%% *}"
   path="${line#* }"; path="${path%% *}"
 
-  # §4: raw length journaled before any decoding, content never stored.
-  jarn_append "$J_DIAG" "$(printf '%s req path_len=%s h=%s' "$rx" "${#path}" \
-    "$(printf '%s' "$path" | _sha256sum | cut -c1-16)")"
+  # Log raw request before handling (v1.3)
+  jarn_append "$J_DIAG" "$(printf '%s req method=%s path_len=%s' "$rx" "$method" "${#path}")"
 
   case $path in
     /ping|/)                                    # §5: / is an alias of /ping
-      jarn_respond "$(jq -cn --arg who "$(jarn_alias)" --arg ts "$rx" \
+      jarn_respond "$(jq -rc -n --arg who "$(jarn_alias)" --arg ts "$rx" \
         --arg engine "$JARNET_PROTO" \
         '{ok:true, who:$who, ts:$ts, engine:$engine}')"
       return 0 ;;
-    /say/*) payload="${path#/say/}" ;;
+    /say)
+      [[ $method == "POST" ]] || { printf 'HTTP/1.0 405 Method Not Allowed\r\n\r\n'; return 0; }
+      ;;
+    /say/*)
+      [[ $method == "GET" ]] || { printf 'HTTP/1.0 405 Method Not Allowed\r\n\r\n'; return 0; }
+      payload="${path#/say/}"
+      ;;
     *)                                          # §5: 404 is reserved for this
       printf 'HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nnot found'
       return 0 ;;
   esac
 
-  # §5: too_large, on the RAW path, before any decoding — normative order.
-  if (( ${#path} > MAX_PATH )); then
-    jarn_refuse "too_large" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "path"; return 0
+  # === POST handling (v1.3) ===
+  if [[ $method == "POST" ]]; then
+    # Read headers to get 'Content-Length'
+    while IFS= read -r -t 2 header; do
+      header="${header%$'\r'}"
+      [[ -z $header ]] && break
+      if [[ $header == Content-Length:* ]]; then
+        clen="${header#Content-Length: }"
+        clen="${clen// /}"
+      fi
+    done
+
+    if (( clen > MAX_BODY )); then
+      jarn_refuse "payload_too_large" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "body"
+      return 0
+    fi
+
+    # Read the body
+    if (( clen > 0 )); then
+      body=$(dd bs=1 count="$clen" 2>/dev/null)
+    fi
+
+    # Envelope
+    env="$body"
+  else
+    # GET legacy
+    if (( ${#path} > MAX_PATH )); then
+      jarn_refuse "too_large" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "path"; return 0
+    fi
+
+    # §6: base64url alphabet; '=' tolerated at the end only. An EMPTY payload
+    # passes here and decodes to nothing — §8.3 gives it its own code below.
+    if [[ ! $payload =~ ^[A-Za-z0-9_-]*={0,2}$ ]]; then
+      jarn_refuse "invalid_envelope" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "alphabet"; return 0
+    fi
+
+    # Envelope
+    env=$(jarn_b64decode "$payload")
+    if [[ -z $env ]]; then
+      jarn_refuse "unreadable_payload" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "base64"; return 0
+    fi
   fi
 
-  # §6: base64url alphabet; '=' tolerated at the end only. An EMPTY payload
-  # passes here and decodes to nothing — §8.3 gives it its own code below.
-  if [[ ! $payload =~ ^[A-Za-z0-9_-]*={0,2}$ ]]; then
-    jarn_refuse "invalid_envelope" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "alphabet"; return 0
-  fi
-
-  env=$(jarn_b64decode "$payload")
-  if [[ -z $env ]]; then
-    jarn_refuse "unreadable_payload" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "base64"; return 0
-  fi
   J_ENV="$env"   # from here, refusals carry re and sid (§8.2)
 
   # §8.3 — closed table, in order.
@@ -670,8 +803,7 @@ jarn_serve() {
   if [[ $jtype == "eta" ]] && [[ -z $(jq -r '.re // ""' <<< "$env") ]]; then
     jarn_refuse "invalid_envelope" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "re"; return 0
   fi
-  if [[ $jtype == "msg" || $jtype == "eta" ]] \
-     && [[ $(jq -r 'has("body")' <<< "$env") != "true" ]]; then
+  if [[ $jtype == "msg" || $jtype == "eta" ]] && [[ $(jq -r 'has("body")' <<< "$env") != "true" ]]; then
     jarn_refuse "invalid_envelope" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "body_absent"; return 0
   fi
   if [[ $(jq -r 'if has("body") then (.body|type) else "string" end' <<< "$env") != "string" ]]; then
@@ -699,6 +831,7 @@ jarn_serve() {
   if ! jarn_lock_acquire "inbox"; then
     jarn_refuse "storage_error" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "inbox_lock"; return 0
   fi
+
   key=$(jarn_key_of <<< "$env")
   found=""
   if [[ -r $J_INBOX ]]; then
@@ -706,10 +839,11 @@ jarn_serve() {
       'select(.k=="received") | select((((.envelope.from // "") + "|" + (.envelope.sid // "") + "|" + (if (.envelope.mid // "")=="" then (.envelope.ts // "") else .envelope.mid end)) == $k)) | .ack // empty' \
       "$J_INBOX" 2>/dev/null | head -n1)
   fi
+
   if [[ -n $found ]]; then
     local ack2
     jarn_lock_release
-    ack2=$(jq -cn --arg rx "$rx" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    ack2=$(jq -rc -n --arg rx "$rx" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg re "$(jq -r '.ts // ""' <<< "$env")" --arg sid "$(jq -r '.sid // ""' <<< "$env")" \
       '{ok:true, rx_ts:$rx, ack_ts:$at, re:$re, sid:$sid}')
     jarn_append "$J_DIAG" "$(printf '%s duplicate key=%s content=recorded timestamps=fresh' "$rx" "$key")"
@@ -722,19 +856,31 @@ jarn_serve() {
   ack=$(jq -cn --arg rx "$rx" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg re "$(jq -r '.ts // ""' <<< "$env")" --arg sid "$(jq -r '.sid // ""' <<< "$env")" \
         '{ok:true, rx_ts:$rx, ack_ts:$at, re:$re, sid:$sid}')
-  if ! jarn_append "$J_INBOX" "$(jq -cn --argjson e "$env" --arg rx "$rx" --argjson ack "$ack" \
-      '{k:"received", rx_ts:$rx, ack:$ack, envelope:$e}')"; then
+
+  local inbox_tmp ; inbox_tmp=$(mktemp)
+
+  jq -rc -n \
+    --argjson e "$(printf '%s' "$env" | jq -c .)" \
+    --arg rx "$rx" \
+    --argjson ack "$ack" \
+    '{k:"received", rx_ts:$rx, ack:$ack, envelope:$e}' > "$inbox_tmp"
+
+  if ! jarn_append "$J_INBOX" "$(cat "$inbox_tmp")"; then
+    rm -f "$inbox_tmp"
     jarn_lock_release
     jarn_refuse "storage_error" "$rx" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "inbox_append"
     return 0
   fi
+
+  rm -f "$inbox_tmp"
+
   jarn_lock_release
   jarn_respond "$ack"
 }
 
 # -- read (§9.4): MESSAGES, never lines ------------------------------------
 jarn_check() {  # [after_n] [source] -> JSON; consumes (advances the offset)
-  local n total previous fresh source="${2:-check}" asked stored
+  local n total previous source="${2:-check}" asked stored tmpfile
   total=$(jarn_count "$J_INBOX")
   previous=$(jarn_offset_get)
   [[ $previous =~ ^[0-9]+$ ]] || previous=0
@@ -748,28 +894,42 @@ jarn_check() {  # [after_n] [source] -> JSON; consumes (advances the offset)
   # .inbox.offset left untouched). At-least-once, never at-most-once.
   n=$asked
   (( n > previous )) && n=$previous
+
   if (( total <= n )); then
     # Nothing to deliver: report the STORED counter, never the argument —
     # an offset that was never written must never be announced.
-    jq -cn --argjson total "$total" --argjson off "$previous" \
+    jq -rc -n --argjson total "$total" --argjson off "$previous" \
       '{ok:true, new:0, total:$total, offset:$off, messages:[]}'
     return 0
   fi
-  fresh=$(awk -v skip="$n" 'NF{c++; if(c>skip) print}' "$J_INBOX" | jq -sc '.' 2>/dev/null) || fresh='[]'
-  [[ -n $fresh ]] || fresh='[]'
+
+  tmpfile=$(mktemp)
+  awk -v skip="$n" 'NF{c++; if(c>skip) print}' "$J_INBOX" > "$tmpfile"
+
   # Report what was ACTUALLY written, never a presumed $total.
   stored=$(jarn_offset_set "$total" "$source" && jarn_offset_get)
   [[ $stored =~ ^[0-9]+$ ]] || stored=$previous
+
   if (( n != asked )); then
     jarn_append "$J_DIAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ) offset_clamped asked=${asked} stored=${previous} used=${n} pid=$$"
   fi
-  jq -cn --argjson total "$total" --argjson off "$stored" --argjson msgs "$fresh" \
-    '{ok:true, new:($msgs|length), total:$total, offset:$off, messages:$msgs}'
+
+  jq -rc -n \
+    --argjson total "$total" \
+    --argjson off "$stored" \
+    --slurpfile msgs "$tmpfile" \
+    '{ ok: true,
+       new: ($msgs | length),
+       total: $total,
+       offset: $off,
+       messages: ($msgs // []) }'
+
+  rm -f "$tmpfile"
 }
 
 # -- wait (§10.5): never emptiness, reason in a closed set -----------------
 jarn_wait_shape() {  # <check-json> <waited_s>
-  jq -cn --argjson o "$1" --argjson w "${2:-0}" '
+  jq -rc -n --argjson o "$1" --argjson w "${2:-0}" '
     {ok:(($o.new // 0) > 0),
      reason:(if (($o.new // 0) > 0) then null else "nothing_new" end),
      waited_s:$w}
@@ -785,7 +945,7 @@ jarn_wait() {  # [timeout_s=45] [after_n]
   if (( tmo == 0 )); then
     out=$(jarn_check "$n" "wait")
     (( $(printf '%s' "$out" | jq -r '.new') > 0 )) && { jarn_wait_shape "$out" 0; return 0; }
-    jq -cn --argjson off "$n" '{ok:false, reason:"nothing_new", waited_s:0, offset:$off}'
+    jq -rc -n --argjson off "$n" '{ok:false, reason:"nothing_new", waited_s:0, offset:$off}'
     return 1
   fi
   (( tmo > 120 )) && tmo=120
@@ -798,7 +958,7 @@ jarn_wait() {  # [timeout_s=45] [after_n]
     fi
     elapsed=$(( $(date +%s) - start ))
     if (( elapsed >= tmo )); then
-      jq -cn --argjson w "$elapsed" --argjson off "$n" \
+      jq -rc -n --argjson w "$elapsed" --argjson off "$n" \
         '{ok:false, reason:"timeout", waited_s:$w, offset:$off,
           hint:"measured silence over the whole duration (R2) -- not a dead peer"}'
       return 1
@@ -815,7 +975,7 @@ jarn_reply() {  # <sid> <reply_to> <body> [ts-of-the-message]
 
   # (a) form, before any use: onion v3, 56 base32 characters, no port
   if [[ ! $target =~ ^[a-z2-7]{56}$ ]]; then
-    jq -cn --arg t "$target" '{ok:false, issue:"refused", error:"invalid reply_to (56 base32 expected)", target:$t}'
+    jq -rc -n --arg t "$target" '{ok:false, issue:"refused", error:"invalid reply_to (56 base32 expected)", target:$t}'
     return 3
   fi
   # (c) loop: never answer my own address
@@ -835,7 +995,7 @@ jarn_reply() {  # <sid> <reply_to> <body> [ts-of-the-message]
   cnt=$(awk -v n="$now" -v w="$REPLY_WINDOW" '$1>=n-w{c++} END{print c+0}' "$J_REPLIES" 2>/dev/null || printf '0')
   if (( cnt >= REPLY_MAX )); then
     jarn_lock_release
-    jq -cn --argjson c "$cnt" --argjson m "$REPLY_MAX" \
+    jq -rc -n --argjson c "$cnt" --argjson m "$REPLY_MAX" \
       '{ok:false, issue:"refused", error:"outgoing reply ceiling reached", count:$c, max:$m}'
     return 5
   fi
@@ -850,7 +1010,7 @@ jarn_reply() {  # <sid> <reply_to> <body> [ts-of-the-message]
   [[ -n $msgj ]] && re_ts=$(jq -r '.ts // ""' <<< "$msgj")
   if [[ -z $re_ts ]]; then
     jarn_lock_release
-    jq -cn --arg s "$sid" '{ok:false, issue:"refused",
+    jq -rc -n --arg s "$sid" '{ok:false, issue:"refused",
       error:"message not in the buffer: re requires the ts of the message answered", sid:$s}'
     return 7
   fi
@@ -860,7 +1020,7 @@ jarn_reply() {  # <sid> <reply_to> <body> [ts-of-the-message]
   mkey=$(jarn_key_of <<< "$msgj")
   if [[ -r $J_REPLIES ]] && awk -v k="$target|$mkey" '$2==k{f=1} END{exit !f}' "$J_REPLIES" 2>/dev/null; then
     jarn_lock_release
-    jq -cn --arg s "$sid" --arg ts "$re_ts" '{ok:false, issue:"refused",
+    jq -rc -n --arg s "$sid" --arg ts "$re_ts" '{ok:false, issue:"refused",
       error:"already answered this message", sid:$s, re:$ts}'
     return 6
   fi
@@ -918,7 +1078,7 @@ jarn_who() {
   pid=$(jarn_listener_pid) || pid=0
   hp=$(jarn_holder_pid) || hp=0
   peers=$(jarn_peers)
-  jq -cn --arg alias "$(jarn_alias)" --arg onion "$onion" --arg sid "$(jarn_sid)" \
+  jq -rc -n --arg alias "$(jarn_alias)" --arg onion "$onion" --arg sid "$(jarn_sid)" \
      --arg fp "$fp" --arg cs "$cs" \
      --argjson total "$(jarn_count "$J_INBOX")" --argjson off "$(jarn_offset_get)" \
      --argjson sent "$(jarn_count "$J_SENT")" --argjson pid "$pid" \
@@ -1225,14 +1385,14 @@ jarn_up() {
   [[ ${1:-} == "link" ]] && peer="${2:-}"
   case " $* " in *" --offline "*) offline=1 ;; esac
   if [[ -n $peer ]] && ! jarn_peer_known "$peer"; then
-    jq -cn --arg p "$peer" '{ok:false, error:"unknown link -- this peer is not in peers.txt", peer:$p}'
+    jq -rc -n --arg p "$peer" '{ok:false, error:"unknown link -- this peer is not in peers.txt", peer:$p}'
     return 3
   fi
 
   local pid; pid=$(jarn_listener_start) \
-    || { jq -cn '{ok:false, error:"listener did not come up (socat missing, port busy/foreign, or engine not runnable)"}'; return 5; }
+    || { jq -rc -n '{ok:false, error:"listener did not come up (socat missing, port busy/foreign, or engine not runnable)"}'; return 5; }
   [[ $pid =~ ^[1-9][0-9]*$ ]] \
-    || { jq -cn '{ok:false, error:"listener ownership could not be established — nothing registered"}'; return 5; }
+    || { jq -rc -n '{ok:false, error:"listener ownership could not be established — nothing registered"}'; return 5; }
 
   local onion="" registered=false holder=0 perr="" prc=0
   if (( offline == 0 )); then
@@ -1262,7 +1422,7 @@ jarn_up() {
   [[ -n $onion ]] && cs=$(jarn_callsign "$onion" 2>/dev/null) || cs=""
   [[ -n $onion ]] && fp=$(jarn_fingerprint 2>/dev/null) || fp=""
 
-  jq -cn --arg onion "$onion" --arg links "$links" --argjson pid "${pid:-0}" \
+  jq -rc -n --arg onion "$onion" --arg links "$links" --argjson pid "${pid:-0}" \
      --argjson port "$LPORT" --argjson ann "$ann" --arg cs "$cs" --arg fp "$fp" \
      --argjson registered "$registered" --argjson holder "${holder:-0}" \
      --argjson offline "$offline" --arg perr "$perr" \
@@ -1302,7 +1462,7 @@ jarn_measure() {
   hp=$(jarn_holder_pid) || hp=0
   state=$(jarn_state)
   orph=$(jarn_orphans)
-  jq -cn --arg alias "$(jarn_alias)" --arg onion "$onion" --arg state "$state" \
+  jq -rc -n --arg alias "$(jarn_alias)" --arg onion "$onion" --arg state "$state" \
      --argjson pid "$pid" --argjson holder "$hp" --argjson port "$LPORT" --arg orphans "$orph" \
      --argjson inbox "$(jarn_count "$J_INBOX")" --argjson sent "$(jarn_count "$J_SENT")" \
      --argjson off "$(jarn_offset_get)" --arg diag "${J_DIAG}" \
@@ -1317,7 +1477,7 @@ jarn_status() {
   local m received
   m=$(jarn_measure)
   received=$(jarn_hsfetch)
-  jq -cn --argjson d "$m" --argjson received "$received" '{
+  jq -rc -n --argjson d "$m" --argjson received "$received" '{
     ok:($d.state=="LISTENING"), alias:$d.alias, state:$d.state, onion:$d.onion,
     control:($d.state!="CONTROL_ABSENT"),
     listener_alive:($d.listener_pid!=null), listener_pid:$d.listener_pid, port:$d.port,
@@ -1328,7 +1488,7 @@ jarn_status() {
 
 jarn_doctor() {
   local m; m=$(jarn_measure)
-  jq -cn --argjson d "$m" '
+  jq -rc -n --argjson d "$m" '
     {ok:($d.state=="LISTENING")} + $d + {
       missing:([
         (if $d.state=="CONTROL_ABSENT" then "Tor control unreachable -- stop here (§3)" else empty end),

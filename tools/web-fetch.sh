@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.4.5
+# Version: 0.4.6
 # ==============================================================================
 
 # Options
@@ -123,21 +123,6 @@ if [[ -z $URL ]]; then
   echo "  --no-tor      Bypass Tor SOCKS5 proxy even if available"
   exit 1
 fi
-
-# Determine curl options
-# if is_termux; then TOR_PROXY="$TOR_PROXY_MOBILE" ; fi
-CURL_OPTS=("-sfSL" "-A" "$USER_AGENT" "--connect-timeout" "10")
-if [[ $USE_TOR == true && -n $TOR_PROXY ]]; then
-  CURL_OPTS+=("-x" "$TOR_PROXY")
-fi
-
-# Define required curl headers
-CURL_OPTS+=(
-  "-H" "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-  "-H" "Accept-Language: fr-CH,fr;q=0.9,en;q=0.8"
-  "-H" "Sec-Fetch-Mode: navigate"
-  "-H" "Upgrade-Insecure-Requests: 1"
-)
 
 if [[ $USE_JS == true ]]; then
   # log "JavaScript fallback option is selected but not natively needed for specific REST APIs."
@@ -1371,6 +1356,21 @@ handle_fallback() {
 
 # Init Tor
 load_tor_config
+
+# Determine curl options
+# if is_termux; then TOR_PROXY="$TOR_PROXY_MOBILE" ; fi
+CURL_OPTS=("-sfSL" "-A" "$USER_AGENT" "--connect-timeout" "10")
+if [[ $USE_TOR == true && -n $TOR_PROXY ]]; then
+  CURL_OPTS+=("-x" "$TOR_PROXY")
+fi
+
+# Define required curl headers
+CURL_OPTS+=(
+  "-H" "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+  "-H" "Accept-Language: fr-CH,fr;q=0.9,en;q=0.8"
+  "-H" "Sec-Fetch-Mode: navigate"
+  "-H" "Upgrade-Insecure-Requests: 1"
+)
 
 # Handle URLs
 if [[ $URL =~ gist.github.com ]] || [[ $URL =~ gist.githubusercontent.com ]]; then

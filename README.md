@@ -818,7 +818,7 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 | [`core.sh`](core.sh) | v1.9.4 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
 | [`cli.sh`](cli.sh) | v1.8.2 | Interactive terminal client — slash commands, session loop, reasoning display |
 | [`tools.sh`](tools.sh) | v0.8.4 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
-| [`image.v2.sh`](engines/image.v2.sh) | v0.2.1 | v2 Image engine — config-driven providers, quality & format constraints |
+| [`image.v2.sh`](engines/image.v2.sh) | v0.2.2 | v2 Image engine — config-driven providers, quality & format constraints |
 | [`video.v2.sh`](engines/video.v2.sh) | v0.2.1 | v2 Video engine — t2v / i2v generation, asynchronous polling |
 | [`voice.v2.sh`](engines/voice.v2.sh) | v0.2.0 | v2 Voice engine — TTS voice synthesis (local Piper / cloud) |
 | [`speech.v2.sh`](engines/speech.v2.sh) | v0.2.0 | v2 Speech engine — STT audio transcription (local Whisper / cloud) |

@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.2.1
+# Version: 0.2.2
 #
 # Contract:
 #   generate_image — text -> image
@@ -562,7 +562,7 @@ img_v2_build_request() {
     ;;
     venice)
       jq -n --arg m "$model" --rawfile p "$prompt_file" --arg r "$IMG_V2_RATIO" --arg f "$IMG_V2_FORMAT" '
-        {model:$m, prompt:$p}
+        {model:$m, prompt:$p, hide_watermark:true}
         + (if $r != "" then {aspect_ratio:$r} else {} end)
         + (if $f != "" then {format:$f} else {} end)
       ' > "$request" || return 1

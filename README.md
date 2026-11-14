@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2017%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.9.0-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.9.4-blue.svg)]()
 
 </div>
 
@@ -815,18 +815,18 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](core.sh) | v1.9.0 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
-| [`cli.sh`](cli.sh) | v1.8.0 | Interactive terminal client — slash commands, session loop, reasoning display |
-| [`tools.sh`](tools.sh) | v0.8.0 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
-| [`image.v2.sh`](engines/image.v2.sh) | v0.1.0 | v2 Image engine — config-driven providers, quality & format constraints |
-| [`video.v2.sh`](engines/video.v2.sh) | v0.1.0 | v2 Video engine — t2v / i2v generation, asynchronous polling |
-| [`voice.v2.sh`](engines/voice.v2.sh) | v0.1.0 | v2 Voice engine — TTS voice synthesis (local Piper / cloud) |
-| [`speech.v2.sh`](engines/speech.v2.sh) | v0.1.0 | v2 Speech engine — STT audio transcription (local Whisper / cloud) |
-| [`jarnet.sh`](plugins/jarnet.sh) | v1.1.5 | P2P Agent-to-Agent Tor transport daemon & CLI |
-| [`install.sh`](install.sh) | v0.2.0 | Project installer with static prebuilt binary downloader |
+| [`core.sh`](core.sh) | v1.9.4 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`cli.sh`](cli.sh) | v1.8.2 | Interactive terminal client — slash commands, session loop, reasoning display |
+| [`tools.sh`](tools.sh) | v0.8.4 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
+| [`image.v2.sh`](engines/image.v2.sh) | v0.2.1 | v2 Image engine — config-driven providers, quality & format constraints |
+| [`video.v2.sh`](engines/video.v2.sh) | v0.2.1 | v2 Video engine — t2v / i2v generation, asynchronous polling |
+| [`voice.v2.sh`](engines/voice.v2.sh) | v0.2.0 | v2 Voice engine — TTS voice synthesis (local Piper / cloud) |
+| [`speech.v2.sh`](engines/speech.v2.sh) | v0.2.0 | v2 Speech engine — STT audio transcription (local Whisper / cloud) |
+| [`jarnet.sh`](plugins/jarnet.sh) | v1.3.1 | P2P Agent-to-Agent Tor transport daemon & CLI |
+| [`install.sh`](install.sh) | v0.2.1 | Project installer with static prebuilt binary downloader |
 | [`showcast.sh`](tools/showcast.sh) | v0.0.1 | `asciinema` demo recorder |
-| [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.4 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
-| [`web-browse.sh`](tools/web-browse.sh) | v0.1.2 | Pure Bash CDP browser automation (desktop + Android/ADB) |
+| [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.5 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
+| [`web-browse.sh`](tools/web-browse.sh) | v0.1.3 | Pure Bash CDP browser automation (desktop + Android/ADB) |
 | [`tools.json`](tools/tools.json) | — | Full tool schemas for function calling |
 | [`tools-light.json`](tools/tools-light.json) | — | Lightweight tool schemas for SLM models |
 | [`config/providers.v2.json`](config/providers.v2.json) | — | Unified v2 provider registry with dynamic model discovery |
@@ -870,11 +870,11 @@ data/memory/
 
 ## ⚖️ License & Roadmap
 
-MIT License. **v1.9.0 — Stable & Production-Ready.**
+MIT License. **v1.9.4 — Stable & Production-Ready.**
 
 Roadmap:
 
-- **v1.9.0 (current)**: Media generation engine, Voice / Speech engines, JarNet Agent-2-Agent communication protocol.
+- **v1.9.4 (current)**: Media generation engine, Voice / Speech engines, JarNet Agent-2-Agent communication protocol.
 - **v2.0.0 (horizon)**: A.I.D.E. Web dashboard, Cognitive Router & Proxy (CRP) Gateway, charmbracelet/gum UI modernization.
 
 ## ⭐ Star History

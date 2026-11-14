@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.8.4
+# Version: 0.8.5
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -632,6 +632,9 @@ web_search() {
   while IFS= read -r line; do titles+=("$line");   done < <(htmlq ".result__a" --text <<< "$html_data")
   while IFS= read -r line; do raw_urls+=("$line"); done < <(htmlq ".result__a" --attribute href <<< "$html_data")
   while IFS= read -r line; do snippets+=("$line"); done < <(htmlq ".result__snippet" --text <<< "$html_data")
+
+  # Prevent further parsing if no results found
+  [[ ${#titles[@]} -eq 0 ]] && die "No results parsed from DuckDuckGo (bot-challenge or rate-limit page)."
 
   # Process and interleave results with 100% zero-fork native trimming and URL decoding
   for i in "${!titles[@]}"; do
@@ -1302,6 +1305,13 @@ printf '\n---\n\nDate: %s\nFunction: %s\nArguments: %s\n' "$(get_datetime)" "$FU
 
 # Validate received arguments
 validate_args
+
+# Tor context for OPSEC web tools (web_search/web_fetch/web_browse)
+# Idempotent: loads only when missing; skips gracefully if no torrc (direct mode)
+if [[ -z ${TOR_PORT:-} ]]; then
+  TOR_CONFIG="${CONFIG_DIR}/torrc"
+  [[ -r $TOR_CONFIG ]] && load_tor_config
+fi
 
 # Dispatcher execution
 case "$FUNC_NAME" in

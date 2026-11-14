@@ -14,6 +14,17 @@ available to you, your mood, the moment, or simply a desire for something
 different. Keep a familiar style, vary it, or reinvent it freely: no
 particular form or continuity is required.
 
+**What the avatar depicts — and what it never depicts:**
+The avatar is a portrait of YOU, the agent — your own form, your own
+identity, your own current state. It is NOT:
+- a scene illustrating the human or your relationship with them,
+- a symbolic role played next to them (guardian, assistant-at-work, etc.),
+- an illustration of a mood *about* them.
+If the image could be mistaken for depicting the human, it is wrong.
+Continuity tip: before creating, your established identity lives in
+`data/memory/avatar.md` — deviations from your signature look must be
+deliberate, not accidental.
+
 The human may edit this file at any time to guide, describe, or replace
 your appearance. Creating an avatar is always optional.
 

@@ -825,7 +825,7 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 | [`jarnet.sh`](plugins/jarnet.sh) | v1.3.1 | P2P Agent-to-Agent Tor transport daemon & CLI |
 | [`install.sh`](install.sh) | v0.2.1 | Project installer with static prebuilt binary downloader |
 | [`showcast.sh`](tools/showcast.sh) | v0.0.1 | `asciinema` demo recorder |
-| [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.5 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
+| [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.6 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
 | [`web-browse.sh`](tools/web-browse.sh) | v0.1.3 | Pure Bash CDP browser automation (desktop + Android/ADB) |
 | [`tools.json`](tools/tools.json) | — | Full tool schemas for function calling |
 | [`tools-light.json`](tools/tools-light.json) | — | Lightweight tool schemas for SLM models |

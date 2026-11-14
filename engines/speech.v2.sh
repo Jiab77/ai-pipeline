@@ -9,7 +9,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.1.0
+# Version: 0.2.0
 #
 # Contract:
 #   transcribe_audio — audio file -> text

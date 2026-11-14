@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.8.1
+# Version: 1.8.2
 # ==============================================================================
 
 # Options
@@ -125,7 +125,7 @@ run_chat() {
     [[ -z $USER_MSG ]] && continue
 
     # Save into history
-    [[ $- == *i* ]] && history -s "$USER_MSG"
+    history -s "$USER_MSG"
 
     # Handle slash commands
     case $USER_MSG in
@@ -238,9 +238,16 @@ EOF
         log ; log_info "Gathering providers balance..."
         list_provider_balance
       ;;
-      "/models")
+      "/models"|"/models "*)
+        local models_arg="${USER_MSG#"/models"}" ; models_arg="${models_arg#" "}"
         log ; log_info "Gathering provider models..."
-        list_provider_models
+        if [[ $models_arg == "--raw" ]]; then
+          list_provider_models "" "$models_arg"
+        elif [[ -z $models_arg ]]; then
+          list_provider_models
+        else
+          log_warn "Unknown option: $models_arg (supported: --raw)"
+        fi
       ;;
       "/draw"|"/draw "*)
         local draw_input="${USER_MSG#"/draw"}"
@@ -600,7 +607,7 @@ EOF
           EXTERNAL_FILE_LOADED="$file"    # Bind to core global state
           log_step "Loading file: ${CLR_B_YELLOW}${filename}${ANSI_RESET}"
           echo -e "${CLR_B_BLACK}$(draw_line "─" "$(get_term_width)")${ANSI_RESET}"
-          if ! is_image_file "$file" || ! is_video_file "$file"; then
+          if ! is_image_file "$file" && ! is_video_file "$file"; then
             echo -e "Loaded file: ${filename}\n\n\`\`\`${fileext}\n$(head -n$max_preview_lines "$file")\n\`\`\`" | render_markdown
           else
             echo -e "Loaded media: ${filename}"

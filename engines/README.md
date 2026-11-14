@@ -8,10 +8,10 @@ The pipeline defaults to modern **v2 engines** via `ENGINE_VERSION="${ENGINE_VER
 
 | Engine | Version | Role | Key Features |
 | --- | --- | --- | --- |
-| [`image.v2.sh`](image.v2.sh) | 0.4.0 | Text-to-Image (t2i), Image-to-Image (i2i), and Image Editing | Multi-provider adapter, dynamic model resolution, automatic EXIF metadata stripping (`exiftool`), format conversion (`webp`/`png`/`jpeg`), and keyless Pollinations fallback. |
-| [`video.v2.sh`](video.v2.sh) | 0.3.0 | Text-to-Video (t2v) and Image-to-Video (i2v) | Asynchronous polling loop, job resume without double-billing, validated MP4 header inspection via `ffprobe`, duration/fps/ratio constraints validation. |
-| [`voice.v2.sh`](voice.v2.sh) | 0.3.0 | Text-to-Speech (TTS) | Multi-provider synthesis (ElevenLabs, OpenAI, Groq, Venice, local Piper), voice/gender resolution, persistent audio caching, non-blocking playback. |
-| [`speech.v2.sh`](speech.v2.sh) | 0.3.0 | Speech-to-Text (STT) & Audio Transcription | Multi-provider transcription (local Whisper.cpp, Groq, OpenAI, Fal, Venice), audio format normalization, language hint injection, automatic temp cleanup. (Symlinked as `speech.sh`). |
+| [`image.v2.sh`](image.v2.sh) | 0.2.1 | Text-to-Image (t2i), Image-to-Image (i2i), and Image Editing | Multi-provider adapter, dynamic model resolution, automatic EXIF metadata stripping (`exiftool`), format conversion (`webp`/`png`/`jpeg`), and keyless Pollinations fallback. |
+| [`video.v2.sh`](video.v2.sh) | 0.2.1 | Text-to-Video (t2v) and Image-to-Video (i2v) | Asynchronous polling loop, job resume without double-billing, validated MP4 header inspection via `ffprobe`, duration/fps/ratio constraints validation. |
+| [`voice.v2.sh`](voice.v2.sh) | 0.2.0 | Text-to-Speech (TTS) | Multi-provider synthesis (ElevenLabs, OpenAI, Groq, Venice, local Piper), voice/gender resolution, persistent audio caching, non-blocking playback. |
+| [`speech.v2.sh`](speech.v2.sh) | 0.2.0 | Speech-to-Text (STT) & Audio Transcription | Multi-provider transcription (local Whisper.cpp, Groq, OpenAI, Fal, Venice), audio format normalization, language hint injection, automatic temp cleanup. (Symlinked as `speech.sh`). |
 
 ## Legacy Engines (v1)
 

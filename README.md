@@ -6,12 +6,12 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2018%20external%20providers-orange.svg)]()
+[![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2017%20external%20providers-orange.svg)]()
 [![Status](https://img.shields.io/badge/Status-Stable--v1.9.0-blue.svg)]()
 
 </div>
 
-> A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory, and the only **capability-driven inter-provider vision fallback** implemented in Bash. Runs fully local (Ollama / llama.cpp) or connects to 18 cloud providers — your choice. No Python. No Node. No Docker. Just `curl`, `jq`, `htmlq`, `grep`, `sed`, `awk`, `websocat`, `socat`, `ffmpeg`, `cut`, `tr`, `printf`, and a brain on fire 😝
+> A sovereign, local-first, Bash-driven cognitive runtime for orchestrating local and cloud LLMs with real tool execution, multimodal perception, privacy-aware transport, and autonomous persistent memory, and the only **capability-driven inter-provider vision fallback** implemented in Bash. Runs fully local (Ollama / llama.cpp) or connects to 17 cloud providers — your choice. No Python. No Node. No Docker. Just `curl`, `jq`, `htmlq`, `grep`, `sed`, `awk`, `websocat`, `socat`, `ffmpeg`, `cut`, `tr`, `printf`, and a brain on fire 😝
 >
 > This project is not just another LLM wrapper. It is a lightweight but deeply capable agent runtime built around a practical equilibrium between **Bash** (orchestration, live browser automation), and **PHP** (local web UX) — proving that modern agentic systems do not have to be trapped inside the usual Python-heavy stack.
 
@@ -94,12 +94,12 @@
           └────────────────────┘                        └──────────────────┘
 ```
 
-**`core.sh`** is the agnostic engine — three backends (Ollama, llama.cpp, 18 cloud providers), ChaCha20-encrypted key chest, Tor routing, Markdown memory, and the agentic tool loop. **`cli.sh`** is the terminal client. **`tools.sh`** bridges model-declared capabilities to real host actions. One engine, multiple interfaces — local or cloud, your choice.
+**`core.sh`** is the agnostic engine — three backends (Ollama, llama.cpp, 17 cloud providers), ChaCha20-encrypted key chest, Tor routing, Markdown memory, and the agentic tool loop. **`cli.sh`** is the terminal client. **`tools.sh`** bridges model-declared capabilities to real host actions. One engine, multiple interfaces — local or cloud, your choice.
 
 ## ⚡ Why This Exists
 
 - **Bash-first by conviction, not nostalgia**: 6036 lines of Bash doing things that usually "require" Python, NodeJS, Rust or even Go, including a stateless CDP browser engine and a multi-agent pipeline (Architect → Coder → Judge).
-- **Local-first, cloud-capable**: Runs fully offline with Ollama/llama.cpp, or connects to 18 cloud providers. Same code, same tools, three backends.
+- **Local-first, cloud-capable**: Runs fully offline with Ollama/llama.cpp, or connects to 17 cloud providers. Same code, same tools, three backends.
 - **Capability-driven fallback**: When a text-only model needs vision, the pipeline auto-switches provider mid-loop — same code, different backend. Nobody else has this in Bash.
 - **Privacy is a feature, not an afterthought**: Tor routing, ChaCha20-encrypted API keys, Zero Data Retention injection, local backends — all first-class.
 
@@ -769,7 +769,7 @@ get_system_prompt()
 |:---|:---|
 | **`ollama`** | Local, offline-first, easy setup — `http://localhost:11434` |
 | **`llamacpp`** | Local, high-performance, fine-grained control — `http://localhost:8080` |
-| **`external`** | Cloud providers (18), vision fallback, ZDR — Tor-routed |
+| **`external`** | Cloud providers (17), vision fallback, ZDR — Tor-routed |
 
 Switch anytime: `/backend`, `/provider`, `/model`. Same tools, same memory, same agent loop across all three.
 
@@ -786,7 +786,7 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 | **Coder** | Mistral 3.3B Reasoning (Ministral) |
 | **Judge** | Mistral 3.3B Reasoning (Ministral) |
 
-### Cloud Providers (18) <!-- omit in toc -->
+### Cloud Providers (17) <!-- omit in toc -->
 
 | ID | Name | URL |
 |:---|:---|:---|
@@ -795,16 +795,15 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 | 3 | DeepSeek | https://deepseek.com |
 | 4 | Groq | https://groq.com |
 | 5 | Hugging Face | https://huggingface.co |
-| 6 | Inception Labs | https://inceptionlabs.ai |
-| 7 | Kimi (Moonshot AI) | https://moonshot.ai |
-| 8 | Mammouth AI | https://mammouth.ai |
-| 9 | OpenAI | https://openai.com |
-| 10 | OpenRoute (CyberNeurova) | https://openroute.cyberneurova.com |
-| 11-12 | OpenRouter (Free / Paid) | https://openrouter.ai |
-| 13 | Venice AI | https://venice.ai |
-| 14-15 | Vercel AI Gateway (Free / Paid) | https://ai-gateway.vercel.sh |
-| 16 | X.AI (Grok API) | https://x.ai |
-| 17-18 | Z.AI (API / Coding Plan) | https://z.ai |
+| 6 | Kimi (Moonshot AI) | https://moonshot.ai |
+| 7 | Mammouth AI | https://mammouth.ai |
+| 8 | OpenAI | https://openai.com |
+| 9 | OpenRoute (CyberNeurova) | https://openroute.cyberneurova.com |
+| 10-11 | OpenRouter (Free / Paid) | https://openrouter.ai |
+| 12 | Venice AI | https://venice.ai |
+| 13-14 | Vercel AI Gateway (Free / Paid) | https://ai-gateway.vercel.sh |
+| 15 | X.AI (Grok API) | https://x.ai |
+| 16-17 | Z.AI (API / Coding Plan) | https://z.ai |
 
 >[!NOTE]
 > All use the same OpenAI-compatible API. Vision fallback works across any text-only → vision-capable pair.

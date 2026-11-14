@@ -7,7 +7,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.0.0
+# Version: 1.0.1
 #
 # Contract: TBD
 #
@@ -97,8 +97,16 @@ filter_provider_models() {
 
   venice:i2v)
     jq '.data |= map(select(
-      .model_spec.constraints.model_type == "image-to-video"
-    ))'
+          .model_spec.constraints.model_type == "image-to-video"
+        ))
+        | .data |= map(
+            if (.id | test("^(seedance-2-[05](-fast|-mini)?-reference-to-video|wan-3-0-(prime-pro-|prime-|pro-)?reference-to-video|minimax-h3(-max)?-reference-to-video|kling-v4(-flash)?-reference-to-video)"))
+            then .model_spec.constraints.reference_video = true
+            else . end
+            | if (.id | test("^seedance-2-[05](-fast)?-reference-to-video"))
+              then .model_spec.constraints.video_edit = true
+              else . end
+          )'
   ;;
 
   # reads: model_spec.capabilities.supportsVision

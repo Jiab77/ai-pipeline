@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.3.0
+# Version: 1.3.1
 #
 # Contract: jarnet.md 1.3; wire envelope v:1
 # Conformance oracle: tests/jarnet-selftest.sh
@@ -93,6 +93,10 @@ set -u
 
 JARNET_ROOT="${JARNET_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 JARNET_DIR="${JARNET_DIR:-${JARNET_ROOT}/data/jarnet}"
+JARNET_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JARNET_SCRIPT_FILE="${BASH_SOURCE[0]##*/}"
+CONFIG_DIR="${JARNET_ROOT}/config"
+TOR_CONFIG="${CONFIG_DIR}/torrc"
 LIB_DIR="${AIDE_LIB_DIR:-${JARNET_ROOT}/lib}"
 LIB_DEPS=("base64" "timeout" "sha256")
 export JARNET_ROOT JARNET_DIR          # inherited by socat EXEC children
@@ -101,6 +105,25 @@ export JARNET_ROOT JARNET_DIR          # inherited by socat EXEC children
 die() {
   echo -e "\nError: $*\n" >&2
   exit 255
+}
+
+# Tor helper
+load_tor_config() {
+  # Check Tor config
+  [[ ! -r $TOR_CONFIG ]] && die "Missing Tor config file."
+
+  # Parse and set Tor config
+  TOR_HOST="127.0.0.1"
+  TOR_PORT=$(grep -v "#" "$TOR_CONFIG" | grep -m1 "SOCKSPort" | cut -d' ' -f2)
+  CTRL_PORT=$(grep -m1 "ControlPort" "$TOR_CONFIG" | cut -d' ' -f2)
+
+  # TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+  # TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
+  # SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+  # TOR_LOG="/tmp/tor.log"
+
+  CTRL="${JR_CTRL:-${TOR_HOST}:${CTRL_PORT}}"       # Tor ControlPort (§3 vocabulary)
+  SOCKS="${JR_SOCKS:-${TOR_HOST}:${TOR_PORT}}"     # Tor SOCKS (traversal for send)
 }
 
 # Load required libraries
@@ -127,6 +150,11 @@ load_libs() {
 }
 
 # -----------------------------------------------------------------------------
+# Init Tor
+# -----------------------------------------------------------------------------
+load_tor_config
+
+# -----------------------------------------------------------------------------
 # Portability helpers (stock macOS / BSD differences)
 # -----------------------------------------------------------------------------
 load_libs
@@ -149,10 +177,9 @@ J_KEYS="${JARNET_DIR}/keys"             # keys/<alias>.addr = derived cache; .ke
 J_HOLDER="${JARNET_DIR}/.holder.pid"    # the control connection, kept open
 J_HRESP="${JARNET_DIR}/.holder.resp"    # this up's control answers (rewritten per up)
 
-CTRL="${JR_CTRL:-127.0.0.1:9051}"       # Tor ControlPort (§3 vocabulary)
-SOCKS="${JR_SOCKS:-127.0.0.1:9050}"     # Tor SOCKS (traversal for send)
 LPORT="${JR_LPORT:-18080}"              # loopback port behind the virtual port 80
 READ_TMO="${JR_READ_TMO:-15}"           # §10.5: the read window is 15 s
+SEND_TMO="${JR_SEND_TMO:-45}"           # §10.5: the send window is 45 s
 HSFETCH_TMO="${JR_HSFETCH_TMO:-5}"      # status: bounded local HSFETCH observation
 MAX_PATH="${JR_MAX_PATH:-16384}"        # §5: chosen ceiling, measured on the raw path
 MAX_BODY="${JR_MAX_BODY:-1048576}"      # v1.3 : 1 MiB for POST /say
@@ -547,7 +574,7 @@ jarn_ping() {  # <peer|onion> [timeout_s=45]
 jarn_send() {  # <peer|onion> <body> [type] [re] [reply_to] [sid] -> JSON on stdout
   local peer="${1:?peer}" body="${2:-}" type="${3:-msg}" re="${4:-}" rto="${5:-}" sid="${6:-}"
   local addr env b64 json url method attempt=1 rc http resp out
-  local issue="unknown" delivered=false t0 t1 dur
+  local issue="unknown" t0 t1 dur
 
   addr=$(jarn_peer_addr "$peer")
   if [[ ! $addr =~ ^[a-z2-7]{56}$ ]]; then
@@ -607,12 +634,12 @@ jarn_send() {  # <peer|onion> <body> [type] [re] [reply_to] [sid] -> JSON on std
 
     # v1.3 — two distinct sending methods
     if [[ $method == "POST" ]]; then
-      out=$(curl -sS --max-time 45 -w '\n%{http_code}' \
+      out=$(curl -sS --max-time "$SEND_TMO" -w '\n%{http_code}' \
             -H "Content-Type: application/json" \
             -d "$json" \
             --proxy "socks5h://${SOCKS}" "$url" 2>&1) || rc=$?
     else
-      out=$(curl -sS --max-time 45 -w '\n%{http_code}' \
+      out=$(curl -sS --max-time "$SEND_TMO" -w '\n%{http_code}' \
             --proxy "socks5h://${SOCKS}" "$url" 2>&1) || rc=$?
     fi
 
@@ -622,8 +649,7 @@ jarn_send() {  # <peer|onion> <body> [type] [re] [reply_to] [sid] -> JSON on std
     if [[ $rc -eq 0 && $http == "200" ]]; then
       issue=$(jarn_response_issue "$resp")
       case $issue in
-        ok)      delivered=true; break ;;
-        refused) break ;;
+        ok|refused) break ;;
         *)       issue="unknown" ;;
       esac
     else
@@ -1092,19 +1118,57 @@ jarn_who() {
       holder_pid:(if $holder==0 then null else $holder end), holder_alive:($holder != 0)}'
 }
 
+# Portable process-environment reader. Linux: /proc newline-separated.
+# macOS/BSD: `ps eww` appends the env after the command, space-separated.
+# Both forms are grep-able with a fixed-string match.
+# shellcheck disable=SC2009
+jarn_proc_env() {
+  local p="${1:-}"
+  [[ -n $p ]] || return 1
+  if [[ -r /proc/$p/environ ]]; then
+    tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null
+  else
+    ps eww "$p" 2>/dev/null
+  fi
+}
+
+# Portable process-cmdline reader (Linux: /proc NUL-separated;
+# macOS/BSD: `ps -ww -o command=` single line). Both grep-able.
+jarn_proc_cmdline() {
+  local p="${1:-}"
+  [[ -n $p ]] || return 1
+  if [[ -r /proc/$p/cmdline ]]; then
+    tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null
+  else
+    ps -ww -p "$p" -o command= 2>/dev/null
+  fi
+}
+
+# Ownership is proven by the ENVIRONMENT tag the holder was launched with —
+# a live pid is not a live control connection (measured, step 3 note).
+jarn_holder_is_ours() {
+  jarn_proc_env "${1:-}" | grep -qF "JARNET_HOLDER=${JARNET_DIR}"
+}
+
+jarn_holder_pid() {
+  local pid=""
+  [[ -r $J_HOLDER ]] && pid=$(tr -dc '0-9' < "$J_HOLDER" 2>/dev/null)
+  [[ -n $pid ]] || { printf '0'; return 1; }
+  kill -0 "$pid" 2>/dev/null || { printf '0'; return 1; }   # stale
+  jarn_holder_is_ours "$pid" || { printf '0'; return 2; }  # not ours: hands off
+  printf '%s' "$pid"; return 0
+}
+
 # -- listener (§4, §11.1): the listener belongs to the NODE ----------------
 # A pidfile may point at a process that is not ours (another engine serving
 # the same port). Killing it would break a live service => ownership check
 # BEFORE any kill.
 jarn_pid_is_ours() {
-  local p="${1:-}"; [[ -n $p && -r /proc/$p/cmdline ]] || return 1
-  tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q 'plugins/jarnet\.sh'
+  jarn_proc_cmdline "${1:-}" | grep -qF "${JARNET_SCRIPT_DIR##*/}/${JARNET_SCRIPT_FILE}"
 }
 
 jarn_listener_env_is_ours() {
-  local p="${1:-}"
-  [[ -n $p && -r /proc/$p/environ ]] || return 1
-  tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qxF "JARNET_LISTENER=${JARNET_DIR}"
+  jarn_proc_env "${1:-}" | grep -qF "JARNET_LISTENER=${JARNET_DIR}"
 }
 
 jarn_listener_ping_ok() {  # exact identity expected from OUR local backend
@@ -1224,23 +1288,6 @@ jarn_hsfetch() {
   fi
 }
 
-# Ownership is proven by the ENVIRONMENT tag the holder was launched with —
-# a live pid is not a live control connection (measured, step 3 note).
-jarn_holder_is_ours() {
-  local p="${1:-}"
-  [[ -n $p && -r /proc/$p/environ ]] || return 1
-  tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qxF "JARNET_HOLDER=${JARNET_DIR}"
-}
-
-jarn_holder_pid() {
-  local pid=""
-  [[ -r $J_HOLDER ]] && pid=$(tr -dc '0-9' < "$J_HOLDER" 2>/dev/null)
-  [[ -n $pid ]] || { printf '0'; return 1; }
-  kill -0 "$pid" 2>/dev/null || { printf '0'; return 1; }   # stale
-  jarn_holder_is_ours "$pid" || { printf '0'; return 2; }  # not ours: hands off
-  printf '%s' "$pid"; return 0
-}
-
 # ADD_ONION with the stored key — NEW:ED25519-V3 at the first up, then the
 # same key forever (same key => same address, measured twice). The holder
 # keeps the control connection OPEN: the onion lives exactly as long as the
@@ -1273,8 +1320,14 @@ jarn_publish() {  # -> ServiceID (56 base32) on stdout
 
   # Secrets travel on fd 3/4, never in argv. The single-quoted holder program
   # is intentional: only its positional, non-secret parameters are expanded.
+  local wrapper
+  if command -v setsid >/dev/null 2>&1; then
+    wrapper="setsid"    # Linux
+  else
+    wrapper="nohup"     # macOS/BSD
+  fi
   # shellcheck disable=SC2016
-  JARNET_HOLDER="$JARNET_DIR" setsid bash -c '
+  JARNET_HOLDER="$JARNET_DIR" "$wrapper" bash -c '
     umask 077
     {
       IFS= read -r hex <&3
@@ -1286,7 +1339,7 @@ jarn_publish() {  # -> ServiceID (56 base32) on stdout
         printf "ADD_ONION NEW:ED25519-V3 Port=80,127.0.0.1:%s\r\n" "$3"
       fi
       unset hex key
-      sleep infinity
+      while :; do sleep 3600; done    # remplace sleep infinity -- better for macOS/BSD
     } | socat - "TCP:$1" > "$2" 2>&1
   ' _ "$CTRL" "$J_HRESP" "$LPORT" 3<<<"$hex" 4<<<"$key" </dev/null >/dev/null 2>&1 &
   hp=$!

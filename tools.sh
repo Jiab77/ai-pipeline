@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.8.3
+# Version: 0.8.4
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -29,10 +29,10 @@
 
 # Config
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-TOR_HOST="127.0.0.1"
-TOR_PORT=9050
-TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
-SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+# TOR_HOST="127.0.0.1"
+# TOR_PORT=9350
+# TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+# SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
 
 # Select engine version
 ENGINE_VERSION="${ENGINE_VERSION:-.v2}"
@@ -91,10 +91,26 @@ is_termux() {
   [[ -d "/data/data/com.termux" ]] && return 0
   return 1
 }
+load_tor_config() {
+  # Check Tor config
+  [[ ! -r $TOR_CONFIG ]] && die "Missing Tor config file."
+
+  # Parse and set Tor config
+  TOR_HOST="127.0.0.1"
+  TOR_PORT=$(grep -v "#" "$TOR_CONFIG" | grep -m1 "SOCKSPort" | cut -d' ' -f2)
+  # CTRL_PORT=$(grep -m1 "ControlPort" "$TOR_CONFIG" | cut -d' ' -f2)
+  TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+  # TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
+  SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+  # TOR_LOG="/tmp/tor.log"
+}
 load_core() {
   # Load core
   # shellcheck source=/dev/null
   source "${SCRIPT_DIR}/core.sh"
+
+  # Load Tor config
+  # [[ $(type -t 'load_tor_config') == 'function' ]] && load_tor_config
 
   # Load libraries
   [[ $(type -t 'load_libs') == 'function' ]] && load_libs
@@ -1077,10 +1093,10 @@ create_avatar() {
     die "Anti-loop guard: ${gen_count} image(s) generated in the last hour (max ${MAX_IMAGE_GEN_PER_HOUR}). Stop generating and ask the user before trying again."
   fi
 
-  # Ratio 1:1 par défaut pour un avatar si aucune dimension n'est spécifiée
-  if [[ -z $size_val || $size_val == "null" ]]; then
-    [[ -z $ratio_val || $ratio_val == "null" ]] && ratio_val="1:1"
-  fi
+  # Ratio 1:1 by default for the avatar if no dimensions are specified
+  # Square intent for avatars: the engine applies 1:1 only on adapters that
+  # document --ratio (see the validation matrix in image.v2.sh).
+  export IMG_V2_SQUARE_DEFAULT=1
 
   img_args=(--prompt "$prompt_val")
   [[ -n $ratio_val && $ratio_val != "null" ]] && img_args+=(--ratio "$ratio_val")
@@ -1094,8 +1110,12 @@ create_avatar() {
   local generated_output img_path
   generated_output=$(generate_image "${img_args[@]}") || exit $?
 
-  img_path=$(grep -E '^[^[:space:]]+' <<< "$generated_output" | tail -n 1)
-  [[ ! -s $img_path ]] && die "Avatar generation failed: output file not found ($img_path)."
+  # img_path=$(grep -E '^[^[:space:]]+' <<< "$generated_output" | tail -n 1)
+  # [[ ! -s $img_path ]] && die "Avatar generation failed: output file not found ($img_path)."
+
+  # Engine contract: last non-empty stdout line = bare output path.
+  img_path=$(awk 'NF {p=$0} END {print p}' <<< "$generated_output")
+  [[ -n $img_path && -s $img_path ]] || die "Avatar generation failed: output file not found."
 
   # Target directory: data/avatar/avatar-YYYYMMDD-HHMMSS.ext
   local avatar_dir="${DATA_STORE:-${SCRIPT_DIR}/data}/avatar"
@@ -1111,6 +1131,15 @@ create_avatar() {
 
   # Return generated avatar path: visual detection loop will automatically inject it
   echo "$avatar_file"
+
+  # Render generated avatar directly in terminal
+  if [[ -n $(command -v chafa 2>/dev/null) ]]; then
+    chafa --label on \
+          --link on \
+          --align "top,center" \
+          --size 48x24 "$avatar_file" \
+          > /dev/tty    # bypass the pipeline, direct to terminal (thanks Jarvis :P)
+  fi
 }
 
 # ==============================================================================

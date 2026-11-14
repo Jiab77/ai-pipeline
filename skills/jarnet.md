@@ -61,8 +61,8 @@ Before operating JarNet, ensure the host system provides:
    - `jq` (JSON command-line parser)
    - `socat` (multipurpose bidirectional relay used for the local listener)
 2. **Local Tor Daemon**:
-   - **SOCKS5 Proxy**: Typically listening on `127.0.0.1:9050` (or `9150` for Tor Browser).
-   - **ControlPort**: Active on `127.0.0.1:9051` with authentication cookie (`CookieAuthentication 1`) or password.
+   - **SOCKS5 Proxy**: Active on `127.0.0.1:9350`
+   - **ControlPort**: Active on `127.0.0.1:9351` with authentication cookie (`CookieAuthentication 1`) or password.
 3. **Shared Pipeline Libraries** (included in `lib/`):
    - `lib/base64.sh` (portable URL-safe base64 encoding)
    - `lib/timeout.sh` (bounded execution primitive)
@@ -184,7 +184,7 @@ bash plugins/jarnet.sh up
 *What happens behind the scenes:*
 - Generates `keys/<alias>.key` if it does not already exist.
 - Binds a loopback HTTP listener on `127.0.0.1:18080`.
-- Connects to Tor ControlPort (`9051`) and requests an ephemeral or persistent hidden service mapping port `80` to `127.0.0.1:18080`.
+- Connects to Tor ControlPort (port from `config/torrc`, `9351` here) and requests an ephemeral or persistent hidden service mapping port `80` to `127.0.0.1:18080`.
 - Returns node details in JSON.
 
 ### Step 2: Inspect Identity and Share String

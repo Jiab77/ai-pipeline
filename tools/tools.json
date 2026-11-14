@@ -577,8 +577,7 @@
           },
           "proxy": {
             "type": "string",
-            "description": "Optional proxy URL (e.g. 'socks5h://127.0.0.1:9050'). Set to false to connect directly.",
-            "default": "socks5h://127.0.0.1:9050"
+            "description": "Optional proxy override. By default, the pipeline routes traffic through the Tor SOCKS proxy defined in config/torrc — omit this parameter to use it. Set to false to connect directly, or to a proxy URL (e.g. 'socks5h://host:port') to override."
           }
         },
         "required": ["url"]
@@ -599,7 +598,8 @@
           },
           "proxy": {
             "type": "string",
-            "description": "Optional proxy URL (e.g. 'socks4a://127.0.0.1:9050' for mobile and 'socks5://127.0.0.1:9050' for desktop). Set to false to connect directly."
+            "description": "Optional proxy override. By default, the pipeline routes traffic through the Tor SOCKS proxy defined in config/torrc — omit this parameter to use it. Set to false to connect directly, or to a proxy URL (e.g. 'socks5h://host:port') to override.",
+            "default": false
           },
           "headless": {
             "type": "string",

@@ -26,6 +26,7 @@ providers.old.json
 state.json
 core.conf
 core-v*.sh
+release.sh
 specs.sh
 test-core.sh
 video-gen.sh

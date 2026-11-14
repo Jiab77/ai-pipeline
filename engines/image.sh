@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.2.0
+# Version: 0.1.1
 #
 # Contract:
 #   generate_image — Generate an image from a text prompt.
@@ -428,7 +428,8 @@ img_save() {
   fi
   dest="${work%/*}/${work##*/}.$ext"
   mv "$work/output" "$dest" || return 1
-  if declare -F log_image >/dev/null; then log_image "Image created in '$dest'."; else printf '%s\n' "$dest"; fi
+  if declare -F log_image >/dev/null; then log_image "Image created in '$dest'."; fi
+  printf '%s\n' "$dest"
 }
 
 img_run() (

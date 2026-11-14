@@ -43,7 +43,7 @@ The root **`tools.sh`** dispatcher is loaded dynamically by `core.sh`. It interc
 
 ### 1. `web-fetch.sh` (Static Crawler & Markdown Extractor)
 A lightweight static fetcher using `curl` and `htmlq` (or precompiled binary) to convert web pages into clean Markdown without executing JavaScript.
-* **Privacy Shield**: Automatically routes traffic through Tor (`socks5h://127.0.0.1:9050`) by default.
+* **Privacy Shield**: Automatically routes traffic through the Tor SOCKS proxy defined in `config/torrc` (single source of truth).
 * **Anti-Bot Resiliency**: Integrates with `curl-impersonate` when available to bypass TLS/HTTP fingerprint blocking.
 
 ### 2. `web-browse.sh` (Stateless WebSocket Browser Automation)

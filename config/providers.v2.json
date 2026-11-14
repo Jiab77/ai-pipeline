@@ -224,37 +224,6 @@
       }
     }
   },
-  "inception": {
-    "name": "Inception Labs",
-    "status": "experimental",
-    "api": "https://docs.inceptionlabs.ai/api-reference/chat/create-a-chat-completion",
-    "url": "https://api.inceptionlabs.ai/v1/chat/completions",
-    "models": "https://api.inceptionlabs.ai/v1/models",
-    "auth": true,
-    "keys": "https://platform.inceptionlabs.ai/dashboard/api-keys",
-    "docs": {
-      "base": "https://docs.inceptionlabs.ai",
-      "intro": "/get-started",
-      "models": "/get-started/models",
-      "chat": "/resources/prompt-guide",
-      "streaming": "/capabilities/streaming",
-      "voice": [
-        "/usecases/voice",
-        "/cookbooks/realtime-voice-assistant"
-      ]
-    },
-    "default": {
-      "memory": "index",
-      "model": "mercury-3",
-      "vision": true,
-      "image": false,
-      "edit": false,
-      "video": false,
-      "voice": false,
-      "speech": false,
-      "zdr": false
-    }
-  },
   "kimi": {
     "name": "Moonshot AI",
     "status": "stable",
@@ -450,7 +419,7 @@
     },
     "default": {
       "memory": "index",
-      "model": "gemini-3-8-flash",
+      "model": "z-ai/glm-5.3-flash",
       "vision": true,
       "image": true,
       "edit": true,
@@ -551,7 +520,7 @@
     },
     "default": {
       "memory": "index",
-      "model": "gemini-3-8-flash",
+      "model": "z-ai-glm-5-3-flash",
       "vision": true,
       "image": true,
       "edit": true,
@@ -620,7 +589,7 @@
     },
     "default": {
       "memory": "index",
-      "model": "gemini-3-8-flash",
+      "model": "zai/glm-5.3-flash",
       "vision": true,
       "image": true,
       "edit": true,
@@ -730,7 +699,7 @@
     },
     "default": {
       "memory": "index",
-      "model": "grok-4.7",
+      "model": "grok-4-20",
       "vision": true,
       "image": true,
       "edit": true,

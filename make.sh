@@ -7,11 +7,11 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.0.0
+# Version: 0.0.1
 # ==============================================================================
 
-# Clean existing data
-echo -e "\n[+] Cleaning existing build data...\n"
+# Clean existing artifacts
+echo -e "\n[+] Cleaning existing build artifacts...\n"
 rm -rf build dist
 
 # Create build folder

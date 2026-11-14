@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.4.4
+# Version: 0.4.5
 # ==============================================================================
 
 # Options
@@ -17,9 +17,9 @@ set -o pipefail
 
 # Config
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-TOR_HOST="127.0.0.1"
-TOR_PORT=9050
-TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+# TOR_HOST="127.0.0.1"
+# TOR_PORT=9350
+# TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 # TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
 
 # Internals
@@ -27,9 +27,12 @@ BIN_CURL=$(command -v curl 2>/dev/null)
 BIN_CURL_IMP=$(command -v curl-impersonate 2>/dev/null)
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AIDE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_DIR="${AIDE_ROOT}/config"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
 LOG_FILE="${SCRIPT_NAME}.log"
+TOR_CONFIG="${CONFIG_DIR}/torrc"
 WEB_BROWSE_TOOL="${SCRIPT_DIR}/web-browse.sh"
 
 # Helper: Detect Termux
@@ -46,6 +49,24 @@ to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
 # Logger function
 log() {
   echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nArguments: $*" >> "$LOG_FILE"
+}
+
+# Tor helper
+load_tor_config() {
+  # Check Tor config
+  if [[ ! -r $TOR_CONFIG ]]; then
+    echo "Error: Missing Tor config file." >&2
+    exit 255
+  fi
+
+  # Parse and set Tor config
+  TOR_HOST="127.0.0.1"
+  TOR_PORT=$(grep -v "#" "$TOR_CONFIG" | grep -m1 "SOCKSPort" | cut -d' ' -f2)
+  # CTRL_PORT=$(grep -m1 "ControlPort" "$TOR_CONFIG" | cut -d' ' -f2)
+  TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+  # TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
+  # SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+  # TOR_LOG="/tmp/tor.log"
 }
 
 # Curl Wrapper
@@ -1348,6 +1369,10 @@ handle_fallback() {
 
 # --- MAIN ROUTING LOGIC ---
 
+# Init Tor
+load_tor_config
+
+# Handle URLs
 if [[ $URL =~ gist.github.com ]] || [[ $URL =~ gist.githubusercontent.com ]]; then
   handle_gist "$URL"
 elif [[ $URL =~ (www.)?github.com ]]; then

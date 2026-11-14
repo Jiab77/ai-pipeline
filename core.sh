@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.3
+# Version: 1.9.4
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -42,7 +42,7 @@ MEMORY_SECTION_KB="${MEMORY_SECTION_KB:-128}"
 HEARTBEAT_THRESHOLD=15
 
 # Settings
-DETECT_MODE="${DETECT_MODE:-images}"                # Visual feedback auto-detection (images|videos|all|off)
+DETECT_MODE="${DETECT_MODE:-off}"                   # Visual feedback auto-detection (images|videos|all|off)
 REASONING_EFFORT="${REASONING_EFFORT:-low}"         # Set default reasoning effort (low|medium|high|xhigh)
 MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-128000}"
 ENGINE_VERSION="${ENGINE_VERSION:-.v2}"             # Select engine version
@@ -52,10 +52,6 @@ KILL_ON_EXIT="${KILL_ON_EXIT:-true}"                # Kill background services o
 
 # Web
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-
-# Tor
-TOR_HOST="127.0.0.1"
-TOR_PORT=9050
 
 # Options
 DEBUG="${DEBUG:-false}"       # Enable / Disable debug mode
@@ -107,7 +103,6 @@ BIN_DEPS_MOBILE=("${BIN_DEPS[@]}" "adb")
 BIN_FIGLET=$(command -v figlet 2>/dev/null)
 BIN_SYSTEMCTL=$(command -v systemctl 2>/dev/null)
 BIN_TOR=$(command -v tor 2>/dev/null)
-TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
 TOR_CONFIG="${CONFIG_DIR}/torrc"
 IS_MEDIA=false
 
@@ -121,7 +116,6 @@ CREDENTIALS="${HOME}/.creds"
 
 # Temporary Files (Default to /tmp, adapts dynamically on Termux)
 TOOLS_OUTPUT="/tmp/tools_output.txt"
-TOR_LOG="/tmp/tor.log"
 TEMP_MEMORY_SYSTEM="/tmp/memory_sys.txt"
 TEMP_MEMORY_USER="/tmp/memory_usr.txt"
 TEMP_BASE64_OUTPUT="/tmp/image_output.b64"
@@ -282,10 +276,17 @@ ICON_AI="🤖"
 # Core Functions
 # -----------------------------------------------------------------------------
 
-# Get terminal width safely
+# Get terminal width safely (portable Linux + macOS/BSD)
+# `stty size < /dev/tty` reads the true tty size on BOTH Linux and macOS.
 set_term_width() {
-  TERM_WIDTH=$(tput cols 2>/dev/null || echo $DEFAULT_TERM_WIDTH)
-  TERM_WIDTH=$((TERM_WIDTH - 1))
+  local cols=""
+  if cols=$(stty size < /dev/tty 2>/dev/null); then
+    cols=${cols#* }                          # "rows cols" -> cols
+  elif command -v tput >/dev/null 2>&1; then
+    cols=$(tput cols 2>/dev/null) || true
+  fi
+  [[ $cols =~ ^[0-9]+$ && $cols -gt 0 ]] || cols=${DEFAULT_TERM_WIDTH:-80}
+  TERM_WIDTH=$((cols - 1))
 }
 get_term_width() {
   echo "$TERM_WIDTH"
@@ -716,6 +717,20 @@ start_tor_detached() (
   set -m
   tor -f "$TOR_CONFIG" </dev/null &>"$TOR_LOG" &
 )
+
+load_tor_config() {
+  # Check Tor config
+  [[ ! -r $TOR_CONFIG ]] && error "Missing Tor config file."
+
+  # Parse and set Tor config
+  TOR_HOST="127.0.0.1"
+  TOR_PORT=$(grep -v "#" "$TOR_CONFIG" | grep -m1 "SOCKSPort" | cut -d' ' -f2)
+  # CTRL_PORT=$(grep -m1 "ControlPort" "$TOR_CONFIG" | cut -d' ' -f2)
+  TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+  # TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
+  # SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+  TOR_LOG="/tmp/tor.log"
+}
 
 detect_tor() {
   log_info "Detecting Tor Network proxy interface..."
@@ -2779,13 +2794,6 @@ normalize_provider_models() {
             (if ((.output_modalities // []) | index("transcription")) then "A" else "" end),
             (if .active == false then "D" else "" end) ] | join("")) ] | @tsv'
     ;;
-    inception)
-      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
-        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
-            (if ((.output_modalities // []) | index("speech")) then "S" else "" end),
-            (if ((.output_modalities // []) | index("transcription")) then "A" else "" end),
-            (if .active == false then "D" else "" end) ] | join("")) ] | @tsv'
-    ;;
     huggingface)
       # Raw array, 1000+ models: top 50 by downloads, the rest is noise.
       jq -r 'sort_by(-(.downloads // 0))[:50][] | [ (.modelId // .id // "?"),
@@ -2828,7 +2836,8 @@ normalize_provider_models() {
       jq -r '.data[] | [ .id, (.model_spec.name // "-"),
         (.model_spec.availableContextTokens // .context_length // "-"),
         (.model_spec.pricing.input.usd // "-"), (.model_spec.pricing.output.usd // "-"),
-        ([ (if (.model_spec.capabilities.supportsFunctionCalling // false) then "T" else "" end),
+        ([ (if (.model_spec.capabilities.supportsVision // false) then "V" else "" end),
+            (if (.model_spec.capabilities.supportsFunctionCalling // false) then "T" else "" end),
             (if (.model_spec.capabilities.supportsReasoning // false) then "R" else "" end),
             (if ((.type // "text") != "text") then (.type | .[0:1] | ascii_upcase) else "" end) ] | join("")) ] | @tsv'
     ;;
@@ -2931,7 +2940,7 @@ list_provider_models() {
       fi
       log
       log "   Flags: V=vision R=reasoning T=tools F=free D=deprecated W=open-weights"
-      log "          U=uncensored I=image (venice non-text)"
+      log "          U=uncensored I=image"
     fi
     log
   else
@@ -3169,6 +3178,7 @@ run_inference_loop() {
         # DETECT_MODE drives the extension class: images (default) | videos | all | off
         local detect_ext_re="png|jpg|jpeg|webp|gif"
         case $DETECT_MODE in
+          off)    detect_ext_re="" ;;   # stop automatic media detection
           videos) detect_ext_re="mp4|webm|mov|mpeg|mpg" ;;
           all)    detect_ext_re="png|jpg|jpeg|webp|gif|mp4|webm|mov|mpeg|mpg" ;;
         esac
@@ -4209,6 +4219,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}--memory <type>${ANSI_RESET}            Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, whispercpp, web)
   ${CLR_B_GREEN}--launch <app> [path]${ANSI_RESET}      Start given application with existing backend / provider
+  ${CLR_B_GREEN}--mode <name>${ANSI_RESET}              Start in given mode (auto, chat, simple, multi, etc...)
   ${CLR_B_GREEN}--auto${ANSI_RESET}                     Start non-interactive mode for Agent-2-Agent communications
   ${CLR_B_GREEN}--chat${ANSI_RESET}                     Start interactive conversational chat mode
   ${CLR_B_GREEN}--multi${ANSI_RESET}                    Start complex multi-agent analysis pipeline
@@ -4241,6 +4252,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}memory <type>${ANSI_RESET}              Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server (ollama, llamacpp, whispercpp, web)
   ${CLR_B_GREEN}launch <app> [path]${ANSI_RESET}        Start given application with existing backend / provider
+  ${CLR_B_GREEN}mode <name>${ANSI_RESET}                Start in given mode (auto, chat, simple, multi, etc...)
   ${CLR_B_GREEN}auto${ANSI_RESET}                       Start non-interactive mode for Agent-2-Agent communications
   ${CLR_B_GREEN}chat${ANSI_RESET}                       Start interactive conversational chat mode
   ${CLR_B_GREEN}multi${ANSI_RESET}                      Start complex multi-agent analysis pipeline
@@ -4312,6 +4324,7 @@ parse_cli_args() {
       --effort|effort) REASONING_EFFORT="${2:-}" ; shift 2 ;;
       --memory|memory) MEMORY_STRUCTURE_TYPE="${2:-}" ; shift 2 ;;
       --detect|detect) DETECT_MODE="${2:-}" ; shift 2 ;;
+      --mode|mode) RUN_MODE="${2:-}" ; shift 2 ;;
       --auto|auto) RUN_MODE="auto" ; shift ;;
       --chat|chat) RUN_MODE="chat" ; shift ;;
       --multi|multi) RUN_MODE="multi" ; shift ;;
@@ -4383,6 +4396,7 @@ init_core() {
   create_local_data_store
 
   # Setup core
+  load_tor_config
   set_console_title "${SCRIPT_FILE}: Initializing..."
   set_listen_interface
   set_keep_alive
@@ -4500,6 +4514,9 @@ init_core() {
 # -----------------------------------------------------------------------------
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # Set Tor config (indempotent)
+  load_tor_config
+
   # Parse received flags
   parse_cli_args "$@"
 

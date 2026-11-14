@@ -470,21 +470,21 @@ Portable in the sense that they depend only on widely available tools; they are 
 
 ```sh
 # is my own door alive?  (R1: wide window, otherwise it is my patience that speaks)
-curl -s --max-time 60 --socks5-hostname 127.0.0.1:9050 "http://<addr>.onion/ping"
+curl -s --max-time 60 --socks5-hostname 127.0.0.1:9350 "http://<addr>.onion/ping"
 
 # is the peer's descriptor in the DHT?  (PUBLISHED, §3 — the only asymmetric state)
-COOKIE=$( { printf 'PROTOCOLINFO 1\r\nQUIT\r\n'; sleep 1; } | socat - TCP:127.0.0.1:9051 \
+COOKIE=$( { printf 'PROTOCOLINFO 1\r\nQUIT\r\n'; sleep 1; } | socat - TCP:127.0.0.1:9351 \
          | sed -n 's/.*COOKIEFILE="\([^"]*\)".*/\1/p' | tr -d '\r' )
 HEX=$(od -An -tx1 -v "$COOKIE" | tr -d ' \n')
 { printf 'AUTHENTICATE %s\r\n' "$HEX"; printf 'SETEVENTS HS_DESC\r\n'
-  printf 'HSFETCH %s\r\n' "<addr without .onion>"; sleep 5; } | socat - TCP:127.0.0.1:9051
+  printf 'HSFETCH %s\r\n' "<addr without .onion>"; sleep 5; } | socat - TCP:127.0.0.1:9351
 #   -> 650 HS_DESC RECEIVED = published ; nothing = not published ; then traverse for REACHABLE
 #   CAUTION: an HS_DESC about ONE'S OWN node may come from the local cache.
 
 # create an identity — measured 2026-10-24: WITHOUT a Port= mapping, Tor answers
 # "512 Missing 'Port' argument". Identity and virtual port are born together.
 { printf 'AUTHENTICATE %s\r\n' "$HEX"
-  printf 'ADD_ONION NEW:ED25519-V3 Port=80,127.0.0.1:18080\r\n'; sleep 1; } | socat - TCP:127.0.0.1:9051
+  printf 'ADD_ONION NEW:ED25519-V3 Port=80,127.0.0.1:18080\r\n'; sleep 1; } | socat - TCP:127.0.0.1:9351
 #   -> 250-ServiceID=<56 base32> (the address) and 250-PrivateKey=ED25519-V3:<blob>
 #   Store the key (mode 600): replaying this line with the stored key republishes the SAME address.
 #   Nothing stays published while nothing listens behind it: DEL_ONION <sid> until the listener is up.
@@ -496,10 +496,10 @@ HEX=$(od -An -tx1 -v "$COOKIE" | tr -d ' \n')
 
 ```sh
 A="http://<addr>.onion"
-curl -s --max-time 60 --socks5-hostname 127.0.0.1:9050 "$A/ping"                       # (a) 200 + ok:true
-curl -s --max-time 60 --socks5-hostname 127.0.0.1:9050 "$A/say/<b64(type=xyz)>"        # (b) unknown_type
-curl -s --max-time 60 --socks5-hostname 127.0.0.1:9050 "$A/say/<b64(17000 chars)>"     # (c) too_large
-curl -s --max-time 60 --socks5-hostname 127.0.0.1:9050 "$A/say/<b64(invalid JSON)>"    # (d) invalid_envelope
+curl -s --max-time 60 --socks5-hostname 127.0.0.1:9350 "$A/ping"                       # (a) 200 + ok:true
+curl -s --max-time 60 --socks5-hostname 127.0.0.1:9350 "$A/say/<b64(type=xyz)>"        # (b) unknown_type
+curl -s --max-time 60 --socks5-hostname 127.0.0.1:9350 "$A/say/<b64(17000 chars)>"     # (c) too_large
+curl -s --max-time 60 --socks5-hostname 127.0.0.1:9350 "$A/say/<b64(invalid JSON)>"    # (d) invalid_envelope
 ```
 
 ### 15.3 What is explicitly outside the contract

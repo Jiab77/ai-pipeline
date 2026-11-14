@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.2.0
+# Version: 0.2.1
 # ==============================================================================
 
 # Options
@@ -28,9 +28,9 @@ BIN_NAME="aide"
 CLI_FILE="cli.sh"
 
 # Internals
-SCRIPT_VERSION="0.2.0"
+SCRIPT_VERSION="0.2.1"
 BIN_DIR="${HOME}/.local/bin"
-BIN_DEPS=("git" "curl" "tor" "glow" "figlet" "awk" "sed" "openssl" "iconv" "jq" "htmlq" "websocat" "socat" "ffmpeg" "ffprobe" "exiftool" "file" "grep" "cut" "tr" "printf")
+BIN_DEPS=("git" "curl" "tor" "glow" "figlet" "awk" "sed" "openssl" "iconv" "jq" "htmlq" "websocat" "socat" "ffmpeg" "ffprobe" "exiftool" "chafa" "file" "grep" "cut" "tr" "printf")
 BIN_DEPS_MOBILE=("${BIN_DEPS[@]}" "adb" "termux-api")
 BIN_BREW=$(command -v brew 2>/dev/null)
 BIN_FIGLET=$(command -v figlet 2>/dev/null)

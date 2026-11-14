@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.1.0
+# Version: 0.2.1
 #
 # Contract:
 #   generate_image — text -> image
@@ -459,6 +459,18 @@ img_v2_options() {
     ;;
   esac
 
+  # Square default for avatar intent.
+  # Applied AFTER adapter validation: 1:1 is injected only on adapters that
+  # document --ratio; every other adapter keeps the provider default instead of
+  # crashing on a sizing parameter it does not expose.
+  if [[ ${IMG_V2_SQUARE_DEFAULT:-} == 1 && -z $IMG_V2_RATIO && -z $IMG_V2_SIZE ]]; then
+    case $IMG_V2_ADAPTER in
+      venice|openrouter) IMG_V2_RATIO='1:1' ;;
+      # openai/zai/vercel_images (→ --size only) et vercel_chat/mammouth_chat/
+      # huggingface (→ aucun sizing) : défaut provider, jamais de crash.
+    esac
+  fi
+
 
   # An edit reuses the source dimensions only when they fit the documented
   # grid; otherwise the provider default is left in charge instead of forcing
@@ -783,9 +795,8 @@ img_v2_run() (
 
   if declare -F log_image >/dev/null; then
     log_image "Image created in '$EXIF_DEST'."
-  else
-    printf '%s\n' "$EXIF_DEST"
   fi
+  printf '%s\n' "$EXIF_DEST"
 )
 
 generate_image() { img_v2_run generate "$@"; }

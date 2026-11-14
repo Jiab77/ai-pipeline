@@ -13,7 +13,7 @@ Optional capabilities and standalone protocols that extend the AI Pipeline witho
 
 JARNET uses cryptographic v3 onion addresses as sovereign node identities. It features zero centralized servers, zero tracking, and zero clearnet leaks.
 
-- **Self-Healing Lifecycle** : The engine dynamically manages its local `socat` listener process and the Tor controller connection (`ControlPort 9051`).
+- **Self-Healing Lifecycle** : The engine dynamically manages its local `socat` listener process and the Tor controller connection (`ControlPort 9351`).
 - **Autonomous Agent Mode** : Fully integrated into the pipeline's `/mode auto` (`run_agent`), enabling background inbox monitoring, anti-loop safeguards (`[AUTO]`), and sovereign inter-agent replies.
 - **Native LLM Tool Suite** : Exposed to the agent via 9 native tool calls:
   - Inspection & Health : `jarnet_who`, `jarnet_status`

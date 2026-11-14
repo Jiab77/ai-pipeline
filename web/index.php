@@ -211,9 +211,27 @@ $f3->route('GET /api/telemetry', function($f3) {
         $providerName = $providersConfig[$activeProvider]['name'];
     }
 
-    // Tor SOCKS port live detection (127.0.0.1:9050)
+    // Tor SOCKS port — single source of truth: config/torrc
+    // (mirror of load_tor_config(): value lives on the "SOCKSPort <port>" marker line)
     $useTor = false;
-    $torSock = @fsockopen('127.0.0.1', 9050, $errno, $errstr, 0.3);
+    $torHost = '127.0.0.1';
+    $torPort = 9350;  // conservative fallback if torrc is unreadable
+    $torrcFile = PROJECT_ROOT . '/config/torrc';
+    if (is_readable($torrcFile)) {
+        foreach (file($torrcFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $torLine) {
+            if (strpos($torLine, '#') !== false) {
+                continue;
+            }
+            if (strpos($torLine, 'SOCKSPort') !== false) {
+                $torParts = preg_split('/\s+/', trim($torLine));
+                if (count($torParts) >= 2 && ctype_digit($torParts[1])) {
+                    $torPort = (int)$torParts[1];
+                }
+                break;
+            }
+        }
+    }
+    $torSock = @fsockopen($torHost, $torPort, $errno, $errstr, 0.3);
     if ($torSock) {
         $useTor = true;
         fclose($torSock);
@@ -312,7 +330,7 @@ $f3->route('GET /api/telemetry', function($f3) {
     //         ]);
     //         curl_setopt($ch, CURLOPT_TIMEOUT, 3);
     //         if ($useTor) {
-    //             curl_setopt($ch, CURLOPT_PROXY, "socks5h://127.0.0.1:9050");
+    //             curl_setopt($ch, CURLOPT_PROXY, "socks5h://127.0.0.1:9350");
     //         }
     //         $res = curl_exec($ch);
     //         curl_close($ch);

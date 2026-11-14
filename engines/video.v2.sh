@@ -9,7 +9,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.1.0
+# Version: 0.2.1
 #
 # Contract:
 #   generate_video — text (or image) -> MP4
@@ -188,7 +188,7 @@ video_v2_resolve_model() {
   local provider="$VIDEO_V2_PROVIDER"
   local block="$VIDEO_V2_BLOCK"
   local operation="$VIDEO_V2_OPERATION"
-  local static default model
+  local static default model mode
 
   static=$(engine_v2_block_models "$provider" "$block")
   default=$(engine_v2_block_field "$provider" "$block" default)
@@ -215,8 +215,29 @@ video_v2_resolve_model() {
         return 1
       }
     else
-      model=$(jq -r '(if type == "array" then .[0].id else .data[0].id end) // empty' <<< "$VIDEO_V2_CATALOGUE") || return 1
-      [[ -n $model ]] || { video_v2_error "No $operation model in the '$provider' catalogue."; return 1; }
+      if [[ $provider == venice ]]; then
+        # Discovery-driven selection: the first catalogue model whose published
+        # constraints accept the requested duration (and resolution/ratio when
+        # set). catalogue[0] is NOT guaranteed to accept the engine defaults
+        # (2026-11-14: gemini i2v durations 4/6/8/10s vs the 5s engine default).
+        mode="$([[ $operation == t2v ]] && printf 'text-to-video' || printf 'image-to-video')"
+        model=$(jq -r --arg mode "$mode" --arg d "${VIDEO_V2_DURATION}s" \
+          --arg r "$VIDEO_V2_RESOLUTION" --arg a "$VIDEO_V2_RATIO" '
+          .data[]
+          | select((.model_spec.constraints.model_type // "") == $mode)
+          | select(((.model_spec.constraints.durations // []) | index($d)) != null)
+          | select($r == "" or ((.model_spec.constraints.resolutions // []) | index($r)) != null)
+          | select($a == "" or ((.model_spec.constraints.aspect_ratios // []) | index($a)) != null)
+          | .id
+        ' <<< "$VIDEO_V2_CATALOGUE" | head -n1) || return 1
+        [[ -n $model ]] || {
+          video_v2_error "No '$provider' $operation model accepts duration '${VIDEO_V2_DURATION}s'${VIDEO_V2_RESOLUTION:+, resolution '$VIDEO_V2_RESOLUTION'}${VIDEO_V2_RATIO:+, ratio '$VIDEO_V2_RATIO'}."
+          return 1
+        }
+      else
+        model=$(jq -r '(if type == "array" then .[0].id else .data[0].id end) // empty' <<< "$VIDEO_V2_CATALOGUE") || return 1
+        [[ -n $model ]] || { video_v2_error "No $operation model in the '$provider' catalogue."; return 1; }
+      fi
     fi
     case "$provider" in
       venice) VIDEO_V2_CONSTRAINTS=$(jq -c '.model_spec.constraints // {}' <<< "$(video_v2_catalogue_model "$model")") || return 1 ;;
@@ -277,15 +298,23 @@ video_v2_options() {
     venice)
       # Venice publishes mode, durations, resolutions and ratios per model.
       local wanted="${VIDEO_V2_DURATION}s"
-      jq -e --arg mode "$([[ $VIDEO_V2_OPERATION == t2v ]] && printf 'text-to-video' || printf 'image-to-video')" \
+      local reason
+      reason=$(jq -r --arg mode "$([[ $VIDEO_V2_OPERATION == t2v ]] && printf 'text-to-video' || printf 'image-to-video')" \
         --arg d "$wanted" --arg r "$VIDEO_V2_RESOLUTION" --arg a "$VIDEO_V2_RATIO" --argjson n "${#VIDEO_V2_PROMPT}" '
-        (.model_type // "") == $mode
-        and ((.durations // []) | index($d) != null)
-        and ($r == "" or ((.resolutions // []) | index($r) != null))
-        and ($a == "" or ((.aspect_ratios // []) | index($a) != null))
-        and $n <= (.prompt_character_limit // 2500)
-      ' <<< "$constraints" >/dev/null || {
-        video_v2_error "Venice model '$VIDEO_V2_MODEL' does not accept this mode/duration/resolution/ratio."
+        if (.model_type // "") != $mode then
+          "operation (model_type: \(.model_type // "none"))"
+        elif ((.durations // []) | index($d)) == null then
+          "duration \"\($d)\" (accepted: \((.durations // []) | join(", ")))"
+        elif ($r != "" and ((.resolutions // []) | index($r)) == null) then
+          "resolution \"\($r)\" (accepted: \((.resolutions // []) | join(", ")))"
+        elif ($a != "" and ((.aspect_ratios // []) | index($a)) == null) then
+          "aspect ratio \"\($a)\" (accepted: \((.aspect_ratios // []) | join(", ")))"
+        elif $n > (.prompt_character_limit // 2500) then
+          "prompt length (\($n) > \(.prompt_character_limit // 2500) characters)"
+        else empty end
+      ' <<< "$constraints")
+      [[ -z $reason ]] || {
+        video_v2_error "Venice model '$VIDEO_V2_MODEL' does not accept this $reason."
         return 1
       }
       if [[ -z $VIDEO_V2_RATIO ]]; then
@@ -592,7 +621,7 @@ video_v2_poll_status() {
   }
 
   if [[ $VIDEO_V2_PROVIDER == venice ]]; then
-    video_v2_http "$url" "$response" true --data-binary "@$body" || return 1
+    video_v2_http "$url" "$response" true -H 'Content-Type: application/json' --data-binary "@$body" || return 1
     if video_v2_valid_media "$response"; then video_v2_finish "$response"; return $?; fi
   elif [[ $VIDEO_V2_PROVIDER == vercel || $VIDEO_V2_PROVIDER == vercel_free ]]; then
     jq -n --argjson op "$VIDEO_V2_OPERATION_JSON" '{operation:$op}' > "$VIDEO_V2_WORK/poll.json" || return 1

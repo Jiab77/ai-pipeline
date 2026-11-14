@@ -1,4 +1,4 @@
-# Multi-stage / Production image for Jarvis (AI Pipeline) v1.9.0
+# Multi-stage / Production image for Jarvis (AI Pipeline) v1.9.4
 FROM debian:stable-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tor \
     git \
     figlet \
+    chafa \
     openssl \
     ncurses-bin \
     socat \
@@ -51,15 +52,12 @@ COPY . .
 # Ensure all scripts and tools are executable
 RUN chmod +x *.sh engines/*.sh plugins/*.sh tools/*.sh 2>/dev/null || true
 
-# 5. Configure Tor with ControlPort for JarNet and SOCKS proxy
-RUN echo "Log notice stdout" >> /etc/tor/torrc && \
-    echo "SocksPort 0.0.0.0:9050" >> /etc/tor/torrc && \
-    echo "ControlPort 9051" >> /etc/tor/torrc && \
-    echo "CookieAuthentication 1" >> /etc/tor/torrc && \
-    echo "HTTPTunnelPort 9080" >> /etc/tor/torrc
+# Tor is fully configured by the embedded config/torrc (single source of truth):
+# cli.sh detects Tor at boot and starts it itself with `tor -f config/torrc`.
+# SOCKS/ControlPort bind to loopback only — nothing Tor-related is exposed.
 
-# Expose Tor SOCKS, HTTP Tunnel, ControlPort and optional local web server
-EXPOSE 8080 9050 9051 9080
+# Expose the local web server port
+EXPOSE 8080
 
-# Default entrypoint starts Tor in background and forwards all arguments to cli.sh
-ENTRYPOINT ["/bin/bash", "-c", "tor & sleep 2 && ./cli.sh \"$@\"", "--"]
+# Forward all arguments to cli.sh (it self-manages Tor)
+ENTRYPOINT ["/bin/bash", "-c", "exec ./cli.sh \"$@\"", "--"]

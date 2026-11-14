@@ -8,17 +8,17 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.1.2
+# Version: 0.1.3
 # ==============================================================================
 
 # Options
 [[ -e $HOME/.debug ]] && set -x
 
 # Config
-TOR_HOST="127.0.0.1"
-TOR_PORT=9050
-TOR_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
-TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
+# TOR_HOST="127.0.0.1"
+# TOR_PORT=9350
+# TOR_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+# TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
 
 # Global state variables
 WS_URL=""
@@ -36,12 +36,14 @@ EVAL_RESULTS=()
 WS_CLIENT=""
 
 # Internals
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AIDE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_DIR="${AIDE_CONF_DIR:-${AIDE_ROOT}/config}"
+LIB_DIR="${AIDE_LIB_DIR:-${AIDE_ROOT}/lib}"
+LIB_DEPS=("base64")
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
-LIB_DIR="${AIDE_LIB_DIR:-${PROJECT_ROOT}/lib}"
-LIB_DEPS=("base64")
 LOG_FILE="${SCRIPT_NAME}.log"
+TOR_CONFIG="${CONFIG_DIR}/torrc"
 
 # Runtime mode flags
 LOCAL_CHROME=false
@@ -71,6 +73,21 @@ is_termux() {
   return 1
 }
 
+# Tor helper
+load_tor_config() {
+  # Check Tor config
+  [[ ! -r $TOR_CONFIG ]] && die "Missing Tor config file."
+
+  # Parse and set Tor config
+  TOR_HOST="127.0.0.1"
+  TOR_PORT=$(grep -v "#" "$TOR_CONFIG" | grep -m1 "SOCKSPort" | cut -d' ' -f2)
+  # CTRL_PORT=$(grep -m1 "ControlPort" "$TOR_CONFIG" | cut -d' ' -f2)
+  TOR_PROXY="socks5h://${TOR_HOST}:${TOR_PORT}"
+  TOR_PROXY_MOBILE="socks4a://${TOR_HOST}:${TOR_PORT}"
+  # SOCKS_PROXY="socks5://${TOR_HOST}:${TOR_PORT}"
+  # TOR_LOG="/tmp/tor.log"
+}
+
 # Load required libraries
 load_libs() {
   local total_libs=0
@@ -93,6 +110,11 @@ load_libs() {
     die "Missing libraries: $missing_libs_str"
   fi
 }
+
+# -----------------------------------------------------------------------------
+# Init Tor
+# -----------------------------------------------------------------------------
+load_tor_config
 
 # -----------------------------------------------------------------------------
 # Portability helpers (stock macOS / BSD differences)
@@ -768,7 +790,7 @@ init_android_browser() {
 
   # Apply proxy (Tor by default). In mobile mode the browser is already running,
   # so we set it via CDP instead of a launch flag. The device Chrome reaches
-  # Termux's Tor on the shared device loopback (127.0.0.1:9050).
+  # Termux's Tor on the shared device loopback (port from config/torrc).
   if [[ $NO_TOR == "false" && -z $PROXY ]]; then
     PROXY="$TOR_PROXY_MOBILE"
   fi
@@ -819,7 +841,7 @@ init_desktop_browser() {
   is_termux && args+=("--no-sandbox" "--disable-setuid-sandbox" "--disable-gpu" "--disable-dev-shm-usage")
   [[ $HEADLESS == "true" ]] && args+=("--headless=new")
 
-  # Apply SOCKS5 proxy (defaults to Tor on 127.0.0.1:9050 if enabled and empty proxy parameter is passed)
+  # Apply SOCKS5 proxy (defaults to Tor on 127.0.0.1:9350 if enabled and empty proxy parameter is passed)
   [[ $NO_TOR == "false" && -z $PROXY ]] && PROXY="$TOR_PROXY"
   [[ $PROXY == "null" || $PROXY == "false" ]] && PROXY=""
 
@@ -1160,4 +1182,5 @@ main() {
 # Logging
 echo -e "\n---\n\nDate: $(date '+%Y-%m-%d %H:%M:%S')\nArguments: $*" >> "$LOG_FILE"
 
+# Main
 main "$@"

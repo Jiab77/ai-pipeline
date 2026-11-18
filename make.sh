@@ -7,7 +7,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.0.1
+# Version: 0.0.2
 # ==============================================================================
 
 # Clean existing artifacts
@@ -20,8 +20,8 @@ mkdir -pv build dist
 
 # Copy required files and folders
 echo -e "\n[+] Copying required files and folders...\n"
-cp -rv {config,engines,lib,plugins,skills,tools} build/
-cp -v AGENTS.md cli.sh core.sh tools.sh build/
+cp -rv bash/{config,llm,engines,lib,plugins,skills,tools} build/
+cp -v AGENTS.md bash/{cli.sh,core.sh,tools.sh} build/
 
 # Remove useless files
 echo -e "\n[+] Removing useless files...\n"

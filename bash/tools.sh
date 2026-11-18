@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.8.7
+# Version: 0.8.8
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -52,11 +52,11 @@ MAX_VIDEO_GEN_PER_HOUR=20
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
-PROJECT_ROOT="${AIDE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+AIDE_ROOT="${AIDE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
-CONFIG_DIR="${PROJECT_ROOT}/config"
+CONFIG_DIR="${AIDE_ROOT}/config"
 ENG_DIR="${SCRIPT_DIR}/engines"
 LIB_DIR="${SCRIPT_DIR}/lib"
 TOOLS_DIR="${SCRIPT_DIR}/tools"

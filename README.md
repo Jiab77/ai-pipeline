@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2017%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.9.5-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v2.0.0-blue.svg)]()
 
 </div>
 
@@ -213,7 +213,7 @@ restore_temp_state() → DEEPSEEK    ← like nothing happened
 * From start:
 
   ```console
-  ./cli.sh provider deepseek fallback zai
+  ./bash/cli.sh provider deepseek fallback zai
   # From now on, any image → auto-switch → auto-restore.
   ```
 
@@ -256,7 +256,7 @@ A.I.D.E integrates **JarNet** (`plugins/jarnet.sh`), a zero-dependency, peer-to-
 
 ```bash
 # Start directly in Autonomous Agent-to-Agent mode:
-./cli.sh auto
+./bash/cli.sh auto
 
 # Or toggle dynamically from interactive chat:
 /mode auto
@@ -266,7 +266,7 @@ A.I.D.E integrates **JarNet** (`plugins/jarnet.sh`), a zero-dependency, peer-to-
 /jarnet status
 
 # Start chat mode without the JarNet background service:
-./cli.sh --no-jarnet
+./bash/cli.sh --no-jarnet
 ```
 
 ## 🚀 Quick Start
@@ -382,25 +382,25 @@ git clone --recursive https://github.com/jiab77/ai-pipeline.git && cd ai-pipelin
 
 ```bash
 # As server
-./cli.sh --server ollama         # Start 'ollama' server
-./cli.sh --server llamacpp       # Start 'llama.cpp' server
-./cli.sh --server web            # Start PHP 'web' server
+./bash/cli.sh --server ollama         # Start 'ollama' server
+./bash/cli.sh --server llamacpp       # Start 'llama.cpp' server
+./bash/cli.sh --server web            # Start PHP 'web' server
 
 # As client
-./cli.sh                          # Chat mode (starts JarNet and Tor by default)
-./cli.sh --no-jarnet              # Chat mode without JarNet background service
-./cli.sh --no-tor                 # Chat mode without using Tor
-./cli.sh --backend ollama         # Run fully offline
-./cli.sh --provider deepseek      # Pick your cloud provider
-./cli.sh --fallback zai           # Enable vision fallback
-./cli.sh --zdr                    # With Zero Data Retention
-./cli.sh --memory index           # Load a memory index instead of full contents
+./bash/cli.sh                          # Chat mode (starts JarNet and Tor by default)
+./bash/cli.sh --no-jarnet              # Chat mode without JarNet background service
+./bash/cli.sh --no-tor                 # Chat mode without using Tor
+./bash/cli.sh --backend ollama         # Run fully offline
+./bash/cli.sh --provider deepseek      # Pick your cloud provider
+./bash/cli.sh --fallback zai           # Enable vision fallback
+./bash/cli.sh --zdr                    # With Zero Data Retention
+./bash/cli.sh --memory index           # Load a memory index instead of full contents
 
 # Or with command args
-./cli.sh server ollama                    # Start local 'ollama' server
-./cli.sh backend ollama                   # Run fully offline
-./cli.sh provider deepseek                # Pick 'deepseek' as cloud provider
-./cli.sh provider deepseek fallback zai   # Pick 'deepseek' as cloud provider and set vision fallback to 'zai' provider
+./bash/cli.sh server ollama                    # Start local 'ollama' server
+./bash/cli.sh backend ollama                   # Run fully offline
+./bash/cli.sh provider deepseek                # Pick 'deepseek' as cloud provider
+./bash/cli.sh provider deepseek fallback zai   # Pick 'deepseek' as cloud provider and set vision fallback to 'zai' provider
 ```
 
 > [!TIP]
@@ -413,10 +413,10 @@ git clone --recursive https://github.com/jiab77/ai-pipeline.git && cd ai-pipelin
 /keys
 
 # From start
-./cli.sh keys
+./bash/cli.sh keys
 
 # Migrate keyring to new format (Nightmare stream obfuscation)
-./cli.sh migrate --apply
+./bash/cli.sh migrate --apply
 ```
 
 > **Keys are encrypted locally with ChaCha20 + PBKDF2. Never written to disk in cleartext.**
@@ -576,15 +576,15 @@ set_system_prompt()
   ├─ Base identity (AI name, model, workspace)
   ├─ Memory format (Markdown / JSON / SQL)
   │
-  ├─ config/rules.md exists?       → Inject safety rules
-  ├─ config/avatar.md exists?      → Inject self avatar creation rules
+  ├─ llm/rules.md exists?          → Inject safety rules
+  ├─ llm/avatar.md exists?         → Inject self avatar creation rules
   │
   ├─ data/framework/ exists?       → "Your behavioral framework files are here..."
   ├─ data/skills/ exists?          → "Your acquired skills are here..."
   ├─ data/learn/ exists?           → "Your learning resources are here..."
   ├─ data/docs/ exists?            → "Your shared documents are here..."
   │
-  └─ Protected files / folders warning (core.sh, cli.sh, tools.sh, image.sh, config/, keys/, lib/, engines/, plugins/)
+  └─ Protected files / folders warning (core.sh, cli.sh, tools.sh, image.sh, config/, llm/, keys/, lib/, engines/, plugins/)
 
 get_system_prompt()
   ├─ Base prompt assembled above
@@ -602,8 +602,8 @@ get_system_prompt()
 | `data/learn/` | Learning resources (read-only), references | "Look at when necessary" |
 | `data/docs/` | Shared documents | "Look at when necessary" |
 | `data/memory/` | Persistent memory | `full`: contents injected; `index`: file map injected, contents read on demand |
-| `config/rules.md` | Non-negotiable safety boundaries | Injected verbatim |
-| `config/avatar.md` | Self avatar creation rules to represent AI personality / mood | Injected verbatim |
+| `llm/rules.md` | Non-negotiable safety boundaries | Injected verbatim |
+| `llm/avatar.md` | Self avatar creation rules to represent AI personality / mood | Injected verbatim |
 
 **In practice**: To teach the agent a new skill, drop a Markdown file in `data/skills/` and restart. No code changes. The prompt adapts.
 ## 💬 Slash Commands
@@ -658,7 +658,7 @@ get_system_prompt()
 - **Tor startup** — when Tor is enabled for an external backend, reuse the configured endpoint if its TCP port is reachable; otherwise attempt to start Tor and check the port again. This is a TCP availability check, not a full Tor bootstrap verification.
 - **Zero Data Retention** — injected automatically for compatible providers
 - **Anti-XPIA / Anti-Injection** — external content is provenance-tagged, structurally separated from instructions
-- **Workspace confinement** — agent stays in `data/`, cannot modify core files or `config/`/`keys/` folders
+- **Workspace confinement** — agent stays in `data/`, cannot modify core files or `config/`/`llm/`/`keys/` folders
 - **ShellCheck-clean** — zero warnings on the active codebase
 
 <details>
@@ -670,7 +670,7 @@ get_system_prompt()
 - **ZDR Injection**: privacy payloads dynamically appended for compatible external providers.
 - **Terminal Payload Immunization**: `iconv` and strict `jq --rawfile` streams protect APIs from malformed outputs.
 - **Device Auth Tag**: cryptographic session tagging via machine-id + timestamp → sha256.
-- **Protected Files Guard**: `core.sh`, `cli.sh`, `tools.sh`, `tools.json`, and the entire `config/` and `keys/` folders are off-limits to the agent.
+- **Protected Files Guard**: `core.sh`, `cli.sh`, `tools.sh`, `tools.json`, and the entire `config/`, `llm/` and `keys/` folders are off-limits to the agent.
 
 </details>
 
@@ -815,22 +815,22 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](core.sh) | v1.9.5 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
-| [`cli.sh`](cli.sh) | v1.8.3 | Interactive terminal client — slash commands, session loop, reasoning display |
-| [`tools.sh`](tools.sh) | v0.8.6 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
-| [`image.v2.sh`](engines/image.v2.sh) | v0.2.2 | v2 Image engine — config-driven providers, quality & format constraints |
-| [`video.v2.sh`](engines/video.v2.sh) | v0.2.1 | v2 Video engine — t2v / i2v generation, asynchronous polling |
-| [`voice.v2.sh`](engines/voice.v2.sh) | v0.2.0 | v2 Voice engine — TTS voice synthesis (local Piper / cloud) |
-| [`speech.v2.sh`](engines/speech.v2.sh) | v0.2.0 | v2 Speech engine — STT audio transcription (local Whisper / cloud) |
-| [`jarnet.sh`](plugins/jarnet.sh) | v1.3.1 | P2P Agent-to-Agent Tor transport daemon & CLI |
+| [`core.sh`](bash/core.sh) | v1.9.5 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`cli.sh`](bash/cli.sh) | v1.8.3 | Interactive terminal client — slash commands, session loop, reasoning display |
+| [`tools.sh`](bash/tools.sh) | v0.8.6 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
+| [`image.v2.sh`](bash/engines/image.v2.sh) | v0.2.2 | v2 Image engine — config-driven providers, quality & format constraints |
+| [`video.v2.sh`](bash/engines/video.v2.sh) | v0.2.1 | v2 Video engine — t2v / i2v generation, asynchronous polling |
+| [`voice.v2.sh`](bash/engines/voice.v2.sh) | v0.2.0 | v2 Voice engine — TTS voice synthesis (local Piper / cloud) |
+| [`speech.v2.sh`](bash/engines/speech.v2.sh) | v0.2.0 | v2 Speech engine — STT audio transcription (local Whisper / cloud) |
+| [`jarnet.sh`](bash/plugins/jarnet.sh) | v1.3.1 | P2P Agent-to-Agent Tor transport daemon & CLI |
 | [`install.sh`](install.sh) | v0.2.1 | Project installer with static prebuilt binary downloader |
-| [`showcast.sh`](tools/showcast.sh) | v0.0.1 | `asciinema` demo recorder |
-| [`web-fetch.sh`](tools/web-fetch.sh) | v0.4.6 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
-| [`web-browse.sh`](tools/web-browse.sh) | v0.1.3 | Pure Bash CDP browser automation (desktop + Android/ADB) |
-| [`tools.json`](tools/tools.json) | — | Full tool schemas for function calling |
-| [`tools-light.json`](tools/tools-light.json) | — | Lightweight tool schemas for SLM models |
+| [`showcast.sh`](bash/tools/showcast.sh) | v0.0.1 | `asciinema` demo recorder |
+| [`web-fetch.sh`](bash/tools/web-fetch.sh) | v0.4.6 | Multi-forge web fetcher (GitHub, GitLab, Codeberg, SourceHut, Wikipedia) |
+| [`web-browse.sh`](bash/tools/web-browse.sh) | v0.1.3 | Pure Bash CDP browser automation (desktop + Android/ADB) |
+| [`tools.json`](config/tools.json) | — | Full tool schemas for function calling |
+| [`tools-light.json`](config/tools-light.json) | — | Lightweight tool schemas for SLM models |
 | [`config/providers.v2.json`](config/providers.v2.json) | — | Unified v2 provider registry with dynamic model discovery |
-| [`lib/*.sh`](lib/) | — | Modular pure-Bash primitives (animate, base64, base82, nightmare, sha256, timeout, helpers) |
+| [`lib/*.sh`](bash/lib/) | — | Modular pure-Bash primitives (animate, base64, base82, nightmare, sha256, timeout, helpers) |
 
 </details>
 
@@ -842,7 +842,7 @@ The pipeline uses a native Markdown-based memory filesystem under `data/memory/`
 - **`full` (default)**: inject the readable memory files' full contents into the system prompt.
 - **`index`**: inject a sorted file map with paths, titles and sizes; contents stay on disk and are read on demand. Files at or above `MEMORY_SECTION_KB` (default: **128 KiB**) also include up to **20 H2 headings**. The threshold applies to the whole file, not individual sections. Setting it to `0` enables H2 listings for every file containing such headings.
 
-Select the mode at launch with `./cli.sh --memory index` (or `./cli.sh memory index`), or during a chat with `/memory index` and `/memory full`. `/memory` alone displays the current setting. The switch changes memory injection for subsequent requests; it does not delete memory files or clear conversation history.
+Select the mode at launch with `./bash/cli.sh --memory index` (or `./bash/cli.sh memory index`), or during a chat with `/memory index` and `/memory full`. `/memory` alone displays the current setting. The switch changes memory injection for subsequent requests; it does not delete memory files or clear conversation history.
 
 **Defaults and fallback:** `MEMORY_STRUCTURE_TYPE` defaults to `full`. During provider setup, a provider's memory default can replace a non-`index` setting, while an active `index` setting is preserved. At prompt assembly, any value other than `index` deliberately uses the `full` branch, including an empty or unrecognized value.
 

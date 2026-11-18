@@ -36,14 +36,14 @@ Human request
 
 The main responsibilities are intentionally separated:
 
-* `cli.sh`: interactive command-line entry point and human-facing commands
-* `core.sh`: orchestration, provider integration, session state, and inference/tool loops
+* `bash/cli.sh`: interactive command-line entry point and human-facing commands
+* `bash/core.sh`: orchestration, provider integration, session state, and inference/tool loops
 * `config/`: runtime configuration, provider definitions and capabilities, and current session state
-* `tools.sh`: model-facing tool handlers and local dispatch
-* `tools/tools*.json`: contracts describing the tools exposed to the model
-* `engines/`: native image, video, and voice engines
-* `lib/`: reusable source-only Bash primitives
-* `plugins/`: optional capabilities
+* `config/tools*.json`: contracts describing the tools exposed to the model
+* `bash/tools.sh`: model-facing tool handlers and local dispatch
+* `bash/engines/`: native image, video, and voice engines
+* `bash/lib/`: reusable source-only Bash primitives
+* `bash/plugins/`: optional capabilities
 * `data/memory/`: persistent project context, read from disk when needed
 
 The source code remains the source of truth for implemented behavior. Documentation must follow the code, and planned capabilities must be identified as such.

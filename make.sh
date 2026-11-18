@@ -7,7 +7,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.0.2
+# Version: 0.0.3
 # ==============================================================================
 
 # Clean existing artifacts
@@ -16,12 +16,14 @@ rm -rf build dist
 
 # Create build folder
 echo -e "\n[+] Creating build folder...\n"
-mkdir -pv build dist
+mkdir -pv build/bash dist
 
 # Copy required files and folders
 echo -e "\n[+] Copying required files and folders...\n"
-cp -rv bash/{config,llm,engines,lib,plugins,skills,tools} build/
-cp -v AGENTS.md bash/{cli.sh,core.sh,tools.sh} build/
+cp -rv bash/{engines,lib,plugins,tools} build/bash
+cp -v bash/{cli.sh,core.sh,tools.sh} build/bash
+cp -rv {config,llm,skills} build/
+cp -v AGENTS.md build/
 
 # Remove useless files
 echo -e "\n[+] Removing useless files...\n"
@@ -31,4 +33,4 @@ rm -fv build/config/state.json
 
 # Run 'makeself' to create the 'aide.run' file
 echo -e "\n[+] Creating 'aide.run' binary with 'makeself'...\n"
-makeself --notemp --target '$HOME/.cache/aide' --gzip --complevel 9 build dist/aide.run "A.I.D.E. Bash Pipeline" ./cli.sh
+makeself --notemp --target '$HOME/.cache/aide' --gzip --complevel 9 build dist/aide.run "A.I.D.E. Bash Pipeline" ./bash/cli.sh

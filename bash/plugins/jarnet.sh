@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.3.1
+# Version: 1.3.2
 #
 # Contract: jarnet.md 1.3; wire envelope v:1
 # Conformance oracle: tests/jarnet-selftest.sh
@@ -89,15 +89,18 @@
 #              string "<callsign>|<onion>.onion>"
 # ============================================================================
 
+# Options
+[[ -e $HOME/.debug ]] && set -x
 set -u
 
-JARNET_ROOT="${JARNET_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# Internals
+JARNET_ROOT="${JARNET_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 JARNET_DIR="${JARNET_DIR:-${JARNET_ROOT}/data/jarnet}"
 JARNET_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JARNET_SCRIPT_FILE="${BASH_SOURCE[0]##*/}"
 CONFIG_DIR="${JARNET_ROOT}/config"
 TOR_CONFIG="${CONFIG_DIR}/torrc"
-LIB_DIR="${AIDE_LIB_DIR:-${JARNET_ROOT}/lib}"
+LIB_DIR="${AIDE_LIB_DIR:-${JARNET_SCRIPT_DIR}/../lib}"
 LIB_DEPS=("base64" "timeout" "sha256")
 export JARNET_ROOT JARNET_DIR          # inherited by socat EXEC children
 
@@ -1218,7 +1221,7 @@ jarn_listener_start() {
   # §4: the listener binds LOOPBACK ONLY — a socket reachable from a shared
   # interface is non-conformant, whatever the peer list believes.
   JARNET_LISTENER="$JARNET_DIR" socat "TCP-LISTEN:${LPORT},bind=127.0.0.1,reuseaddr,fork" \
-        "EXEC:bash ${JARNET_ROOT}/plugins/jarnet.sh serve" >/dev/null 2>&1 &
+        "EXEC:bash ${JARNET_SCRIPT_DIR}/jarnet.sh serve" >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$J_PID"
   sleep 0.4
 

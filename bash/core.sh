@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.5
+# Version: 2.0.0
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -71,15 +71,17 @@ ZDR_ENFORCED=false            # Enforce Zero Data Retention for all cloud provid
 [[ -e $HOME/.debug ]] && DEBUG=true
 
 # Self-Discovery Paths (Dynamic Sandbox & Root Mounting)
+AIDE_ROOT="${AIDE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Internals
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
-DATA_STORE="${SCRIPT_DIR}/data"
+DATA_STORE="${AIDE_ROOT}/data"
 MEMORY_DIR="${DATA_STORE}/memory"
-CONFIG_DIR="${SCRIPT_DIR}/config"
-MODELS_DIR="${SCRIPT_DIR}/models"
+CONFIG_DIR="${AIDE_ROOT}/config"
+MODELS_DIR="${AIDE_ROOT}/models"
+LLM_DIR="${AIDE_ROOT}/llm"
 LIB_DIR="${SCRIPT_DIR}/lib"
 ENG_DIR="${SCRIPT_DIR}/engines"
 PLUG_DIR="${SCRIPT_DIR}/plugins"
@@ -90,7 +92,7 @@ IMG_HANDLER="${ENG_DIR}/image${ENGINE_VERSION}.sh"
 VID_HANDLER="${ENG_DIR}/video${ENGINE_VERSION}.sh"
 VOC_HANDLER="${ENG_DIR}/voice${ENGINE_VERSION}.sh"
 SPE_HANDLER="${ENG_DIR}/speech${ENGINE_VERSION}.sh"
-WEB_SERVER="${SCRIPT_DIR}/web/server.php"
+WEB_SERVER="${AIDE_ROOT}/web/server.php"
 SCRIPT_CONFIG="${CONFIG_DIR}/${SCRIPT_NAME}.conf"
 MODELS_CONFIG="${CONFIG_DIR}/models.json"
 PROVIDERS_CONFIG="${PROVIDERS_CONFIG:-${CONFIG_DIR}/providers${ENGINE_VERSION}.json}"
@@ -107,7 +109,7 @@ TOR_CONFIG="${CONFIG_DIR}/torrc"
 IS_MEDIA=false
 
 # Keys
-KEYS_DIR="${SCRIPT_DIR}/keys"
+KEYS_DIR="${AIDE_ROOT}/keys"
 MASTER_KEY_FILE="${KEYS_DIR}/key.dat"
 KEYRING_CIPHER=""
 KEYRING_PBKDF2=1
@@ -132,8 +134,8 @@ VENICE_BALANCE_FILE="/tmp/venice-balance.txt"
 # Sovereign Personality & Identity
 AI_NAME="${AI_NAME:-Jarvis}"
 AI_GENDER="${AI_GENDER:-male}"
-AI_AVATAR="${CONFIG_DIR}/avatar.md"
-AI_RULES="${CONFIG_DIR}/rules.md"
+AI_AVATAR="${LLM_DIR}/avatar.md"
+AI_RULES="${LLM_DIR}/rules.md"
 
 # Local Computing Controls
 QUANTIZATION="q8_0"   # Target quantization for resource-frugal models
@@ -1400,13 +1402,13 @@ set_base_tools() {
   case $BACKEND in
     ollama|llamacpp)
       if [[ $memory_size -gt 8 ]]; then
-        BASE_TOOLS="${TOOLS_DIR}/tools.json"
+        BASE_TOOLS="${CONFIG_DIR}/tools.json"
       else
-        BASE_TOOLS="${TOOLS_DIR}/tools-light.json"
+        BASE_TOOLS="${CONFIG_DIR}/tools-light.json"
       fi
     ;;
     external)
-      BASE_TOOLS="${TOOLS_DIR}/tools.json"
+      BASE_TOOLS="${CONFIG_DIR}/tools.json"
     ;;
   esac
 }
@@ -1593,7 +1595,7 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 **Config file:** \`${CONFIG_DIR##*/}/providers.json\`
 
 ## Your Constraints
-- **Rules** (\`${CONFIG_DIR##*/}/rules.md\`) — Non-negotiable safety boundaries
+- **Rules** (\`${LLM_DIR##*/}/rules.md\`) — Non-negotiable safety boundaries
 - **Deny-by-default** — Actions require human consent
 - **Workspace containment** — No system directory exploration
 - **Anti-XPIA** — \`compute_device_tag()\` + \`wrap_external_content()\`
@@ -1881,7 +1883,7 @@ set_model_settings() {
 }
 
 set_system_prompt() {
-  local SLM_PROMPT ; SLM_PROMPT=$(<"${CONFIG_DIR}/slm-prompt.md")
+  local SLM_PROMPT ; SLM_PROMPT=$(<"${LLM_DIR}/slm-prompt.md")
   local CORE_FILE
 
   # Define system prompt for cloud models
@@ -1944,9 +1946,9 @@ set_system_prompt() {
   # Sets important rules
   [[ -n $CORE_LIB && -r $CORE_LIB ]] && CORE_FILE="${CORE_LIB##*/}"
   if [[ -n $CORE_FILE ]]; then
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\`, \`${ENG_DIR##*/}\`, \`${LIB_DIR##*/}\`, \`${PLUG_DIR##*/}\` folders.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${CORE_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${LLM_DIR##*/}\`, \`${KEYS_DIR##*/}\`, \`${ENG_DIR##*/}\`, \`${LIB_DIR##*/}\`, \`${PLUG_DIR##*/}\` folders.\n"
   else
-    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${KEYS_DIR##*/}\`, \`${ENG_DIR##*/}\`, \`${LIB_DIR##*/}\`, \`${PLUG_DIR##*/}\` folders.\n"
+    SYSTEM_PROMPT+="You must never modify: \`${SCRIPT_FILE}\`, \`${TOOLS_HANDLER##*/}\`, \`${BASE_TOOLS##*/}\` and the content of the \`${CONFIG_DIR##*/}\`, \`${LLM_DIR##*/}\`, \`${KEYS_DIR##*/}\`, \`${ENG_DIR##*/}\`, \`${LIB_DIR##*/}\`, \`${PLUG_DIR##*/}\` folders.\n"
   fi
   SYSTEM_PROMPT+="Modifying these files will break the core pipeline functionalities."
 }
@@ -4169,6 +4171,9 @@ jarnet_start() {
 # -----------------------------------------------------------------------------
 # Initializing
 # -----------------------------------------------------------------------------
+
+# Export project root
+export AIDE_ROOT
 
 # Check required dependencies
 check_deps

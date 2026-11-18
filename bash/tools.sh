@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.8.6
+# Version: 0.8.7
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -52,10 +52,11 @@ MAX_VIDEO_GEN_PER_HOUR=20
 
 # Internals
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
+PROJECT_ROOT="${AIDE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"
-CONFIG_DIR="${SCRIPT_DIR}/config"
+CONFIG_DIR="${PROJECT_ROOT}/config"
 ENG_DIR="${SCRIPT_DIR}/engines"
 LIB_DIR="${SCRIPT_DIR}/lib"
 TOOLS_DIR="${SCRIPT_DIR}/tools"
@@ -184,16 +185,16 @@ validate_args() {
   # Read current schema from state
   schema=$(jq -rc .schema "${CONFIG_DIR}/state.json" 2>/dev/null)
   [[ -z $schema ]] && die "Required tool schema not found."
-  [[ ! -r "${TOOLS_DIR}/${schema}" ]] && die "Required tool schema file not readable."
+  [[ ! -r "${CONFIG_DIR}/${schema}" ]] && die "Required tool schema file not readable."
 
   # Gather the full properties object (keys for the whitelist, enum for values)
   props=$(jq -rc --arg func "$FUNC_NAME" \
-    '.[] | select(.function.name == $func) | .function.parameters.properties // {}' "${TOOLS_DIR}/${schema}") \
+    '.[] | select(.function.name == $func) | .function.parameters.properties // {}' "${CONFIG_DIR}/${schema}") \
     || die "Failed to get properties for '$FUNC_NAME'."
   [[ -z $props ]] && die "Unknown function '$FUNC_NAME' — not in schema."
 
   keys=$(jq -rc --arg func "$FUNC_NAME" \
-    '.[] | select(.function.name == $func) | .function.parameters.properties | keys // []' "${TOOLS_DIR}/${schema}") \
+    '.[] | select(.function.name == $func) | .function.parameters.properties | keys // []' "${CONFIG_DIR}/${schema}") \
     || die "Failed to get keys for '$FUNC_NAME'."
 
   bad_keys=$(jq -rc --argjson props "$props" \

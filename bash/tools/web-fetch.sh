@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.4.6
+# Version: 0.4.7
 # ==============================================================================
 
 # Options
@@ -27,7 +27,7 @@ BIN_CURL=$(command -v curl 2>/dev/null)
 BIN_CURL_IMP=$(command -v curl-impersonate 2>/dev/null)
 BIN_HTMLQ=$(command -v htmlq 2>/dev/null)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AIDE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AIDE_ROOT="${AIDE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 CONFIG_DIR="${AIDE_ROOT}/config"
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"

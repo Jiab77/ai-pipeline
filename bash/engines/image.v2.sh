@@ -44,7 +44,6 @@ if ! declare -F engine_v2_http >/dev/null; then
 fi
 
 # Transport tunables are read by lib/helpers.sh (engine_v2_http); the engine
-# Transport tunables are read by lib/helpers.sh (engine_v2_http); the engine
 # only has to state them for its own calls.
 ENGINE_V2_CONNECT_TIMEOUT=10
 ENGINE_V2_TIMEOUT=180

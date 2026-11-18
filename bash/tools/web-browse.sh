@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.1.3
+# Version: 0.1.4
 # ==============================================================================
 
 # Options
@@ -36,9 +36,9 @@ EVAL_RESULTS=()
 WS_CLIENT=""
 
 # Internals
-AIDE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AIDE_ROOT="${AIDE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 CONFIG_DIR="${AIDE_CONF_DIR:-${AIDE_ROOT}/config}"
-LIB_DIR="${AIDE_LIB_DIR:-${AIDE_ROOT}/lib}"
+LIB_DIR="${AIDE_LIB_DIR:-${AIDE_ROOT}/bash/lib}"
 LIB_DEPS=("base64")
 SCRIPT_FILE="${0##*/}"
 SCRIPT_NAME="${SCRIPT_FILE%.*}"

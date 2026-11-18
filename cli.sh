@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.8.2
+# Version: 1.8.3
 # ==============================================================================
 
 # Options
@@ -97,6 +97,11 @@ run_chat() {
   else
     log_info "Automatic Detection: ${CLR_B_RED}OFF${ANSI_RESET}"
   fi
+  if [[ ! $SHOW_THINKING == "off" ]]; then
+    log_info "Reasoning Display: ${CLR_B_YELLOW}$(to_upper "${SHOW_THINKING}")${ANSI_RESET}"
+  else
+    log_info "Reasoning Display: ${CLR_B_RED}OFF${ANSI_RESET}"
+  fi
   if [[ ! $RUN_MODE == "chat" ]]; then
     log_info "Working Mode: ${CLR_B_YELLOW}$(to_upper "${RUN_MODE}")${ANSI_RESET}"
   fi
@@ -146,7 +151,7 @@ ${CLR_B_CYAN}✨ Available Commands ✨${ANSI_RESET}
   ${CLR_B_GREEN}/voice [provider]${ANSI_RESET}              • Change / set voice provider
   ${CLR_B_GREEN}/speech [provider]${ANSI_RESET}             • Change / set speech provider
   ${CLR_B_GREEN}/model [name]${ANSI_RESET}                  • Change / set active model
-  ${CLR_B_GREEN}/thinking [boolean]${ANSI_RESET}            • Change / set active model reasoning display
+  ${CLR_B_GREEN}/thinking [value]${ANSI_RESET}              • Change / set active model reasoning display (on, off)
   ${CLR_B_GREEN}/effort [level]${ANSI_RESET}                • Change / set active model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}/memory [type]${ANSI_RESET}                 • Change / set active memory structure (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}/detect [mode]${ANSI_RESET}                 • Change / set visual feedback auto-detection (images, videos, all, off) -- default: $DETECT_MODE
@@ -530,25 +535,19 @@ EOF
         set_state           # Update new state
       ;;
       "/thinking")
-        if [[ -n $SHOW_THINKING ]]; then
-          log_step "Model reasoning display enabled: ${CLR_B_YELLOW}${SHOW_THINKING}${ANSI_RESET}"
-        else
-          log_step "Model reasoning display disabled.${ANSI_RESET}"
-        fi
-        log_info "Toggle model reasoning display with ${CLR_B_YELLOW}/thinking <true|false>${ANSI_RESET}"
+        log_step "Model reasoning display: ${CLR_B_YELLOW}${SHOW_THINKING}${ANSI_RESET}"
+        log_info "Toggle model reasoning display with ${CLR_B_YELLOW}/thinking <on|off>${ANSI_RESET}"
       ;;
       "/thinking "*)
-        unset SHOW_THINKING   # Remove initially defined threshold
-        SHOW_THINKING="${USER_MSG#"/thinking "}"
-        if [[ -n $SHOW_THINKING ]]; then
-          if [[ $SHOW_THINKING == true ]]; then
-            log_step "Model reasoning display: ${CLR_B_GREEN}enabled${ANSI_RESET}"
-          else
-            log_step "Model reasoning display: ${CLR_B_YELLOW}disabled${ANSI_RESET}"
-          fi
-        else
-          log_warn "Model reasoning display disabled."
-        fi
+        local thinking_value="${USER_MSG#"/thinking "}"
+        case $thinking_value in
+          on|off)
+            SHOW_THINKING="$thinking_value"
+            log_step "Model reasoning display: ${CLR_B_YELLOW}${SHOW_THINKING}${ANSI_RESET}"
+            set_state   # Update new state
+          ;;
+          *) log_warn "Unknown reasoning display value '${thinking_value}' — supported: on, off" ;;
+        esac
       ;;
       "/effort")
         if [[ -n $REASONING_EFFORT ]]; then

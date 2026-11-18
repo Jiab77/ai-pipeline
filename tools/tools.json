@@ -89,6 +89,23 @@
   {
     "type": "function",
     "function": {
+      "name": "exec_shell_command",
+      "description": "Execute a shell command and return its output (stdout and stderr combined). Exact alias of exec_command (same parameters).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string", "description": "Shell command to execute" },
+          "cmd": { "type": "string", "description": "Alias for command" },
+          "max_output_size": { "type": "string", "description": "Maximum output size in bytes (default 16384)" },
+          "timeout": { "type": "string", "description": "Timeout in seconds (default 10, max 60)" }
+        },
+        "required": ["command"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "apply_diff",
       "description": "Apply a unified diff to edit one or more files using patch (fuzzy-tolerant, path-agnostic). Use this instead of edit_file when the changes are complex. Paths in the diff dictate the target: absolute for out-of-root edits, relative for in-repo, or ../ to escape. Always verify after applying.",
       "parameters": {

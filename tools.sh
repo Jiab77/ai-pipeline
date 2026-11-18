@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.8.5
+# Version: 0.8.6
 # ==============================================================================
 # ------------------------------------------------------------------------------
 # AUDIT CHANGELOG:
@@ -369,6 +369,9 @@ exec_command() {
   fi
   exit $exit_code
 }
+
+# 4bis. exec_shell_command — exact alias of exec_command (same handler, same Anti-XPIA wrap)
+exec_shell_command() { exec_command "$@" ; }
 
 # 5. Write or overwrite a file (creates parent directories dynamically)
 write_file() {
@@ -922,13 +925,14 @@ get_state() {
 
 # 18. Return active providers.
 get_providers() {
-  local active_provider current_provider keyed_csv=""
+  local active_provider active_model current_provider keyed_csv=""
 
   # Load main library
   load_core
 
-  [[ -r "${CONFIG_DIR}/state.json" ]] || die "Missing state file: state.json."
-  active_provider=$(jq -r '.provider // empty' "${CONFIG_DIR}/state.json" 2>/dev/null)
+  [[ -r $STATE_FILE ]] || die "Missing state file: ${CONFIG_DIR##*/}/${STATE_FILE##*/}."
+  active_provider=$(jq -r '.provider // empty' "$STATE_FILE" 2>/dev/null)
+  active_model=$(jq -r '.model // empty' "$STATE_FILE" 2>/dev/null)
 
   [[ -r $PROVIDERS_CONFIG ]] || die "Missing provider registry: ${CONFIG_DIR##*/}/${PROVIDERS_CONFIG##*/}."
 
@@ -939,7 +943,7 @@ get_providers() {
     has_provider_key "$current_provider" && keyed_csv+="${current_provider},"
   done < <(jq -r 'keys[]' "$PROVIDERS_CONFIG" 2>/dev/null)
 
-  jq -c --arg active "$active_provider" --arg keyed "$keyed_csv" '
+  jq -c --arg active "$active_provider" --arg model "$active_model" --arg keyed "$keyed_csv" '
     ($keyed | split(",") | map(select(length > 0))) as $with_key |
     {
       active: (if $active == "" then null else $active end),
@@ -952,7 +956,7 @@ get_providers() {
           usable: ((((.value.auth // true) == false) or ((.key as $k | ($with_key | index($k))) != null))),
           catalogue: (((.value.inference // .value.models) | type) == "string"),
           catalogue_source: (if (.value.inference | type) == "string" then "inference" else "models" end),
-          model: (.value.default.model // null),
+          model: (if .key == $active and ($model | length) > 0 then $model else (.value.default.model // null) end),
           capabilities: {
             image:  (.value.default.image  // false),
             edit:   (.value.default.edit   // false),
@@ -1315,7 +1319,7 @@ fi
 
 # Dispatcher execution
 case "$FUNC_NAME" in
-  exec_command|web_fetch|web_search|web_browse|jarnet_check|jarnet_wait)
+  exec_command|exec_shell_command|web_fetch|web_search|web_browse|jarnet_check|jarnet_wait)
     output=$("$FUNC_NAME" "$FUNC_ARGS" 2>&1)
     exit_code=$?
     source_url=$(jq -r '.url // .query // .cmd // .command // "jarnet:inbox"' <<< "$FUNC_ARGS")

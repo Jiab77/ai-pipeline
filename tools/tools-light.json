@@ -56,6 +56,23 @@
   {
     "type": "function",
     "function": {
+      "name": "exec_shell_command",
+      "description": "Execute a shell command and return its output (stdout and stderr combined). Exact alias of exec_command (same parameters).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string", "description": "Shell command to execute" },
+          "cmd": { "type": "string", "description": "Alias for command" },
+          "max_output_size": { "type": "string", "description": "Maximum output size in bytes (default 16384)" },
+          "timeout": { "type": "string", "description": "Timeout in seconds (default 10, max 60)" }
+        },
+        "required": ["command"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_datetime",
       "description": "Returns the current date and time",
       "parameters": {

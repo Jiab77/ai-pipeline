@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.4
+# Version: 1.9.5
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -44,6 +44,7 @@ HEARTBEAT_THRESHOLD=15
 # Settings
 DETECT_MODE="${DETECT_MODE:-off}"                   # Visual feedback auto-detection (images|videos|all|off)
 REASONING_EFFORT="${REASONING_EFFORT:-low}"         # Set default reasoning effort (low|medium|high|xhigh)
+SHOW_THINKING="${SHOW_THINKING:-on}"                # Set default reasoning display (on|off)
 MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-128000}"
 ENGINE_VERSION="${ENGINE_VERSION:-.v2}"             # Select engine version
 AUDIO_LANG="${AUDIO_LANG:-auto}"                    # Set default audio language
@@ -59,7 +60,6 @@ USE_TOR="${USE_TOR:-true}"    # Enable / Disable routing cloud API calls through
 USE_TOOLS=true                # Enable / Disable tool calling capabilities
 USE_ANIMATE=true              # Enable / Disable 'Thinking...' animation spinner
 PULL_MODELS=false             # Enable / Disable initial models pulling
-SHOW_THINKING=true            # Enable / Disable model reasoning display
 VISION_ENABLED=true           # Enable vision for all cloud providers models
 IMAGE_ENABLED=false           # Enable image generation for the active provider
 VIDEO_ENABLED=false           # Enable video generation for the active provider
@@ -291,6 +291,7 @@ set_term_width() {
 get_term_width() {
   echo "$TERM_WIDTH"
 }
+trap set_term_width WINCH   # Detect window resize
 
 # Draw full width visual horizontal line
 draw_line() {
@@ -502,7 +503,10 @@ EOF
   echo
 }
 
+# -----------------------------------------------------------------------------
 # Media helpers
+# -----------------------------------------------------------------------------
+
 # NOTE: single grammar, aligned with analyze_media (file -b --mime-type) and the
 # venice vision contract: images = png/jpeg/webp/gif, videos = mp4/webm/mov/mpeg.
 # svg / avi / mkv are intentionally NOT accepted — no provider documents them as
@@ -548,14 +552,14 @@ is_audio_file() {
 
 # media_to_b64 <file> — base64-encode a media file into $TEMP_BASE64_OUTPUT (E2BIG-safe).
 # Shared by send_message (/load), the autonomous injection loop and analyze_media.
-# Dual form keeps both worlds happy: GNU (-i = --ignore-garbage, ignored on encode)
-# and macOS BSD (-i = input file; the first form then fails and the second fires).
 media_to_b64() {
-  # (base64 -i -w0 "$1" 2>/dev/null || base64 -i "$1" | tr -d '\r\n') > "$TEMP_BASE64_OUTPUT"
   b64e < "$1" > "$TEMP_BASE64_OUTPUT"
 }
 
+# -----------------------------------------------------------------------------
 # System helpers
+# -----------------------------------------------------------------------------
+
 is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 
 is_termux() {
@@ -698,12 +702,6 @@ set_keep_alive() {
     MAX_LIFETIME="5s"
   fi
 }
-
-# -----------------------------------------------------------------------------
-# Portability helpers (stock macOS / BSD differences)
-# -----------------------------------------------------------------------------
-
-# Moved to './lib'.
 
 # -----------------------------------------------------------------------------
 # Tor helpers
@@ -1422,6 +1420,7 @@ set_state() {
      --arg schema "${BASE_TOOLS##*/}" \
      --arg model "$CHAT_MODEL" \
      --arg vision "$VISION_MODEL" \
+     --arg thinking "$SHOW_THINKING" \
      --arg effort "$REASONING_EFFORT" \
      --arg detect "$DETECT_MODE" \
      --arg memory "$MEMORY_STRUCTURE_TYPE" \
@@ -1440,6 +1439,7 @@ set_state() {
        schema: $schema,
        model: $model,
        vision: $vision,
+       thinking: $thinking,
        effort: $effort,
        detect: $detect,
        memory: $memory,
@@ -1783,11 +1783,6 @@ bootstrap_memory() {
           secs=$(awk '/^## /{ if (n++ >= 20) exit; sub(/^#+[ \t]*/, ""); printf "%s%s", (s++ ? " · " : ""), $0 }' "$file" 2>/dev/null)
           [[ -n $secs ]] && index+="    § ${secs}\n"
         fi
-
-      # bad variant
-      # done < <(find "$MEMORY_DIR" -type f 2>/dev/null | sort)
-
-      # better variant
       done < <(find "$MEMORY_DIR" -path '*/.git' -prune -o -type f -print 2>/dev/null | sort)
       echo -ne "$index"
     ;;
@@ -1800,11 +1795,6 @@ bootstrap_memory() {
           prompt+="\n--- File: ${rel_path} ---\n"
           prompt+="$(<"$file")\n"
         fi
-
-      # bad variant
-      # done < <(find "$MEMORY_DIR" -type f 2>/dev/null)
-
-      # better variant
       done < <(find "$MEMORY_DIR" -path '*/.git' -prune -o -type f -print 2>/dev/null)
       echo -ne "$prompt"
     ;;
@@ -1834,11 +1824,6 @@ index_dir() {
     [[ -z $title ]] && title=$(basename "$file")
     # shellcheck disable=SC2016
     printf -- '- `%s` — %s (%s KB)\n' "${DATA_STORE##*/}/$rel_path" "${title:0:100}" "$kb"
-
-  # bad variant
-  # done < <(find "$dir" -type f 2>/dev/null | sort)
-
-  # better variant
   done < <(find "$dir" -path '*/.git' -prune -o -type f -print 2>/dev/null | sort)
 }
 
@@ -2868,6 +2853,16 @@ normalize_provider_models() {
 }
 
 # -----------------------------------------------------------------------------
+# Normalize numbers for display: "5.0" -> "5", "5.50" -> "5.5",
+# "1.25" leaves "1.25". Locale insensitive, BSD/macos compatible
+# -----------------------------------------------------------------------------
+normalize_numbers() {
+  local n="$1"
+  case $n in *.*) while [[ $n == *0 ]]; do n=${n%0}; done; n=${n%.} ;; esac
+  printf '%s' "$n"
+}
+
+# -----------------------------------------------------------------------------
 # Human rendering: TSV (id|model|ctx|$/M in|$/M out|flags) -> aligned table.
 # Column widths computed dynamically, free pricing in green, deprecated
 # models in red. No external dependency.
@@ -2900,8 +2895,16 @@ render_models_table() {
     IFS=$'\t' read -r id name ctx pin pout flags <<<"$line" || true
     free=$([[ $flags == *F* ]] && echo 1 || echo 0)
     deprecated=$([[ $flags == *D* ]] && echo 1 || echo 0)
-    pin=$([[ $pin == "-" || -z $pin ]] && echo "-" || printf '%g' "$pin")
-    pout=$([[ $pout == "-" || -z $pout ]] && echo "-" || printf '%g' "$pout")
+    if [[ $pin == "-" || -z $pin ]]; then
+      pin="-"
+    else
+      pin=$(normalize_numbers "$pin")
+    fi
+    if [[ $pout == "-" || -z $pout ]]; then
+      pout="-"
+    else
+      pout=$(normalize_numbers "$pout")
+    fi
     c_in=$ANSI_RESET ; c_id=$ANSI_RESET
     [[ $free == 1 ]] && c_in=$CLR_B_GREEN
     [[ $deprecated == 1 ]] && c_id=$CLR_B_RED
@@ -3095,7 +3098,7 @@ run_inference_loop() {
     [[ -n $resolved_model && ! $resolved_model == "null" && ! $output_stream == "silent" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
     # Output thinking (reasoning) if present
-    if [[ $SHOW_THINKING == true ]]; then
+    if [[ $SHOW_THINKING == true || $SHOW_THINKING == "on" || $SHOW_THINKING == "ON" ]]; then
       if [[ -n $reasoning && ! $reasoning == "null" ]]; then
         if [[ "$output_stream" == "stdout" ]]; then
           show_thinking_header
@@ -4214,7 +4217,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}--voice <provider>${ANSI_RESET}         Set AI voice engine provider
   ${CLR_B_GREEN}--speech <provider>${ANSI_RESET}        Set AI speech engine provider
   ${CLR_B_GREEN}--model <name>${ANSI_RESET}             Set AI model name to use
-  ${CLR_B_GREEN}--thinking <boolean>${ANSI_RESET}       Set AI model reasoning display
+  ${CLR_B_GREEN}--thinking <value>${ANSI_RESET}         Set AI model reasoning display (on, off)
   ${CLR_B_GREEN}--effort <level>${ANSI_RESET}           Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}--memory <type>${ANSI_RESET}            Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, whispercpp, web)
@@ -4247,7 +4250,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}voice <provider>${ANSI_RESET}           Set AI voice engine provider
   ${CLR_B_GREEN}speech <provider>${ANSI_RESET}          Set AI speech engine provider
   ${CLR_B_GREEN}model <name>${ANSI_RESET}               Set AI model name to use
-  ${CLR_B_GREEN}thinking <boolean>${ANSI_RESET}         Set AI model reasoning display
+  ${CLR_B_GREEN}thinking <value>${ANSI_RESET}           Set AI model reasoning display (on, off)
   ${CLR_B_GREEN}effort <level>${ANSI_RESET}             Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}memory <type>${ANSI_RESET}              Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server (ollama, llamacpp, whispercpp, web)

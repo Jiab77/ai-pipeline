@@ -7,11 +7,11 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.0.2
+# Version: 2.0.0
 #
-# Contract: TBD
+# Contract: LIB_DEPS
 #
-# Dependencies: TBD
+# Dependencies: core.sh
 # Loading: source only; no output or caller shell-option changes on success.
 # ==============================================================================
 
@@ -26,11 +26,19 @@ fi
 
 HELPERS_SH_LOADED=1
 
+# -----------------------------------------------------------------------------
 # Log and exit helper
+# -----------------------------------------------------------------------------
 die() {
   echo -e "\nError: $*\n" >&2
   exit 255
 }
+
+# -----------------------------------------------------------------------------
+# Strings helpers
+# -----------------------------------------------------------------------------
+to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
+to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
 
 # -----------------------------------------------------------------------------
 # Filtering helper
@@ -400,6 +408,173 @@ filter_provider_models() {
   esac
 }
 
+# -----------------------------------------------------------------------------
+# Normalize a provider catalogue into canonical TSV:
+#   id | name | context | $/M in | $/M out | flags
+# Flags: V=vision R=reasoning T=tools F=free D=deprecated W=open-weights
+#        U=uncensored I=image (venice non-text)
+# Each provider ships its own structure (measured live 2026-11-02): this case
+# block is the adaptation layer, the renderer below stays generic.
+# -----------------------------------------------------------------------------
+normalize_provider_models() {
+  local provider="$1"
+  case "$provider" in
+    anthropic)
+      jq -r '.data[] | [ .id, (.display_name // "-"), (.max_input_tokens // "-"), "-", "-",
+        (if .lifecycle == "deprecated" then "D" else "" end) ] | @tsv'
+    ;;
+    cyberneurova)
+      jq -r '.data[] | [ .id, (.display_name // "-"), (.context_length // "-"), "-", "-",
+        ([ (if .supports_image_in then "V" else "" end),
+            (if .supports_reasoning then "R" else "" end),
+            (if .supports_tool_use then "T" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    deepseek)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if .effort then "R" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    groq)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if ((.output_modalities // []) | index("speech")) then "S" else "" end),
+            (if ((.output_modalities // []) | index("transcription")) then "A" else "" end),
+            (if .active == false then "D" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    huggingface)
+      # Raw array, 1000+ models: top 50 by downloads, the rest is noise.
+      jq -r 'sort_by(-(.downloads // 0))[:50][] | [ (.modelId // .id // "?"),
+        "-", "-", "-", "-",
+        ([ (if .downloads then "dl:" + ((.downloads / 1000000 * 10 | round / 10 | tostring) + "M") else "" end),
+            (if .likes then "♥" + (.likes | tostring) else "" end) ] | join(" ")) ] | @tsv'
+    ;;
+    kimi)
+      jq -r '.data[] | [ .id, .id, (.context_length // "-"), "-", "-",
+        ([ (if .supports_image_in then "V" else "" end),
+            (if .supports_reasoning then "R" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    mammouth)
+      jq -r '.data[] | [ .id, .id, (.model_info.max_input_tokens // "-"),
+        (if .model_info.input_cost_per_token then (.model_info.input_cost_per_token * 1000000) else "-" end),
+        (if .model_info.output_cost_per_token then (.model_info.output_cost_per_token * 1000000) else "-" end), "-" ] | @tsv'
+    ;;
+    openai)
+      jq -r '.data[] | [ .id, .id, "-", "-", "-",
+        (if .shutdown_date then "D:" + .shutdown_date else "" end) ] | @tsv'
+    ;;
+    openroute)
+      jq -r '.data[] | [ .id, (.display_name // "-"), (.context_length // "-"),
+        (if .pricing.prompt then ((.pricing.prompt | tonumber) * 1000000) else "-" end),
+        (if .pricing.completion then ((.pricing.completion | tonumber) * 1000000) else "-" end),
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if .supports_reasoning then "R" else "" end),
+            (if .supports_tool_use then "T" else "" end),
+            (if ((.badges // []) | index("uncensored")) then "U" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    openrouter*)
+      # jq -r '.data[] | [ .id, (.name // "-"), (.context_length // "-"),
+      jq -r '.data[] | [ .id, "-", (.context_length // "-"),
+        (if .pricing.prompt then ((.pricing.prompt | tonumber) * 1000000) else "-" end),
+        (if .pricing.completion then ((.pricing.completion | tonumber) * 1000000) else "-" end),
+        ([ (if ((.architecture.input_modalities // []) | index("image")) then "V" else "" end),
+            (if ((.pricing.prompt | tonumber) == 0 and (.pricing.completion | tonumber) == 0) then "F" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    venice)
+      jq -r '.data[] | [ .id, (.model_spec.name // "-"),
+        (.model_spec.availableContextTokens // .context_length // "-"),
+        (.model_spec.pricing.input.usd // "-"), (.model_spec.pricing.output.usd // "-"),
+        ([ (if (.model_spec.capabilities.supportsVision // false) then "V" else "" end),
+            (if (.model_spec.capabilities.supportsFunctionCalling // false) then "T" else "" end),
+            (if (.model_spec.capabilities.supportsReasoning // false) then "R" else "" end),
+            (if ((.type // "text") != "text") then (.type | .[0:1] | ascii_upcase) else "" end) ] | join("")) ] | @tsv'
+    ;;
+    vercel*)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
+        ([ (if ((.tags // []) | index("vision")) then "V" else "" end),
+            (if ((.tags // []) | index("reasoning")) then "R" else "" end),
+            (if ((.tags // []) | index("tool-use")) then "T" else "" end),
+            (if ((.tags // []) | index("free")) then "F" else "" end),
+            (if ((.tags // []) | index("open-weights")) then "W" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    xai)
+      jq -r '.data[] | [ .id, (.name // "-"), (.context_length // "-"), "-", "-",
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
+            (if ((.output_modalities // []) | index("speech")) then "S" else "" end),
+            (if ((.output_modalities // []) | index("transcription")) then "A" else "" end),
+            (if .active == false then "D" else "" end) ] | join("")) ] | @tsv'
+    ;;
+    zai*)
+      jq -r '.data[] | [ .id, .id, "-", "-", "-", "-" ] | @tsv'
+    ;;
+    *)
+      # Unknown structure: best-effort extraction on universal keys.
+      jq -r 'if type == "object" then (.data // .models // [.] )[] else .[] end |
+        [ (.id // .modelId // "?"), "-", "-", "-", "-", "-" ] | @tsv'
+    ;;
+  esac
+}
+
+# -----------------------------------------------------------------------------
+# Normalize numbers for display: "5.0" -> "5", "5.50" -> "5.5",
+# "1.25" leaves "1.25". Locale insensitive, BSD/macos compatible
+# -----------------------------------------------------------------------------
+normalize_numbers() {
+  local n="$1"
+  case $n in *.*) while [[ $n == *0 ]]; do n=${n%0}; done; n=${n%.} ;; esac
+  printf '%s' "$n"
+}
+
+# -----------------------------------------------------------------------------
+# Human rendering: TSV (id|model|ctx|$/M in|$/M out|flags) -> aligned table.
+# Column widths computed dynamically, free pricing in green, deprecated
+# models in red. No external dependency.
+# -----------------------------------------------------------------------------
+render_models_table() {
+  local -a rows ; rows=()
+  local _row
+  while IFS= read -r _row; do rows+=("$_row"); done   # Bash 3.2 trick for macOS
+  [[ ${#rows[@]} -eq 0 ]] && { log_warn "No models found in catalogue." ; return 0 ; }
+
+  local -a hdr ; hdr=(ID NAME CONTEXT '$/M IN' '$/M OUT' FLAGS)
+  local -a w ; w=() ; local line f i len
+  for i in 0 1 2 3 4 5 ; do w[i]=${#hdr[i]} ; done
+  for line in "${rows[@]}" ; do
+    IFS=$'\t' read -ra f <<<"$line"
+    for i in 0 1 2 3 4 5 ; do
+      len=${#f[i]} ; (( len > w[i] )) && w[i]=$len
+    done
+  done
+
+  local sep="" ; for ((i=0; i<w[0]+w[1]+w[2]+w[3]+w[4]+w[5]+10; i++)) ; do sep+="─" ; done
+
+  printf "${CLR_B_CYAN}%-*s  %-*s  %*s  %*s  %*s  %s${ANSI_RESET}\n" \
+    "${w[0]}" "${hdr[0]}" "${w[1]}" "${hdr[1]}" "${w[2]}" "${hdr[2]}" \
+    "${w[3]}" "${hdr[3]}" "${w[4]}" "${hdr[4]}" "${hdr[5]}"
+  log "$sep"
+
+  local id name ctx pin pout flags free deprecated c_in c_id
+  for line in "${rows[@]}" ; do
+    IFS=$'\t' read -r id name ctx pin pout flags <<<"$line" || true
+    free=$([[ $flags == *F* ]] && echo 1 || echo 0)
+    deprecated=$([[ $flags == *D* ]] && echo 1 || echo 0)
+    if [[ $pin == "-" || -z $pin ]]; then
+      pin="-"
+    else
+      pin=$(normalize_numbers "$pin")
+    fi
+    if [[ $pout == "-" || -z $pout ]]; then
+      pout="-"
+    else
+      pout=$(normalize_numbers "$pout")
+    fi
+    c_in=$ANSI_RESET ; c_id=$ANSI_RESET
+    [[ $free == 1 ]] && c_in=$CLR_B_GREEN
+    [[ $deprecated == 1 ]] && c_id=$CLR_B_RED
+    printf "%b%-*s${ANSI_RESET}  %-*s  %*s  %b%*s${ANSI_RESET}  %*s  %s\n" \
+      "$c_id" "${w[0]}" "$id" "${w[1]}" "$name" "${w[2]}" "$ctx" \
+      "$c_in" "${w[3]}" "$pin" "${w[4]}" "$pout" "$flags"
+  done
+}
 
 # ------------------------------------------------------------------------------
 # Engine v2 plumbing

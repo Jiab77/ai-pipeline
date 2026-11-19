@@ -9,9 +9,9 @@
 # Collaborator: Jarvis
 # Version: 0.0.0
 #
-# Contract: TBD
+# Contract: LIB_DEPS
 #
-# Dependencies: TBD
+# Dependencies: core.sh
 # Loading: source only; no output or caller shell-option changes on success.
 # ==============================================================================
 
@@ -25,6 +25,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 fi
 
 TOR_SH_LOADED=1
+
+# -----------------------------------------------------------------------------
+# Tor Functions
+# -----------------------------------------------------------------------------
 
 kill_tor_svc() {
   pkill -f "tor -f $TOR_CONFIG" &>/dev/null

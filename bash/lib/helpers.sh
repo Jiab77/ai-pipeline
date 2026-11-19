@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # ==============================================================================
-# lib/helpers.sh — Shared project functions
+# lib/helpers.sh — Shared helpers functions
 # ==============================================================================
 # Provides source-only shared functions
 #

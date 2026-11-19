@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # ==============================================================================
-# lib/apps.sh — Shared Tor functions
+# lib/apps.sh — Shared apps functions
 # ==============================================================================
 # Provides source-only shared functions
 #

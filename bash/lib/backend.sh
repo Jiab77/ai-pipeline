@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash disable=SC2034
 # ==============================================================================
-# lib/backend.sh — Shared JarNet functions
+# lib/backend.sh — Shared backend functions
 # ==============================================================================
 # Provides source-only shared functions
 #

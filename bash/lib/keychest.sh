@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash disable=SC2034
 # ==============================================================================
-# lib/keychest.sh — Shared JarNet functions
+# lib/keychest.sh — Shared key chest functions
 # ==============================================================================
 # Provides source-only shared functions
 #

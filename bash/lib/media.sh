@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash disable=SC2034
 # ==============================================================================
-# lib/media.sh — Shared JarNet functions
+# lib/media.sh — Shared media functions
 # ==============================================================================
 # Provides source-only shared functions
 #

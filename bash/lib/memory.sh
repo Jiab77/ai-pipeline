@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # ==============================================================================
-# lib/memory.sh — Shared Tor functions
+# lib/memory.sh — Shared memory functions
 # ==============================================================================
 # Provides source-only shared functions
 #

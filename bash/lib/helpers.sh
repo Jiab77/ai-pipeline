@@ -7,7 +7,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.0.1
+# Version: 1.0.2
 #
 # Contract: TBD
 #
@@ -15,13 +15,26 @@
 # Loading: source only; no output or caller shell-option changes on success.
 # ==============================================================================
 
+# Idempotent re-sourcing guard
+[[ -n "${HELPERS_SH_LOADED:-}" ]] && return 0
+
+# Execution guard: this file is sourced, never executed
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    printf 'helpers.sh: library must be SOURCED, not executed (source %s)\n' "${BASH_SOURCE[0]}" >&2
+    exit 1
+fi
+
+HELPERS_SH_LOADED=1
+
 # Log and exit helper
 die() {
   echo -e "\nError: $*\n" >&2
   exit 255
 }
 
+# -----------------------------------------------------------------------------
 # Filtering helper
+# -----------------------------------------------------------------------------
 #
 # Narrows a provider catalogue to the models matching one operation.
 #

@@ -4306,10 +4306,10 @@ init_core() {
     ICON_INFO="ℹ️  "
   fi
 
-  # Fix Iterations for Termux
-  if is_termux; then
-    PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
-  fi
+  # Fix Iterations for Termux (creates key migration issues)
+  # if is_termux; then
+  #   PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
+  # fi
 
   # Create required folders
   create_local_model_cache

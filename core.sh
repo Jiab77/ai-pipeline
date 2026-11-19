@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.5
+# Version: 1.9.6
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -210,7 +210,7 @@ cleanup_the_mess() {
     [[ -x $NET_HANDLER ]] && "$NET_HANDLER" down &>/dev/null
 
     # Killing Tor service
-    pkill -f "tor -f $TOR_CONFIG" &>/dev/null
+    kill_tor_svc
   fi
 }
 
@@ -707,6 +707,10 @@ set_keep_alive() {
 # Tor helpers
 # -----------------------------------------------------------------------------
 
+kill_tor_svc() {
+  pkill -f "tor -f $TOR_CONFIG" &>/dev/null
+}
+
 # A background child inherits the CLI's process group when job control is off:
 # Ctrl+C then signals Tor as well as the client. Keep job control local to this
 # subshell and let Tor create its OWN process group. No setsid/nohup dependency;
@@ -742,14 +746,14 @@ detect_tor() {
 }
 
 wait_for_tor() {
-  local i
-  for i in {1..10}; do
+  for _ in {1..10}; do
     if _timeout 2 bash -c "</dev/tcp/${TOR_HOST}/${TOR_PORT}" &>/dev/null; then
       log_success "Tor privacy tunnel established! Routing securely to $TOR_PROXY."
       return 0
     fi
     sleep 1
   done
+  error "Tor proxy ($TOR_PROXY) is configured but unreachable after 10 retries. Is Tor running?"
 }
 
 check_tor() {
@@ -4389,10 +4393,10 @@ init_core() {
     ICON_INFO="ℹ️  "
   fi
 
-  # Fix Iterations for Termux
-  if is_termux; then
-    PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
-  fi
+  # Fix Iterations for Termux (creates key migration issues)
+  # if is_termux; then
+  #   PBKDF_ITERATIONS=$((PBKDF_ITERATIONS/2))
+  # fi
 
   # Create required folders
   create_local_model_cache

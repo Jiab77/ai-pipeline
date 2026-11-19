@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.8.3
+# Version: 2.0.0
 # ==============================================================================
 
 # Options
@@ -97,8 +97,8 @@ run_chat() {
   else
     log_info "Automatic Detection: ${CLR_B_RED}OFF${ANSI_RESET}"
   fi
-  if [[ ! $SHOW_THINKING == "off" ]]; then
-    log_info "Reasoning Display: ${CLR_B_YELLOW}$(to_upper "${SHOW_THINKING}")${ANSI_RESET}"
+  if [[ ! $REASONING_DISPLAY == "off" ]]; then
+    log_info "Reasoning Display: ${CLR_B_YELLOW}$(to_upper "${REASONING_DISPLAY}")${ANSI_RESET}"
   else
     log_info "Reasoning Display: ${CLR_B_RED}OFF${ANSI_RESET}"
   fi
@@ -120,6 +120,11 @@ run_chat() {
 
   # Custom user prompt
   local custom_prompt ; custom_prompt="$(printf '\n\001%s\002%sUser\001%s\002 \001%s\002❯\001%s\002 ' "${CLR_B_GREEN}" "${ICON_USER}" "${ANSI_RESET}" "${CLR_B_BLACK}" "${ANSI_RESET}")"
+
+  # Tor status bar — pure Bash, silent degrade (no Tor, no bar)
+  if [[ $STATUS_BAR == "on" || $STATUS_BAR == "ON" ]]; then
+    statusbar_enable
+  fi
 
   # Magic loop :P
   while true; do
@@ -155,6 +160,7 @@ ${CLR_B_CYAN}✨ Available Commands ✨${ANSI_RESET}
   ${CLR_B_GREEN}/effort [level]${ANSI_RESET}                • Change / set active model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}/memory [type]${ANSI_RESET}                 • Change / set active memory structure (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}/detect [mode]${ANSI_RESET}                 • Change / set visual feedback auto-detection (images, videos, all, off) -- default: $DETECT_MODE
+  ${CLR_B_GREEN}/status [value]${ANSI_RESET}                • Change / set status bar display (on, off) -- default: $STATUS_BAR
   ${CLR_B_GREEN}/jarnet [action]${ANSI_RESET}               • Control JarNet service (who, status, doctor, up, down)
   ${CLR_B_GREEN}/balance${ANSI_RESET}                       • Show available credits for all or active provider
   ${CLR_B_GREEN}/models${ANSI_RESET}                        • Show available models in active provider
@@ -429,6 +435,28 @@ EOF
           *) log_warn "Unknown detection mode '${detect_value}' — supported: images, videos, all, off" ;;
         esac
       ;;
+      "/status")
+        log_step "Tor status bar: ${CLR_B_YELLOW}${STATUS_BAR}${ANSI_RESET}"
+        log_info "Change status bar display with ${CLR_B_YELLOW}/status <on|off>${ANSI_RESET}"
+      ;;
+      "/status "*)
+        local status_value="${USER_MSG#"/status "}"
+        case $status_value in
+          on)
+            unset STATUS_BAR ; STATUS_BAR="$status_value"
+            log_step "New status bar setting defined: ${CLR_B_YELLOW}${STATUS_BAR}${ANSI_RESET}"
+            set_state   # Update new state
+            statusbar_enable
+          ;;
+          off)
+            unset STATUS_BAR ; STATUS_BAR="$status_value"
+            log_step "New status bar setting defined: ${CLR_B_YELLOW}${STATUS_BAR}${ANSI_RESET}"
+            set_state   # Update new state
+            statusbar_stop
+          ;;
+          *) log_warn "Unknown status bar argument '${status_value}' — supported: on, off" ;;
+        esac
+      ;;
       "/replay")
         if [[ -z $LAST_USER_MSG ]]; then
           log_warn "No previous message to replay!"
@@ -535,15 +563,15 @@ EOF
         set_state           # Update new state
       ;;
       "/thinking")
-        log_step "Model reasoning display: ${CLR_B_YELLOW}${SHOW_THINKING}${ANSI_RESET}"
+        log_step "Model reasoning display: ${CLR_B_YELLOW}${REASONING_DISPLAY}${ANSI_RESET}"
         log_info "Toggle model reasoning display with ${CLR_B_YELLOW}/thinking <on|off>${ANSI_RESET}"
       ;;
       "/thinking "*)
         local thinking_value="${USER_MSG#"/thinking "}"
         case $thinking_value in
           on|off)
-            SHOW_THINKING="$thinking_value"
-            log_step "Model reasoning display: ${CLR_B_YELLOW}${SHOW_THINKING}${ANSI_RESET}"
+            REASONING_DISPLAY="$thinking_value"
+            log_step "Model reasoning display: ${CLR_B_YELLOW}${REASONING_DISPLAY}${ANSI_RESET}"
             set_state   # Update new state
           ;;
           *) log_warn "Unknown reasoning display value '${thinking_value}' — supported: on, off" ;;

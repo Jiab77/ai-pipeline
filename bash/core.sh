@@ -44,7 +44,8 @@ HEARTBEAT_THRESHOLD=15
 # Settings
 DETECT_MODE="${DETECT_MODE:-off}"                   # Visual feedback auto-detection (images|videos|all|off)
 REASONING_EFFORT="${REASONING_EFFORT:-low}"         # Set default reasoning effort (low|medium|high|xhigh)
-SHOW_THINKING="${SHOW_THINKING:-on}"                # Set default reasoning display (on|off)
+REASONING_DISPLAY="${REASONING_DISPLAY:-on}"        # Set default reasoning display (on|off)
+STATUS_BAR="${STATUS_BAR:-on}"                      # Set Tor status bar display (on|off)
 MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-128000}"
 ENGINE_VERSION="${ENGINE_VERSION:-.v2}"             # Select engine version
 AUDIO_LANG="${AUDIO_LANG:-auto}"                    # Set default audio language
@@ -115,6 +116,7 @@ LIB_DEPS=(              # Orders matter!
   "memory"              # LLM memory management
   "history"             # LLM history management
   "backend"             # LLM backend management
+  "statusbar"           # LLM / Tor traffic status bar
   "apps"                # External managed apps
 )
 BIN_DEPS=("curl" "awk" "sed" "openssl" "jq" "htmlq" "websocat" "grep" "cut" "tr" "printf")
@@ -645,9 +647,10 @@ set_state() {
      --arg schema "${BASE_TOOLS##*/}" \
      --arg model "$CHAT_MODEL" \
      --arg vision "$VISION_MODEL" \
-     --arg thinking "$SHOW_THINKING" \
+     --arg thinking "$REASONING_DISPLAY" \
      --arg effort "$REASONING_EFFORT" \
      --arg detect "$DETECT_MODE" \
+     --arg status "$STATUS_BAR" \
      --arg memory "$MEMORY_STRUCTURE_TYPE" \
      --arg image "$IMAGE_PROVIDER" \
      --arg video "$VIDEO_PROVIDER" \
@@ -667,6 +670,7 @@ set_state() {
        thinking: $thinking,
        effort: $effort,
        detect: $detect,
+       status: $status,
        memory: $memory,
        image: $image,
        video: $video,
@@ -1225,7 +1229,7 @@ run_inference_loop() {
     [[ -n $resolved_model && ! $resolved_model == "null" && ! $output_stream == "silent" ]] && log "\n✨ [Resolved Model] -> ${CLR_B_CYAN}${resolved_model}${ANSI_RESET}"
 
     # Output thinking (reasoning) if present
-    if [[ $SHOW_THINKING == true || $SHOW_THINKING == "on" || $SHOW_THINKING == "ON" ]]; then
+    if [[ $SHOW_THINKING == true || $REASONING_DISPLAY == "on" || $REASONING_DISPLAY == "ON" ]]; then
       if [[ -n $reasoning && ! $reasoning == "null" ]]; then
         if [[ "$output_stream" == "stdout" ]]; then
           show_thinking_header
@@ -2198,6 +2202,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}OPTIONS / FLAGS:${ANSI_RESET}
   ${CLR_B_GREEN}--thinking <value>${ANSI_RESET}         Set AI model reasoning display (on, off)
   ${CLR_B_GREEN}--effort <level>${ANSI_RESET}           Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}--memory <type>${ANSI_RESET}            Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
+  ${CLR_B_GREEN}--status <value>${ANSI_RESET}           Set Tor status bar display (on, off)
   ${CLR_B_GREEN}--server <type>${ANSI_RESET}            Start backend API server (ollama, llamacpp, whispercpp, web)
   ${CLR_B_GREEN}--launch <app> [path]${ANSI_RESET}      Start given application with existing backend / provider
   ${CLR_B_GREEN}--mode <name>${ANSI_RESET}              Start in given mode (auto, chat, simple, multi, etc...)
@@ -2231,6 +2236,7 @@ ${ANSI_BOLD}${CLR_B_YELLOW}COMMANDS:${ANSI_RESET}
   ${CLR_B_GREEN}thinking <value>${ANSI_RESET}           Set AI model reasoning display (on, off)
   ${CLR_B_GREEN}effort <level>${ANSI_RESET}             Set AI model reasoning effort (none, minimal, low, medium, high, xhigh, max) -- default: $REASONING_EFFORT
   ${CLR_B_GREEN}memory <type>${ANSI_RESET}              Set AI memory structure type (full, index) -- default: $MEMORY_STRUCTURE_TYPE
+  ${CLR_B_GREEN}status <value>${ANSI_RESET}             Set Tor status bar display (on, off)
   ${CLR_B_GREEN}server <type>${ANSI_RESET}              Start backend API server (ollama, llamacpp, whispercpp, web)
   ${CLR_B_GREEN}launch <app> [path]${ANSI_RESET}        Start given application with existing backend / provider
   ${CLR_B_GREEN}mode <name>${ANSI_RESET}                Start in given mode (auto, chat, simple, multi, etc...)
@@ -2301,10 +2307,11 @@ parse_cli_args() {
       --voice|voice) VOICE_PROVIDER="${2:-}" ; shift 2 ;;
       --speech|speech) SPEECH_PROVIDER="${2:-}" ; shift 2 ;;
       --model|model) USER_MODEL="${2:-}" ; shift 2 ;;
-      --thinking|thinking) SHOW_THINKING="${2:-}" ; shift 2 ;;
+      --thinking|thinking) REASONING_DISPLAY="${2:-}" ; shift 2 ;;
       --effort|effort) REASONING_EFFORT="${2:-}" ; shift 2 ;;
       --memory|memory) MEMORY_STRUCTURE_TYPE="${2:-}" ; shift 2 ;;
       --detect|detect) DETECT_MODE="${2:-}" ; shift 2 ;;
+      --status|status) STATUS_BAR="${2:-}" ; shift 2 ;;
       --mode|mode) RUN_MODE="${2:-}" ; shift 2 ;;
       --auto|auto) RUN_MODE="auto" ; shift ;;
       --chat|chat) RUN_MODE="chat" ; shift ;;

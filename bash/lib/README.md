@@ -66,6 +66,7 @@ LIB_DEPS=(              # Orders matter!
   "memory"              # LLM memory management
   "history"             # LLM history management
   "backend"             # LLM backend management
+  "statusbar"           # LLM / Tor traffic status bar
   "apps"                # External managed apps
 )
 ```

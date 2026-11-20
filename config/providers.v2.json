@@ -289,6 +289,39 @@
       }
     }
   },
+  "mistral": {
+    "name": "Mistral AI",
+    "status": "experimental",
+    "api": "https://docs.mistral.ai/api",
+    "url": "https://api.mistral.ai/v1/chat/completions",
+    "models": "https://api.mistral.ai/v1/models",
+    "auth": true,
+    "keys": "https://console.mistral.ai/api-keys",
+    "docs": {
+      "base": "https://docs.mistral.ai",
+      "intro": "/inference/quickstarts/send-your-first-request",
+      "models": "/models",
+      "files": "https://docs.mistral.ai/api/endpoint/files",
+      "voice": [
+        "https://docs.mistral.ai/api/endpoint/audio/transcriptions",
+        "https://docs.mistral.ai/api/endpoint/audio/speech",
+        "https://docs.mistral.ai/api/endpoint/audio/voices"
+      ],
+      "chat": "/inference/conversations/chat-completion",
+      "vision": "/inference/conversations/vision"
+    },
+    "default": {
+      "memory": "index",
+      "model": "mistral-large-4",
+      "vision": true,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": true,
+      "speech": true,
+      "zdr": false
+    }
+  },
   "openai": {
     "name": "OpenAI",
     "status": "stable",
@@ -488,6 +521,24 @@
       "voice": false,
       "speech": false,
       "zdr": false
+    }
+  },
+  "proton": {
+    "name": "Proton Lumo",
+    "status": "experimental",
+    "url": "https://lumo.proton.me/api/ai/v1/chat/completions",
+    "models": "https://lumo.proton.me/api/ai/v1/models",
+    "auth": false,
+    "default": {
+      "memory": "index",
+      "model": "lumo-max",
+      "vision": false,
+      "image": false,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": true
     }
   },
   "venice": {

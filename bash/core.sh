@@ -96,6 +96,7 @@ SPE_HANDLER="${ENG_DIR}/speech${ENGINE_VERSION}.sh"
 WEB_SERVER="${AIDE_ROOT}/web/server.php"
 SCRIPT_CONFIG="${CONFIG_DIR}/${SCRIPT_NAME}.conf"
 MODELS_CONFIG="${CONFIG_DIR}/models.json"
+LUMO_TOOLS="${CONFIG_DIR}/tools-lumo.json"
 PROVIDERS_CONFIG="${PROVIDERS_CONFIG:-${CONFIG_DIR}/providers${ENGINE_VERSION}.json}"
 STATE_FILE="${CONFIG_DIR}/state.json"
 MESSAGES_FILE="messages.json"
@@ -728,18 +729,19 @@ handle_vision_request() {
 }
 
 set_api_provider() {
-  local provider_data provider_zdr
+  local provider_data
   local target_provider ; target_provider="${1:-$PROVIDER}"
 
   [[ ! -r "$PROVIDERS_CONFIG" ]] && error "Unable to read providers config file: $PROVIDERS_CONFIG"
 
   # Read all values in a single jq process call using tab-delimited parsing
-  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.default.memory)\t\(.default.model)\t\(.default.zdr)"' "$PROVIDERS_CONFIG" 2>/dev/null)
+  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.auth)\t\(.default.memory)\t\(.default.model)\t\(.default.zdr)"' "$PROVIDERS_CONFIG" 2>/dev/null)
   [[ -z $provider_data ]] && error "Unsupported provider defined: $target_provider"
 
-  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_MEMORY_STRUCTURE PROVIDER_API_MODEL provider_zdr <<< "$provider_data"
+  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_API_AUTH PROVIDER_MEMORY_STRUCTURE PROVIDER_API_MODEL PROVIDER_API_ZDR <<< "$provider_data"
 
   [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $target_provider"
+  [[ -z $PROVIDER_API_AUTH || $PROVIDER_API_AUTH == "null" ]] && error "API auth not found for provider: $target_provider"
   [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $target_provider"
   [[ -z $PROVIDER_MEMORY_STRUCTURE || $PROVIDER_MEMORY_STRUCTURE == "null" ]] && PROVIDER_MEMORY_STRUCTURE="$MEMORY_STRUCTURE_TYPE"
 
@@ -762,7 +764,7 @@ set_api_provider() {
   SPEECH_ENABLED=$(jq -r --arg p "${SPEECH_PROVIDER:-$target_provider}" '.[$p].default.speech // false' "$PROVIDERS_CONFIG" 2>/dev/null)
 
   # Enforce ZDR if enabled in the provider config, while preserving command-line overrides
-  [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
+  [[ $PROVIDER_API_ZDR == true ]] && ZDR_ENFORCED=true
 }
 
 change_provider() {
@@ -771,10 +773,23 @@ change_provider() {
   log_step "New active provider: ${CLR_B_WHITE}${active_provider}${ANSI_RESET}"
   set_api_provider    # Reflect new active provider
   log_step "New active model: ${CLR_B_WHITE}${PROVIDER_API_MODEL}${ANSI_RESET}"
-  load_provider_key "$active_provider"   # Load corresponding provider key
-  if [[ -z $PROVIDER_API_KEY ]]; then
-    interactive_key_setup "$active_provider"
+  if [[ $PROVIDER_API_AUTH == true ]] ; then
+    load_provider_key "$active_provider"   # Load corresponding provider key
+    if [[ -z $PROVIDER_API_KEY ]]; then
+      interactive_key_setup "$active_provider"
+    fi
   fi
+  set_chat_model                # Update corresponding chat model for new provider
+  set_vision_model              # Update corresponding vision model for new provider
+  set_system_prompt             # Update system prompt with new active model
+  set_state                     # Update new state
+  heal_history_file             # Heal protocol-tagged history left on disk by a previous protocol
+  generate_self_architecture    # Update new architecture / identity document
+}
+
+change_model() {
+  local active_model="$1"
+  log_step "New active model: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
   set_chat_model                # Update corresponding chat model for new provider
   set_vision_model              # Update corresponding vision model for new provider
   set_system_prompt             # Update system prompt with new active model
@@ -926,31 +941,31 @@ get_credit_balance() {
   if [[ $BACKEND == "external" ]]; then
     case $active_provider in
       vercel*)
-        curl "${curl_opts[@]}" "https://ai-gateway.vercel.sh/v1/credits" \
+        curl_wrapper "${curl_opts[@]}" "https://ai-gateway.vercel.sh/v1/credits" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .balance 2>/dev/null
       ;;
       openrouter*)
-        curl "${curl_opts[@]}" "https://openrouter.ai/api/v1/key" \
+        curl_wrapper "${curl_opts[@]}" "https://openrouter.ai/api/v1/key" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .data.usage 2>/dev/null
       ;;
       cyberneurova)
-        curl "${curl_opts[@]}" "https://api.cyberneurova.ai/v1/usage" \
+        curl_wrapper "${curl_opts[@]}" "https://api.cyberneurova.ai/v1/usage" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .data.tokens.input.remaining 2>/dev/null
       ;;
       deepseek)
-        curl "${curl_opts[@]}" "https://api.deepseek.com/user/balance" \
+        curl_wrapper "${curl_opts[@]}" "https://api.deepseek.com/user/balance" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .balance_infos[0].total_balance 2>/dev/null
       ;;
       kimi)
-        curl "${curl_opts[@]}" "https://api.moonshot.ai/v1/users/me/balance" \
+        curl_wrapper "${curl_opts[@]}" "https://api.moonshot.ai/v1/users/me/balance" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${provider_key}" \
               -A "$USER_AGENT" | jq -rc .data.available_balance 2>/dev/null
@@ -1039,7 +1054,7 @@ get_provider_models() {
 
   # Provider models
   if [[ $BACKEND == "external" && -n $url ]]; then
-    curl "${curl_opts[@]}" "$url" \
+    curl_wrapper "${curl_opts[@]}" "$url" \
           -H "Content-Type: application/json" \
           -A "$USER_AGENT" | jq -rc . 2>/dev/null
   fi
@@ -2161,6 +2176,9 @@ load_libs
 # Load config
 load_config_file
 
+# Load tor config
+load_tor_config
+
 # Set terminal dimensions
 set_term_width
 
@@ -2420,7 +2438,7 @@ init_core() {
   [[ $USE_TOR == true ]] && handle_tor
 
   # Load API keys only for external backend
-  if [[ $BACKEND == "external" ]]; then
+  if [[ $BACKEND == "external" && $PROVIDER_API_AUTH == true ]]; then
     # Try loading from the encrypted key chest first
     load_provider_key
 

@@ -41,6 +41,17 @@ to_lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
 to_upper() { tr '[:lower:]' '[:upper:]' <<< "$1"; }
 
 # -----------------------------------------------------------------------------
+# Curl helper
+# -----------------------------------------------------------------------------
+curl_wrapper() {
+  if [[ -n $(command -v curl-impersonate 2>/dev/null) ]]; then
+    curl-impersonate --compressed --impersonate "chrome150" "$@"
+  else
+    curl "$@"
+  fi
+}
+
+# -----------------------------------------------------------------------------
 # Filtering helper
 # -----------------------------------------------------------------------------
 #
@@ -741,7 +752,7 @@ engine_v2_http() {
     options+=(--location)
   fi
 
-  code=$(curl "${options[@]}" "$@" "$url")
+  code=$(curl_wrapper "${options[@]}" "$@" "$url")
   rc=$?
   # Read by every caller to report the failing status; not used here.
   # shellcheck disable=SC2034

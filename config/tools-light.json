@@ -128,6 +128,28 @@
   {
     "type": "function",
     "function": {
+      "name": "get_current_address",
+      "description": "Get the current Tor exit address (exit IP) by querying an IP-echo service through the local Tor SOCKS port (ports from config/torrc, source of truth). READ-ONLY: performs no rotation, no state change, no signal to the ControlPort. Use to check the current exit before or after a rotation (see get_new_address), or to verify which exit a service is seeing.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_new_address",
+      "description": "Get a new Tor exit address by signaling NEWNYM to the local Tor ControlPort (ports read from config/torrc, cookie auth — same pattern as jarnet/statusbar). Use when the current exit IP is blocked or rate-limited by a remote service. Affects subsequent connections only: existing streams are not torn down, and the JarNet onion address is unaffected. Subject to a 10s rotation guard. Network-affecting action: use only on explicit human request or endorsement.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "read_file",
       "description": "Read the contents of a file. Optionally specify a 1-based line range. If append_loc is true, each line is prefixed with its line number (e.g. \"1→ ...\").",
       "parameters": {

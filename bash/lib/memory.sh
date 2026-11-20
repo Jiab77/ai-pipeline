@@ -31,7 +31,7 @@ MEMORY_SH_LOADED=1
 # -----------------------------------------------------------------------------
 
 generate_self_architecture() {
-  local arch_file="${DATA_STORE}/${AI_NAME}.md"
+  local arch_file="${DATA_STORE}/identity.md"
   local core_file="$CORE_LIB"
   local cli_file="$SCRIPT_FILE"
 
@@ -44,7 +44,7 @@ generate_self_architecture() {
 
   # Generate self description file
   cat > "$arch_file" <<EOF
-# 🏗️ ${AI_NAME}.md — This Is Your Brain
+# 🏗️ ${arch_file##*/} — This Is Your Architecture
 
 Generated at bootstrap by \`generate_self_architecture()\`.
 **Version:** $(get_self_version)
@@ -66,6 +66,9 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 **Source:** https://github.com/jiab77/ai-pipeline
 **Birth:** 2026-05-30 (1st commit)
 
+## Your Identity
+**Name:** $AI_NAME
+
 ## Your Core Files
 - \`${core_file##*/}\` — Cognitive engine (API calls, memory, providers, AUTH tag)
 - \`${cli_file}\` — Interface layer (slash commands, /provider, /launch, /fallback)
@@ -73,9 +76,10 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 - \`${VID_HANDLER##*/}\` — Video rendering engine (create_video, config-driven sizing, EXIF cleanup)
 - \`${VOC_HANDLER##*/}\` — Voice rendering engine (config-driven voice, EXIF cleanup)
 - \`${SPE_HANDLER##*/}\` — Speech capture engine (config-driven)
+- \`${NET_HANDLER##*/}\` — AI communication layer (jarnet_up, jarnet_down, jarnet_status, etc.)
 - \`${TOOLS_HANDLER##*/}\` — Tool execution layer (web_fetch, web_browse, edit_file, etc.)
 
-## Your Identity
+## Your Authentication Tag
 - **AUTH tag** comes from \`compute_device_tag()\` in the code \`${LIB_DIR##*/}/tag.sh\`.
 - The tag changes **per session** — includes UNIX timestamp in the hash
 - On Termux: uses \`settings get secure android_id\` (fallback chain)
@@ -104,7 +108,7 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 1. \`read_file ${core_file##*/}\` — Your full cognitive engine source code
 2. \`git log --oneline\` — Your version history
 3. \`grep_search pattern ${core_file##*/}\` — Find any function or variable
-4. \`read_file ${AI_NAME}.md\` — Re-read this file
+4. \`read_file ${arch_file##*/}\` — Re-read this file
 
 ## Self-Check Rule
 > **Before making any claim about your version, environment, provider state,

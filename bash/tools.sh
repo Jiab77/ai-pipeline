@@ -617,6 +617,9 @@ web_search() {
 
   [[ -z $query ]] && die "The search query is required."
 
+  # Load main core
+  load_core
+
   # URL encode the search term natively inside JQ
   encoded_query=$(jq -nrc --arg q "$query" '$q | @uri')
 
@@ -627,7 +630,7 @@ web_search() {
   fi
 
   # Run search query
-  html_data=$(curl "${curl_opts[@]}" "${search_url}/html?q=${encoded_query}")
+  html_data=$(curl_wrapper "${curl_opts[@]}" "${search_url}/html?q=${encoded_query}")
   [[ -z $html_data ]] && die "Could not retrieve search data from DuckDuckGo."
 
   # Align-extract data streams
@@ -1300,6 +1303,36 @@ jarnet_wait() {
   "$NET_HANDLER" wait "${args[@]}" || rc=$?
   (( rc == 1 )) && exit 0
   exit "$rc"
+}
+
+# ==============================================================================
+# Tor ControlPort Tools
+# ==============================================================================
+
+# 33. Get current Tor exit address
+get_current_address() {
+  # Load main core
+  load_core
+
+  local current_ip ; current_ip=$(get_tor_exit_ip)
+  if [[ -n $current_ip ]]; then
+    printf 'Your current Tor exit address is: %s\n' "$current_ip"
+  else
+    die "Could not retrieve current Tor exit address."
+  fi
+}
+
+# 34. Get a new Tor exit address (SIGNAL NEWNYM via ControlPort)
+get_new_address() {
+  # Load main core
+  load_core
+
+  local old_ip ; old_ip=$(get_tor_exit_ip)
+  local new_ip ; new_ip=$(get_new_exit_ip)
+
+  printf 'Tor exit address rotated (SIGNAL NEWNYM: 250 OK)\n'
+  printf 'Before: %s\nAfter:  %s\n' "${old_ip:-unknown}" "${new_ip:-unknown}"
+  printf 'Existing streams are unaffected; JarNet onion address unchanged.\n'
 }
 
 # Bootstrap

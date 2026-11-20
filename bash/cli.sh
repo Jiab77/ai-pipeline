@@ -75,7 +75,7 @@ run_chat() {
   if [[ $IMAGE_ENABLED == true ]]; then
     log_info "Active Image Provider: ${CLR_B_YELLOW}$(to_upper "${IMAGE_PROVIDER:-$PROVIDER}")${ANSI_RESET}"
   else
-    log_info "Image Generation: ${CLR_B_RED}OFF${ANSI_RESET} on ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET} — pollinations fallback"
+    log_info "Image Generation: ${CLR_B_RED}OFF${ANSI_RESET} on ${CLR_B_YELLOW}${provider_upper}${ANSI_RESET} — default fallback"
   fi
   if [[ $VIDEO_ENABLED == true ]]; then
     log_info "Active Video Provider: ${CLR_B_YELLOW}$(to_upper "${VIDEO_PROVIDER:-$PROVIDER}")${ANSI_RESET}"
@@ -161,6 +161,7 @@ ${CLR_B_CYAN}✨ Available Commands ✨${ANSI_RESET}
   ${CLR_B_GREEN}/memory [type]${ANSI_RESET}                 • Change / set active memory structure (full, index) -- default: $MEMORY_STRUCTURE_TYPE
   ${CLR_B_GREEN}/detect [mode]${ANSI_RESET}                 • Change / set visual feedback auto-detection (images, videos, all, off) -- default: $DETECT_MODE
   ${CLR_B_GREEN}/status [value]${ANSI_RESET}                • Change / set status bar display (on, off) -- default: $STATUS_BAR
+  ${CLR_B_GREEN}/ip [action]${ANSI_RESET}                   • Control Tor exit IP address (real, current, new)
   ${CLR_B_GREEN}/jarnet [action]${ANSI_RESET}               • Control JarNet service (who, status, doctor, up, down)
   ${CLR_B_GREEN}/balance${ANSI_RESET}                       • Show available credits for all or active provider
   ${CLR_B_GREEN}/models${ANSI_RESET}                        • Show available models in active provider
@@ -310,7 +311,7 @@ EOF
         if [[ $img_cap == "true" ]]; then
           log_info "Image generation: ${CLR_B_GREEN}available${ANSI_RESET} on ${CLR_B_YELLOW}${effective_image_provider}${ANSI_RESET}"
         else
-          log_info "Image generation: ${CLR_B_YELLOW}unavailable${ANSI_RESET} on ${CLR_B_YELLOW}${effective_image_provider}${ANSI_RESET} — keyless pollinations fallback"
+          log_info "Image generation: ${CLR_B_YELLOW}unavailable${ANSI_RESET} on ${CLR_B_YELLOW}${effective_image_provider}${ANSI_RESET} — keyless default fallback"
         fi
         log_info "Set image provider with ${CLR_B_YELLOW}/image <provider>${ANSI_RESET}"
       ;;
@@ -465,6 +466,25 @@ EOF
           send_message "$LAST_USER_MSG"
         fi
       ;;
+      "/ip")
+        log_info "Supported actions: ${CLR_B_YELLOW}real${CLR_B_WHITE}, ${CLR_B_YELLOW}current${CLR_B_WHITE}, ${CLR_B_YELLOW}new${ANSI_RESET}"
+        log_info "Control Tor exit IP address with ${CLR_B_YELLOW}/ip <action>${ANSI_RESET}"
+      ;;
+      "/ip "*)
+        local action_value="${USER_MSG#"/ip "}"
+        case $action_value in
+          real)
+            log_step "Real exit IP address: ${CLR_B_YELLOW}$(get_real_exit_ip)${ANSI_RESET}"
+          ;;
+          current)
+            log_step "Tor exit IP address: ${CLR_B_YELLOW}$(get_tor_exit_ip)${ANSI_RESET}"
+          ;;
+          new)
+            log_step "New Tor exit IP address: ${CLR_B_YELLOW}$(get_new_exit_ip)${ANSI_RESET}"
+          ;;
+          *) log_warn "Unsupported action given: $action_value" ;;
+        esac
+      ;;
       "/jarnet")
         if [[ $START_JARNET == true ]]; then
           log_step "JarNet service active: ${CLR_B_YELLOW}${START_JARNET}${ANSI_RESET}"
@@ -536,6 +556,8 @@ EOF
       "/provider "*)
         unset USER_MODEL          # Remove initially defined model
         unset PROVIDER_API_KEY    # Remove previous provider API key
+        unset PROVIDER_API_AUTH   # Remove previous provider API auth boolean
+        unset PROVIDER_API_ZDR    # Remove previous provider API zdr boolean
         local active_provider="${USER_MSG#"/provider "}"
         if [[ $active_provider == "groq" ]]; then
           USE_TOR=false
@@ -556,11 +578,7 @@ EOF
         # local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
         # log_step "New active model: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
         USER_MODEL="${USER_MSG#"/model "}"
-        log_step "New active model: ${CLR_B_YELLOW}${USER_MODEL}${ANSI_RESET}"
-        set_chat_model      # Update corresponding chat model
-        set_vision_model    # Update corresponding vision model
-        set_system_prompt   # Update system prompt with new active model
-        set_state           # Update new state
+        change_model "$USER_MODEL"
       ;;
       "/thinking")
         log_step "Model reasoning display: ${CLR_B_YELLOW}${REASONING_DISPLAY}${ANSI_RESET}"

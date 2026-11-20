@@ -123,3 +123,68 @@ handle_tor() {
 
   wait_for_tor || check_tor
 }
+
+# Helper: get real exit IP (without Tor)
+get_real_exit_ip() {
+  local out ; out=$(curl -sSL --max-time 12 "https://ipinfo.io/json" \
+    | jq -rc .ip 2>/dev/null) || return 0
+  printf '%s' "$out"
+}
+
+# Helper: current Tor exit IP through the SOCKS port (empty string on failure)
+get_tor_exit_ip() {
+  local out ; out=$(curl -x "${TOR_PROXY}" \
+    -sS --max-time 12 "https://check.torproject.org/api/ip" 2>/dev/null) || return 0
+  printf '%s' "$out" | sed -n 's/.*"IP"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+# Helper: get new Tor exit IP
+get_new_exit_ip() {
+  # Tor context is already loaded by the dispatcher bootstrap (TOR_CONFIG/TOR_HOST/TOR_PORT)
+  [[ -n ${TOR_CONFIG:-} && -r $TOR_CONFIG ]] || die "Missing Tor config file (torrc)."
+
+  # ControlPort from torrc (source of truth) — zero-fork parse
+  local line ctrl_port=""
+  while IFS= read -r line; do
+    line=${line%%#*}
+    case $line in
+      ControlPort\ *) ctrl_port=${line#ControlPort } ; ctrl_port=${ctrl_port//[\" ]/} ;;
+    esac
+  done < "$TOR_CONFIG"
+  [[ -n $ctrl_port ]] || die "ControlPort not found in $TOR_CONFIG."
+
+  # 10s client-side rotation guard
+  local state="${TMPDIR:-/tmp}/aide-newnym.last"
+  local now ; now=$(date +%s)
+  local last=0 ; [[ -r $state ]] && last=$(<"$state")
+  if (( now - last < 10 )); then
+    die "Rotation guard: last request was $(( now - last ))s ago (min 10s)."
+  fi
+
+  # Cookie auth (PROTOCOLINFO -> cookie -> hex, jarnet/statusbar proven pattern)
+  local cf ; cf=$( ( printf 'PROTOCOLINFO 1\r\nQUIT\r\n'; sleep 0.4 ) \
+      | socat -T 5 - "TCP:${TOR_HOST:-127.0.0.1}:${ctrl_port}" 2>/dev/null \
+      | sed -n 's/.*COOKIEFILE="\([^"]*\)".*/\1/p' | tr -d '\r')
+  [[ -n $cf && -r $cf ]] || die "ControlPort auth cookie unavailable."
+  local hex ; hex=$(od -An -tx1 -v "$cf" | tr -d ' \n')
+
+  # Exit IP before rotation
+  local old_ip ; old_ip=$(get_tor_exit_ip)
+
+  # AUTHENTICATE + SIGNAL NEWNYM in one session
+  local out ; out=$( ( printf 'AUTHENTICATE %s\r\nSIGNAL NEWNYM\r\n' "$hex"; sleep 0.9 ) \
+      | socat -T 5 - "TCP:${TOR_HOST:-127.0.0.1}:${ctrl_port}" 2>/dev/null)
+  grep -qE '^5[0-9]{2}' <<<"$out" && die "Tor rejected: $(grep -E '^5[0-9]{2}' <<<"$out" | head -n 1)"
+  [[ $(grep -c '^250' <<<"$out") -ge 2 ]] || die "Unexpected ControlPort reply."
+  printf '%s\n' "$now" > "$state"
+
+  # Exit IP after — retry while exits rotate
+  local new_ip="" _try
+  for _try in 1 2 3 4 5; do
+    sleep 2
+    new_ip=$(get_tor_exit_ip)
+    [[ -n $new_ip && $new_ip != "$old_ip" ]] && break
+  done
+
+  printf '%s' "$new_ip"
+}

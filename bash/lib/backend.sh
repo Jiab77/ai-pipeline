@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck shell=bash disable=SC2034
+# shellcheck shell=bash disable=SC2034,SC2089
 # ==============================================================================
 # lib/backend.sh — Shared backend functions
 # ==============================================================================
@@ -7,7 +7,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.0.0
+# Version: 2.0.0
 #
 # Contract: LIB_DEPS
 #
@@ -55,13 +55,112 @@ api_call_type_completions() {
       payload=$(jq -rc '.providerOptions.gateway.disallowPromptTraining = true' <<< "$payload" 2>/dev/null)
 
       # Send custom payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -H "http-referer: ${ATTRIBUTION_REFERER}" \
             -H "x-title: ${ATTRIBUTION_TITLE}" \
             -A "$USER_AGENT" \
             -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # Mistral AI
+    mistral)
+      # Show ZDR policy warning when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not applied: https://docs.mistral.ai/admin/monitor-comply/zero-data-retention" ; log
+      fi
+
+      # Send custom payload
+      curl_wrapper "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
+    # Proton Lumo
+    # FIXME: Add automatic Tor exit IP address rotation if necessary
+    proton)
+      # Disable reasoning (not supported)
+      payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+      [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Proton Lumo."
+
+      # Add client type to the payload
+      payload=$(jq -rc '.lumo.client_type = "frontend"' <<< "$payload" 2>/dev/null)
+
+      # Enable their external tools
+      #
+      # FIXME: Might be probably better to recreate the same tools on our own...
+      #
+      # Available tools: weather, stock, cryptocurrency, proton_info,
+      #                  web_extract, web_search
+      #
+      # Available tools (streaming): generate_image, describe_image, edit_image
+      #
+      # Enabled tools: see 'config/tools-lumo.json'
+      local proton_tools   ; proton_tools=$(<"$LUMO_TOOLS")
+      local pipeline_tools ; pipeline_tools=$(<"$BASE_TOOLS")
+      local combined_tools ; combined_tools=$(jq -rc -n \
+        --argjson proton "$proton_tools" \
+        --argjson pipeline "$pipeline_tools" \
+        '[$proton, $pipeline] | flatten' 2>/dev/null)
+      
+      # Combine all the tools in the received payload
+      payload=$(jq -rc --argjson tools "$combined_tools" '.tools = $tools' <<< "$payload" 2>/dev/null)
+
+      # Enable automatic tools selection
+      payload=$(jq -rc '.tool_choice = "auto"' <<< "$payload" 2>/dev/null)
+
+      # Lumo transport-failure handling (ENHANCE_YOUR_CALM) -- same bounded retry
+      # pattern as the Groq rate-limiter loop. Unlike Groq the block is seen at
+      # TRANSPORT level (curl rc 92 HTTP/2 reset, rc 52 empty reply, HTTP 000):
+      # no JSON body, no server-provided wait time -> local exponential backoff.
+      local response curl_rc attempt=1 max_attempts=10 wait_time=5
+      while (( attempt <= max_attempts )); do
+        # Send payload (stderr discarded: curl prints the reset there)
+        response=$(curl_wrapper "${curl_opts[@]}" "${url}" \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -H "x-pm-appversion: web-lumo@5.0.0" \
+          -A "$USER_AGENT" \
+          -d @- <<< "$payload" 2>/dev/null)
+        curl_rc=$?
+
+        # Transport-level failure: HTTP/2 stream reset (92) or empty reply (52)
+        if (( curl_rc == 92 || curl_rc == 52 )); then
+          if (( attempt == ( max_attempts / 2 ) )); then
+            echo -n " - " >&2 ; log_warn "${CLR_B_YELLOW}[TRANSPORT]${ANSI_RESET} Lumo: ENHANCE_YOUR_CALM, (attempt ${attempt}/${max_attempts}) -- Changing Tor exit IP address..."
+            get_new_exit_ip
+            sleep "$wait_time"
+            wait_time=$(( wait_time / 2 ))
+            ((attempt++))
+            continue
+          fi
+          if (( attempt < max_attempts )); then
+            echo -n " - " >&2 ; log_warn "${CLR_B_YELLOW}[TRANSPORT]${ANSI_RESET} Lumo: ENHANCE_YOUR_CALM, retry in ${wait_time}s (attempt ${attempt}/${max_attempts})"
+            sleep "$wait_time"
+            wait_time=$(( wait_time * 2 ))
+            ((attempt++))
+            continue
+          fi
+          # Last attempt failed: return an OpenAI-shaped error object, never empty
+          jq -nc --arg msg "Lumo: ENHANCE_YOUR_CALM after ${max_attempts} attempts (HTTP/2 reset, likely Tor exit reputation)" \
+            '{error:{message:$msg,type:"transport_error",code:"enhance_your_calm"}}'
+          return 0
+        fi
+
+        # Empty response (other curl failure, e.g. timeout) -- same contract
+        if [[ -z $response ]]; then
+          jq -nc --arg msg "Lumo: transport failure (curl rc ${curl_rc})" \
+            '{error:{message:$msg,type:"transport_error",code:"transport_failed"}}'
+          return 0
+        fi
+
+        # Success or non-transport error: pass body through and exit loop
+        jq -rc . <<<"$response"
+        return 0
+      done
     ;;
 
     # Hugging Face
@@ -71,7 +170,7 @@ api_call_type_completions() {
         log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported for Hugging Face." ; log
       fi
 
-      # Disable reasoning for OpenAI (causes issues)
+      # Disable reasoning (causes issues)
       payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Hugging Face."
 
@@ -82,7 +181,7 @@ api_call_type_completions() {
       payload=$(jq -rc '.model = "'"$current_model"':fastest"' <<< "$payload" 2>/dev/null)
 
       # Send custom payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -A "$USER_AGENT" \
@@ -106,7 +205,7 @@ api_call_type_completions() {
       payload=$(jq -rc '.parallel_tool_calls = true' <<< "$payload" 2>/dev/null)
 
       # Send custom payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -w "%output{$VENICE_BALANCE_FILE}balance: %header{x-venice-balance-usd}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
@@ -120,7 +219,7 @@ api_call_type_completions() {
       sleep 1
 
       # Send generic payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -A "$USER_AGENT" \
@@ -134,7 +233,7 @@ api_call_type_completions() {
         log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented yet for Groq."
       fi
 
-      # Disable reasoning for Groq (causes issues)
+      # Disable reasoning (causes issues)
       payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
 
@@ -153,7 +252,7 @@ api_call_type_completions() {
       local response attempt=1 max_attempts=3
       while (( attempt <= max_attempts )); do
         # Send custom payload and capture the output
-        response=$(curl "${curl_opts[@]}" "${url}" \
+        response=$(curl_wrapper "${curl_opts[@]}" "${url}" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
           -A "$USER_AGENT" \
@@ -179,7 +278,7 @@ api_call_type_completions() {
             return 0
           fi
 
-          log_warn "${CLR_B_YELLOW}[RATE LIMIT]${ANSI_RESET} Groq: ${wait_time}s (tentative ${attempt}/${max_attempts})"
+          echo -n " - " >&2 ; log_warn "${CLR_B_YELLOW}[RATE LIMIT]${ANSI_RESET} Groq: ${wait_time}s (attempt ${attempt}/${max_attempts})"
           sleep "$wait_time"
           ((attempt++))
           continue
@@ -212,7 +311,7 @@ api_call_type_completions() {
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for this provider."
 
       # Send custom payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -A "$USER_AGENT" \
@@ -234,7 +333,7 @@ api_call_type_completions() {
       payload=$(jq -rc '.provider.data_collection = "deny"' <<< "$payload" 2>/dev/null)
 
       # Send custom payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
@@ -268,7 +367,7 @@ api_call_type_completions() {
       fi
 
       # Send custom payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -H "HTTP-Referer: ${ATTRIBUTION_REFERER}" \
@@ -281,7 +380,7 @@ api_call_type_completions() {
     # Any other supported providers
     *)
       # Send generic payload
-      curl "${curl_opts[@]}" "${url}" \
+      curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -A "$USER_AGENT" \
@@ -360,7 +459,7 @@ api_call_type_responses() {
   payload=$(jq -rc '.store = false' <<< "$payload" 2>/dev/null)
 
   # Send custom payload
-  curl "${curl_opts[@]}" "${url}" \
+  curl_wrapper "${curl_opts[@]}" "${url}" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
         -A "$USER_AGENT" \
@@ -426,7 +525,7 @@ api_call_type_messages() {
     ' <<< "$payload" 2>/dev/null)
 
   # Send request with Anthropic-specific auth headers
-  curl "${curl_opts[@]}" "${url}" \
+  curl_wrapper "${curl_opts[@]}" "${url}" \
         -H "Content-Type: application/json" \
         -H "x-api-key: ${PROVIDER_API_KEY}" \
         -H "anthropic-version: ${version}" \
@@ -472,14 +571,14 @@ api_call() {
   case $BACKEND in
     # Local Backend: Ollama
     ollama)
-      curl "${curl_opts[@]}" "${OLLAMA_API_URL}" \
+      curl_wrapper "${curl_opts[@]}" "${OLLAMA_API_URL}" \
            -H "Content-Type: application/json" \
            -d @- <<< "$payload" | jq -rc '.'
     ;;
 
     # Local Backend: llama.cpp
     llamacpp)
-      curl "${curl_opts[@]}" "${LLAMA_CPP_API_URL}" \
+      curl_wrapper "${curl_opts[@]}" "${LLAMA_CPP_API_URL}" \
            -H "Content-Type: application/json" \
            -H "Authorization: Bearer no-key" \
            -d @- <<< "$payload" | jq -rc '.'

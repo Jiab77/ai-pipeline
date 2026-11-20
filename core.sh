@@ -4454,7 +4454,7 @@ init_core() {
   [[ $USE_TOR == true ]] && handle_tor
 
   # Load API keys only for external backend
-  if [[ $BACKEND == "external" ]]; then
+  if [[ $BACKEND == "external" && $PROVIDER_API_AUTH == true ]]; then
     # Try loading from the encrypted key chest first
     load_provider_key
 

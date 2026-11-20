@@ -616,6 +616,9 @@ web_search() {
 
   [[ -z $query ]] && die "The search query is required."
 
+  # Load main core
+  load_core
+
   # URL encode the search term natively inside JQ
   encoded_query=$(jq -nrc --arg q "$query" '$q | @uri')
 

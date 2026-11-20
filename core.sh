@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.6
+# Version: 1.9.7
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -1503,18 +1503,19 @@ handle_vision_request() {
 }
 
 set_api_provider() {
-  local provider_data provider_zdr
+  local provider_data
   local target_provider ; target_provider="${1:-$PROVIDER}"
 
   [[ ! -r "$PROVIDERS_CONFIG" ]] && error "Unable to read providers config file: $PROVIDERS_CONFIG"
 
   # Read all values in a single jq process call using tab-delimited parsing
-  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.default.memory)\t\(.default.model)\t\(.default.zdr)"' "$PROVIDERS_CONFIG" 2>/dev/null)
+  provider_data=$(jq -rc --arg p "$target_provider" '.[$p] | select(. != null) | "\(.url)\t\(.auth)\t\(.default.memory)\t\(.default.model)\t\(.default.zdr)"' "$PROVIDERS_CONFIG" 2>/dev/null)
   [[ -z $provider_data ]] && error "Unsupported provider defined: $target_provider"
 
-  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_MEMORY_STRUCTURE PROVIDER_API_MODEL provider_zdr <<< "$provider_data"
+  IFS=$'\t' read -r PROVIDER_API_URL PROVIDER_API_AUTH PROVIDER_MEMORY_STRUCTURE PROVIDER_API_MODEL PROVIDER_API_ZDR <<< "$provider_data"
 
   [[ -z $PROVIDER_API_URL || $PROVIDER_API_URL == "null" ]] && error "API url not found for provider: $target_provider"
+  [[ -z $PROVIDER_API_AUTH || $PROVIDER_API_AUTH == "null" ]] && error "API auth not found for provider: $target_provider"
   [[ -z $PROVIDER_API_MODEL || $PROVIDER_API_MODEL == "null" ]] && error "API model not found for provider: $target_provider"
   [[ -z $PROVIDER_MEMORY_STRUCTURE || $PROVIDER_MEMORY_STRUCTURE == "null" ]] && PROVIDER_MEMORY_STRUCTURE="$MEMORY_STRUCTURE_TYPE"
 
@@ -1537,7 +1538,7 @@ set_api_provider() {
   SPEECH_ENABLED=$(jq -r --arg p "${SPEECH_PROVIDER:-$target_provider}" '.[$p].default.speech // false' "$PROVIDERS_CONFIG" 2>/dev/null)
 
   # Enforce ZDR if enabled in the provider config, while preserving command-line overrides
-  [[ $provider_zdr == "true" ]] && ZDR_ENFORCED=true
+  [[ $PROVIDER_API_ZDR == true ]] && ZDR_ENFORCED=true
 }
 
 generate_self_architecture() {
@@ -1753,6 +1754,17 @@ change_provider() {
   if [[ -z $PROVIDER_API_KEY ]]; then
     interactive_key_setup "$active_provider"
   fi
+  set_chat_model                # Update corresponding chat model for new provider
+  set_vision_model              # Update corresponding vision model for new provider
+  set_system_prompt             # Update system prompt with new active model
+  set_state                     # Update new state
+  heal_history_file             # Heal protocol-tagged history left on disk by a previous protocol
+  generate_self_architecture    # Update new architecture / identity document
+}
+
+change_model() {
+  local active_model="$1"
+  log_step "New active model: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
   set_chat_model                # Update corresponding chat model for new provider
   set_vision_model              # Update corresponding vision model for new provider
   set_system_prompt             # Update system prompt with new active model
@@ -4182,6 +4194,9 @@ load_libs
 
 # Load config
 load_config_file
+
+# Load tor config
+load_tor_config
 
 # Set terminal dimensions
 set_term_width

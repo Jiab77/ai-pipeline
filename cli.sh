@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.8.3
+# Version: 1.8.4
 # ==============================================================================
 
 # Options
@@ -508,6 +508,8 @@ EOF
       "/provider "*)
         unset USER_MODEL          # Remove initially defined model
         unset PROVIDER_API_KEY    # Remove previous provider API key
+        unset PROVIDER_API_AUTH   # Remove previous provider API auth boolean
+        unset PROVIDER_API_ZDR    # Remove previous provider API zdr boolean
         local active_provider="${USER_MSG#"/provider "}"
         if [[ $active_provider == "groq" ]]; then
           USE_TOR=false
@@ -528,11 +530,7 @@ EOF
         # local active_model="${USER_MSG#"/model "}" ; CHAT_MODEL="$active_model"
         # log_step "New active model: ${CLR_B_YELLOW}${active_model}${ANSI_RESET}"
         USER_MODEL="${USER_MSG#"/model "}"
-        log_step "New active model: ${CLR_B_YELLOW}${USER_MODEL}${ANSI_RESET}"
-        set_chat_model      # Update corresponding chat model
-        set_vision_model    # Update corresponding vision model
-        set_system_prompt   # Update system prompt with new active model
-        set_state           # Update new state
+        change_model "$USER_MODEL"
       ;;
       "/thinking")
         log_step "Model reasoning display: ${CLR_B_YELLOW}${SHOW_THINKING}${ANSI_RESET}"

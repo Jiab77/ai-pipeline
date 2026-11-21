@@ -9,7 +9,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.2.1
+# Version: 0.2.2
 #
 # Contract:
 #   generate_video — text (or image) -> MP4
@@ -85,24 +85,26 @@ video_v2_deps() {
 
 video_v2_allowlist() {
   case "$1" in
-    venice)                  printf '%s' 'https://api.venice.ai/api/v1/' ;;
-    zai)                     printf '%s' 'https://api.z.ai/api/paas/v4/' ;;
-    openrouter)              printf '%s' 'https://openrouter.ai/api/v1/' ;;
-    vercel|vercel_free)      printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/' ;;
-    huggingface)             printf '%s' 'https://router.huggingface.co/fal-ai/' ;;
     cyberneurova)            printf '%s' 'https://api.cyberneurova.ai/v1/videos/' ;;
+    huggingface)             printf '%s' 'https://router.huggingface.co/fal-ai/' ;;
+    openrouter)              printf '%s' 'https://openrouter.ai/api/v1/' ;;
+    venice)                  printf '%s' 'https://api.venice.ai/api/v1/' ;;
+    vercel|vercel_free)      printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/' ;;
+    xai)                     printf '%s' 'https://api.x.ai/v1/' ;;
+    zai)                     printf '%s' 'https://api.z.ai/api/paas/v4/' ;;
     *) return 1 ;;
   esac
 }
 
 video_v2_documented_endpoint() {
   case "$1" in
-    venice)       printf '%s' 'https://api.venice.ai/api/v1/video/queue' ;;
-    zai)          printf '%s' 'https://api.z.ai/api/paas/v4/videos/generations' ;;
-    openrouter)   printf '%s' 'https://openrouter.ai/api/v1/videos' ;;
-    vercel|vercel_free) printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/video-model/start' ;;
-    huggingface)  printf '%s' 'https://router.huggingface.co/fal-ai' ;;
-    cyberneurova) printf '%s' 'https://api.cyberneurova.ai/v1/videos/generations' ;;
+    cyberneurova)           printf '%s' 'https://api.cyberneurova.ai/v1/videos/generations' ;;
+    huggingface)            printf '%s' 'https://router.huggingface.co/fal-ai' ;;
+    openrouter)             printf '%s' 'https://openrouter.ai/api/v1/videos' ;;
+    venice)                 printf '%s' 'https://api.venice.ai/api/v1/video/queue' ;;
+    vercel|vercel_free)     printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/video-model/start' ;;
+    xai)                    printf '%s' 'https://api.x.ai/v1/videos/generations' ;;
+    zai)                    printf '%s' 'https://api.z.ai/api/paas/v4/videos/generations' ;;
     *) return 1 ;;
   esac
 }
@@ -423,6 +425,15 @@ video_v2_build_request() {
         + (if $i != "" then {image_url:$i} else {} end)
       ' > "$request"
     ;;
+    xai)
+      jq -n --arg m "$model" --rawfile p "$VIDEO_V2_WORK/prompt" \
+        --argjson d "$VIDEO_V2_DURATION" --arg r "$VIDEO_V2_RESOLUTION" \
+        --arg a "$VIDEO_V2_RATIO" '
+        {model:$m, prompt:$p, duration:$d}
+        + (if $r != "" then {resolution:$r} else {} end)
+        + (if $a != "" then {aspect_ratio:$a} else {} end)
+      ' > "$request"
+    ;;
     zai)
       jq -n --arg m "$model" --rawfile p "$VIDEO_V2_WORK/prompt" \
         --argjson d "$VIDEO_V2_DURATION" --argjson fps "$VIDEO_V2_FPS" \
@@ -525,6 +536,9 @@ video_v2_submit() {
       VIDEO_V2_JOB_ID=$(jq -er '.queue_id | select(type == "string" and length > 0)' "$response") || return 1
       VIDEO_V2_DOWNLOAD_URL=$(jq -r '.download_url // empty' "$response") || return 1
     ;;
+    xai)
+      VIDEO_V2_JOB_ID=$(jq -er '.request_id | select(type == "string" and length > 0)' "$response") || return 1
+    ;;
     zai)
       VIDEO_V2_JOB_ID=$(jq -er '.id | select(type == "string" and length > 0)' "$response") || return 1
     ;;
@@ -608,11 +622,12 @@ video_v2_poll_status() {
         '{model:$m, queue_id:$id}' > "$VIDEO_V2_WORK/poll.json" || return 1
       body="$VIDEO_V2_WORK/poll.json"
     ;;
-    zai)          url="${VIDEO_V2_ENDPOINT%/videos/generations}/async-result/$encoded" ;;
-    openrouter)   url="$VIDEO_V2_ENDPOINT/$encoded" ;;
-    huggingface)  url="${VIDEO_V2_RESULT_URL}/status?_subdomain=queue" ;;
-    vercel|vercel_free) url="${VIDEO_V2_ENDPOINT%/*}/status" ;;
-    cyberneurova) url="${VIDEO_V2_ENDPOINT%/videos/generations}/videos/status/$VIDEO_V2_JOB_ID" ;;
+    openrouter)           url="$VIDEO_V2_ENDPOINT/$encoded" ;;
+    xai)                  url="${VIDEO_V2_ENDPOINT%/videos/generations}/videos/$VIDEO_V2_JOB_ID" ;;
+    zai)                  url="${VIDEO_V2_ENDPOINT%/videos/generations}/async-result/$encoded" ;;
+    cyberneurova)         url="${VIDEO_V2_ENDPOINT%/videos/generations}/videos/status/$VIDEO_V2_JOB_ID" ;;
+    vercel|vercel_free)   url="${VIDEO_V2_ENDPOINT%/*}/status" ;;
+    huggingface)          url="${VIDEO_V2_RESULT_URL}/status?_subdomain=queue" ;;
   esac
 
   [[ $url == "$VIDEO_V2_ALLOW"/* ]] || {
@@ -648,6 +663,13 @@ video_v2_poll_status() {
       link="$VIDEO_V2_DOWNLOAD_URL"
       auth=false
     ;;
+    xai)
+      status=$(jq -r '.status // empty' "$response")
+      if [[ $status == "done" ]]; then
+        link=$(jq -er '.video.url | select(type == "string" and length > 0)' "$response") || return 1
+        auth=false
+      fi
+    ;;
     zai)
       status=$(jq -r '.task_status // empty' "$response")
       link=$(jq -r '.video_result[0].url // empty' "$response")
@@ -659,7 +681,7 @@ video_v2_poll_status() {
     ;;
     huggingface)
       status=$(jq -r '.status // empty' "$response")
-      if [[ $status == COMPLETED ]]; then
+      if [[ $status == "COMPLETED" ]]; then
         engine_v2_http "$VIDEO_V2_RESULT_URL" "$response" true "$VIDEO_V2_KEY" || {
           video_v2_error "Result request failed (HTTP ${ENGINE_V2_HTTP_CODE:-none})."
           return 1
@@ -670,7 +692,7 @@ video_v2_poll_status() {
     ;;
     vercel|vercel_free)
       status=$(jq -r '.status // empty' "$response")
-      if [[ $status == completed ]]; then
+      if [[ $status == "completed" ]]; then
         case "$(jq -r '.videos[0].type // empty' "$response")" in
           url)
             link=$(jq -er '.videos[0].url | select(type == "string" and length > 0)' "$response") || return 1
@@ -687,7 +709,7 @@ video_v2_poll_status() {
     ;;
     cyberneurova)
       status=$(jq -r '.status // empty' "$response")
-      if [[ $status == completed ]]; then
+      if [[ $status == "completed" ]]; then
         local video_id
         video_id=$(jq -er '.videoId | select(type == "string" and length > 0)' "$response") || return 1
         link="${VIDEO_V2_ENDPOINT%/videos/generations}/videos/$video_id/stream"

@@ -7,7 +7,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 2.0.0
+# Version: 0.0.0
 #
 # Contract: LIB_DEPS
 #
@@ -41,6 +41,32 @@ api_call_type_completions() {
   # Override URL when necessary
   [[ -z $url ]] && url="$PROVIDER_API_URL"
 
+  # -----------------------------------------------------------------------------
+  # Canonical reasoning translation (upstream)
+  # Internal payload carries "reasoning": {enabled: true|false} (core.sh).
+  # OpenAI-compatible chat completions endpoints expect a top-level
+  # "reasoning_effort" string instead (none|low|medium|high).
+  # Translate ONCE here, then let specific provider cases adjust or remove.
+  # -----------------------------------------------------------------------------
+  local reasoning_enabled ; reasoning_enabled=$(jq -rc '.reasoning.enabled // false' <<< "$payload" 2>/dev/null)
+  if [[ $reasoning_enabled == true ]]; then
+    payload=$(jq -rc --arg effort "${REASONING_EFFORT:-low}" '
+      del(.reasoning)
+      | .reasoning_effort = (
+          if   $effort == "none"    then "none"
+          elif $effort == "minimal" then "low"
+          elif $effort == "xhigh"   then "high"
+          elif $effort == "max"     then "high"
+          else                           $effort
+          end
+        )' <<< "$payload" 2>/dev/null)
+
+    [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} reasoning.enabled -> reasoning_effort: ${CLR_B_WHITE}${REASONING_EFFORT}${ANSI_RESET}"
+  else
+    # Reasoning disabled: drop internal object, explicitly disable thinking
+    payload=$(jq -rc 'del(.reasoning) | .reasoning_effort = "none"' <<< "$payload" 2>/dev/null)
+  fi
+
   # Provider selector
   case $PROVIDER in
     # Vercel / Vercel Free
@@ -64,6 +90,35 @@ api_call_type_completions() {
             -d @- <<< "$payload" | jq -rc .
     ;;
 
+    # Infomaniak
+    infomaniak)
+      # Show ZDR policy warning when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented for Infomaniak." ; log
+      fi
+
+      # Get user product id
+      if [[ -z $IFM_PID_CACHE ]]; then
+        local prod_id ; prod_id=$(get_infomaniak_product_id)
+
+        # Store gathered product id in memory
+        IFM_PID_CACHE="$prod_id"
+      fi
+
+      # Check product id
+      [[ -z $IFM_PID_CACHE || $IFM_PID_CACHE == "null" ]] && error "Returned Infomaniak product ID is invalid or empty."
+
+      # Rewrite URL with gathered product id
+      url="${url//product_id/$IFM_PID_CACHE}"
+
+      # Send generic payload
+      curl_wrapper "${curl_opts[@]}" "${url}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+            -A "$USER_AGENT" \
+            -d @- <<< "$payload" | jq -rc .
+    ;;
+
     # Mistral AI
     mistral)
       # Show ZDR policy warning when enabled
@@ -74,7 +129,7 @@ api_call_type_completions() {
       # Send custom payload
       curl_wrapper "${curl_opts[@]}" "${url}" \
             -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
+            -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
             -A "$USER_AGENT" \
             -d @- <<< "$payload" | jq -rc .
     ;;
@@ -82,8 +137,13 @@ api_call_type_completions() {
     # Proton Lumo
     # FIXME: Add automatic Tor exit IP address rotation if necessary
     proton)
-      # Disable reasoning (not supported)
-      payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+      # Show ZDR policy warning when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not necessary for Proton." ; log
+      fi
+
+      # Disable reasoning / reasoning_effort (not supported)
+      payload=$(jq -rc 'del(.reasoning, .reasoning_effort)' <<< "$payload" 2>/dev/null)
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Proton Lumo."
 
       # Add client type to the payload
@@ -105,7 +165,7 @@ api_call_type_completions() {
         --argjson proton "$proton_tools" \
         --argjson pipeline "$pipeline_tools" \
         '[$proton, $pipeline] | flatten' 2>/dev/null)
-      
+
       # Combine all the tools in the received payload
       payload=$(jq -rc --argjson tools "$combined_tools" '.tools = $tools' <<< "$payload" 2>/dev/null)
 
@@ -170,8 +230,8 @@ api_call_type_completions() {
         log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported for Hugging Face." ; log
       fi
 
-      # Disable reasoning (causes issues)
-      payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+      # Disable reasoning / reasoning_effort (not supported)
+      payload=$(jq -rc 'del(.reasoning, .reasoning_effort)' <<< "$payload" 2>/dev/null)
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Hugging Face."
 
       # Get current model
@@ -215,6 +275,11 @@ api_call_type_completions() {
 
     # CyberNeurova (same as generic but rate-limited)
     cyberneurova)
+      # Show ZDR policy warning when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented for CyberNeurova." ; log
+      fi
+
       # Add minor delay to avoid triggering the rate limiter
       sleep 1
 
@@ -233,8 +298,8 @@ api_call_type_completions() {
         log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented yet for Groq."
       fi
 
-      # Disable reasoning (causes issues)
-      payload=$(jq -rc 'del(.reasoning)' <<< "$payload")
+      # Disable reasoning / reasoning_effort (not supported)
+      payload=$(jq -rc 'del(.reasoning, .reasoning_effort)' <<< "$payload" 2>/dev/null)
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter removed explicitely for Groq."
 
       # Remove 'reasoning_content' from history messages in payload (causes issues)
@@ -301,13 +366,13 @@ api_call_type_completions() {
       fi
 
       # Get current reasoning value before removing it (for compatibility reason)
-      local reasoning ; reasoning=$(jq -rc .reasoning.enabled <<< "$payload" 2>/dev/null)
-      if [[ -n $reasoning && $reasoning == true ]]; then
+      local reasoning_effort ; reasoning_effort=$(jq -rc '.reasoning_effort // empty' <<< "$payload" 2>/dev/null)
+      if [[ -n $reasoning_effort && ! $reasoning_effort == "none" ]]; then
         payload=$(jq -rc '.thinking.type = "enabled"' <<< "$payload" 2>/dev/null)
       fi
 
-      # Remove not supported 'reasoning' property before sending payload
-      payload=$(jq -rc 'del(.reasoning)' <<< "$payload" 2>/dev/null)
+      # Disable reasoning / reasoning_effort (not supported)
+      payload=$(jq -rc 'del(.reasoning, .reasoning_effort)' <<< "$payload" 2>/dev/null)
       [[ $DEBUG == true ]] && log_brain "${CLR_B_CYAN}[REASONING]${ANSI_RESET} Reasoning parameter converted to Thinking parameter for this provider."
 
       # Send custom payload
@@ -524,6 +589,11 @@ api_call_type_messages() {
         else {} end)
     ' <<< "$payload" 2>/dev/null)
 
+  # Show ZDR policy warning when enabled
+  if [[ $ZDR_ENFORCED == true ]]; then
+    log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not implemented for this provider." ; log
+  fi
+
   # Send request with Anthropic-specific auth headers
   curl_wrapper "${curl_opts[@]}" "${url}" \
         -H "Content-Type: application/json" \
@@ -588,7 +658,7 @@ api_call() {
     external)
         # Call handler selector
         case $PROVIDER in
-          openai) api_call_type_responses "$payload" "$url" ;;
+          openai|xai) api_call_type_responses "$payload" "$url" ;;
           anthropic) api_call_type_messages "$payload" "$url" ;;
           *) api_call_type_completions "$payload" "$url" ;;
         esac
@@ -667,19 +737,23 @@ handle_response() {
 
     # /v1/chat/completions — default for other providers
     *)
-      # 2026-09-12 — "cadeau empoisonné" (openrouter_free -> Cohere 400): a loose provider may
-      # return tool_calls[].function.arguments as a JSON OBJECT instead of a stringified JSON
-      # object. This message is replayed VERBATIM on the wire (L2302) and persisted to disk
-      # (L2304), so ONE lax provider poisons the entire fallback cascade:
-      #   "invalid tool call provided in messages[N].tool_calls[0]"
-      # Coerce here; strings are left untouched (no double-encoding).
+      # Canonical form only (2026-11-21): persisting .choices[0].message VERBATIM
+      # leaked provider-specific keys into messages.json (reasoning_content,
+      # annotations, audio, refusal, name:null) -> poisoned on the NEXT provider
+      # switch (Infomaniak 400 / 56 pydantic errors on messages[25]).
       assistant_msg=$(jq -rc '
-        .choices[0].message
-        | if (.tool_calls | type) == "array" then
-            .tool_calls |= [ .[] | .function.arguments =
-              (if (.function.arguments | type) == "string" then .function.arguments
-               else ((.function.arguments // {}) | tostring) end) ]
-          else . end' <<<"$raw_res" 2>/dev/null)
+        (.choices[0].message // {}) as $m
+        | ((($m.tool_calls // []) | length) > 0) as $tc
+        | { role: "assistant",
+            content: (if $tc and (($m.content // "") | length) == 0 then null
+                         else ($m.content // null) end) }
+        + (if $tc then
+             { tool_calls: [ $m.tool_calls[] | { id: .id, type: "function",
+                 function: { name: .function.name,
+                   arguments: (if ((.function.arguments // null) | type) == "string"
+                               then .function.arguments
+                               else ((.function.arguments // {}) | tostring) end) } } ] }
+           else {} end)' <<<"$raw_res" 2>/dev/null)
       reasoning=$(jq -rc '.choices[0].message.reasoning // .choices[0].message.reasoning_content' <<<"$raw_res" 2>/dev/null)
       content=$(jq -rc '.choices[0].message.content' <<<"$raw_res" 2>/dev/null)
       refusal=$(jq -rc '.choices[0].message.refusal' <<<"$raw_res" 2>/dev/null)

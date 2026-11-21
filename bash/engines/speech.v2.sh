@@ -9,7 +9,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.2.0
+# Version: 0.2.1
 #
 # Contract:
 #   transcribe_audio — audio file -> text
@@ -81,26 +81,32 @@ speech_v2_deps() {
 
 speech_v2_allowlist() {
   case "$1" in
-    openai)          printf '%s' 'https://api.openai.com/v1/' ;;
-    groq)            printf '%s' 'https://api.groq.com/openai/v1/' ;;
-    openrouter)      printf '%s' 'https://openrouter.ai/api/v1/' ;;
-    venice)          printf '%s' 'https://api.venice.ai/api/v1/' ;;
-    zai)             printf '%s' 'https://api.z.ai/api/paas/v4/' ;;
-    vercel|vercel_free) printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/' ;;
-    huggingface)     printf '%s' 'https://router.huggingface.co/hf-inference/models' ;;
+    groq)                   printf '%s' 'https://api.groq.com/openai/v1/' ;;
+    huggingface)            printf '%s' 'https://router.huggingface.co/hf-inference/models' ;;
+    infomaniak)             printf '%s' 'https://api.infomaniak.com/1/' ;;
+    mistral)                printf '%s' 'https://api.mistral.ai/v1/' ;;
+    openai)                 printf '%s' 'https://api.openai.com/v1/' ;;
+    openrouter)             printf '%s' 'https://openrouter.ai/api/v1/' ;;
+    venice)                 printf '%s' 'https://api.venice.ai/api/v1/' ;;
+    vercel|vercel_free)     printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/' ;;
+    xai)                    printf '%s' 'https://api.x.ai/v1/' ;;
+    zai)                    printf '%s' 'https://api.z.ai/api/paas/v4/' ;;
     *) return 1 ;;
   esac
 }
 
 speech_v2_documented_endpoint() {
   case "$1" in
-    openai)          printf '%s' 'https://api.openai.com/v1/audio/transcriptions' ;;
-    groq)            printf '%s' 'https://api.groq.com/openai/v1/audio/transcriptions' ;;
-    openrouter)      printf '%s' 'https://openrouter.ai/api/v1/audio/transcriptions' ;;
-    venice)          printf '%s' 'https://api.venice.ai/api/v1/audio/transcriptions' ;;
-    zai)             printf '%s' 'https://api.z.ai/api/paas/v4/audio/transcriptions' ;;
-    vercel|vercel_free) printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/transcription-model' ;;
-    huggingface)     printf '%s' 'https://router.huggingface.co/hf-inference/models' ;;
+    groq)                   printf '%s' 'https://api.groq.com/openai/v1/audio/transcriptions' ;;
+    huggingface)            printf '%s' 'https://router.huggingface.co/hf-inference/models' ;;
+    infomaniak)             printf '%s' 'https://api.infomaniak.com/1/ai/product_id/openai/audio/transcriptions' ;;
+    mistral)                printf '%s' 'https://api.mistral.ai/v1/audio/transcriptions' ;;
+    openai)                 printf '%s' 'https://api.openai.com/v1/audio/transcriptions' ;;
+    openrouter)             printf '%s' 'https://openrouter.ai/api/v1/audio/transcriptions' ;;
+    venice)                 printf '%s' 'https://api.venice.ai/api/v1/audio/transcriptions' ;;
+    vercel|vercel_free)     printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/transcription-model' ;;
+    xai)                    printf '%s' 'https://api.x.ai/v1/stt' ;;
+    zai)                    printf '%s' 'https://api.z.ai/api/paas/v4/audio/transcriptions' ;;
     *) return 1 ;;
   esac
 }
@@ -127,7 +133,7 @@ speech_v2_discover_model() {
     speech_v2_error "Catalogue lookup failed for '$provider'; availability is unknown."
     return 1
   }
-  [[ -n $raw && $raw != null ]] || { speech_v2_error "Empty catalogue for '$provider'."; return 1; }
+  [[ -n $raw && $raw != "null" ]] || { speech_v2_error "Empty catalogue for '$provider'."; return 1; }
 
   if declare -F filter_provider_models >/dev/null; then
     raw=$(filter_provider_models "$provider" stt <<< "$raw") || return 1
@@ -147,7 +153,7 @@ speech_v2_model_known() {
   local raw
 
   raw=$(get_provider_models "$provider" stt) || return 1
-  [[ -n $raw && $raw != null ]] || return 1
+  [[ -n $raw && $raw != "null" ]] || return 1
   jq -e --arg m "$model" '
     (if type == "array" then .[] else (.data // [])[] end) | select(.id == $m)
   ' <<< "$raw" >/dev/null 2>&1
@@ -174,7 +180,7 @@ speech_v2_resolve_remote() {
   SPEECH_V2_PROTOCOL=$(engine_v2_block_field "$provider" "voice.stt" protocol)
   SPEECH_V2_PROTOCOL="${SPEECH_V2_PROTOCOL:-$(speech_v2_default_protocol "$provider")}"
   case "$SPEECH_V2_PROTOCOL" in
-    multipart|binary|json) ;;
+    multipart|binary|json|async-json) ;;
     *) speech_v2_error "Unsupported STT protocol '$SPEECH_V2_PROTOCOL'."; return 1 ;;
   esac
 
@@ -187,7 +193,7 @@ speech_v2_resolve_remote() {
         speech_v2_error "Model '$SPEECH_V2_MODEL' is not a documented '$provider' STT model."
         return 1
       }
-    elif [[ $provider != huggingface ]] && ! speech_v2_model_known "$provider" "$SPEECH_V2_MODEL"; then
+    elif [[ $provider != "huggingface" ]] && ! speech_v2_model_known "$provider" "$SPEECH_V2_MODEL"; then
       # Hugging Face publishes a Hub listing, not the router surface: the
       # router is authoritative there, so an explicit model is trusted.
       speech_v2_error "Model '$SPEECH_V2_MODEL' is absent from the '$provider' catalogue."
@@ -196,7 +202,7 @@ speech_v2_resolve_remote() {
   elif [[ -n $static ]]; then
     SPEECH_V2_MODEL="$default"
     [[ -n $SPEECH_V2_MODEL ]] || { speech_v2_error "No default STT model for '$provider'."; return 1; }
-  elif [[ $provider == huggingface ]]; then
+  elif [[ $provider == "huggingface" ]]; then
     # The registry declares the hf-inference listing (`.inference`): the first
     # ASR model it lists is the default, so a caller no longer needs a repo id.
     SPEECH_V2_MODEL=$(engine_v2_inference_model "$provider" inference 'automatic-speech-recognition') || {
@@ -221,7 +227,7 @@ speech_v2_resolve() {
   local provider="$SPEECH_V2_PROVIDER"
 
   SPEECH_V2_LOCAL=false
-  if [[ -z $provider || $provider == local ]]; then
+  if [[ -z $provider || $provider == "local" ]]; then
     SPEECH_V2_LOCAL=true
     return 0
   fi
@@ -271,7 +277,7 @@ speech_v2_resolve_language() {
   candidate=$(speech_v2_lower "${SPEECH_V2_LANGUAGE:-}")
   value=$(speech_v2_lower "${AUDIO_LANG:-}")
   for candidate in "$candidate" "$value"; do
-    [[ -n $candidate && $candidate != auto ]] || continue
+    [[ -n $candidate && $candidate != "auto" ]] || continue
     [[ $candidate =~ ^[a-z]{2}$ ]] || {
       speech_v2_error "Language must be an ISO-639-1 code (two letters, e.g. fr) or 'auto', not '$candidate'."
       return 1
@@ -368,6 +374,19 @@ speech_v2_send() {
 
   case "$SPEECH_V2_PROTOCOL" in
     multipart)
+      # Only for X.AI
+      if [[ $SPEECH_V2_PROVIDER == xai ]]; then
+        local -a xform ; xform=(--form-string "model=$SPEECH_V2_MODEL")
+        [[ -z $SPEECH_V2_LANGUAGE ]] || xform+=(--form-string "language=$SPEECH_V2_LANGUAGE")
+        xform+=(-F "file=@$SPEECH_V2_INPUT;type=$SPEECH_V2_MIME")   # file ALWAYS in last (xai doc)
+        engine_v2_http "$SPEECH_V2_ENDPOINT" "$response" true "$SPEECH_V2_KEY" "${xform[@]}" || {
+          speech_v2_error "Transcription failed (HTTP ${ENGINE_V2_HTTP_CODE:-none}); no retry, no substitution."
+          return 1
+        }
+        return 0
+      fi
+
+      # All providers
       local -a form ; form=(
         -F "file=@$SPEECH_V2_INPUT;type=$SPEECH_V2_MIME"
         --form-string "model=$SPEECH_V2_MODEL"
@@ -421,6 +440,100 @@ speech_v2_send() {
           return 1
         }
       fi
+    ;;
+    async-json)
+      # ── Step 1: submission (multipart, OpenAI shape) ───────────────────
+      # Infomaniak documents the transcription route as OpenAI-compliant
+      # ("The input format is the same as OpenAI"); the async answer is
+      # {batch_id} and the result is fetched on the dedicated results path.
+      local -a aform ; aform=(
+        -F "file=@$SPEECH_V2_INPUT;type=$SPEECH_V2_MIME"
+        --form-string "model=$SPEECH_V2_MODEL"
+      )
+      [[ -z $SPEECH_V2_LANGUAGE ]] || aform+=(--form-string "language=$SPEECH_V2_LANGUAGE")
+      engine_v2_http "$SPEECH_V2_ENDPOINT" "$response" true "$SPEECH_V2_KEY" "${aform[@]}" || {
+        speech_v2_error "Transcription submission failed (HTTP ${ENGINE_V2_HTTP_CODE:-none}); no retry, no substitution."
+        return 1
+      }
+
+      # ── Step 2: batch id ───────────────────────────────────────────────
+      local batch_id
+      batch_id=$(jq -er '.batch_id | select(type == "string" and length > 0)' "$response") || {
+        speech_v2_error 'Submission accepted but the response carries no batch_id.'
+        return 1
+      }
+
+      # ── Step 3: results URL from the registry block ────────────────────
+      # The product_id placeholder is rewritten by engine_v2_http, same
+      # contract as the submit endpoint.
+      local results_base poll_url download_url
+      results_base=$(jq -r --arg p "$SPEECH_V2_PROVIDER" \
+        '.[$p].voice.stt.results // empty' "$PROVIDERS_CONFIG") || return 1
+
+      [[ -n $results_base ]] || {
+        speech_v2_error "No 'results' endpoint declared for '$SPEECH_V2_PROVIDER'."
+        return 1
+      }
+
+      poll_url="${results_base%/}/$batch_id"
+      download_url="${results_base%/}/$batch_id/download"
+
+      # ── Step 4: poll until terminal state ──────────────────────────────
+      # The polling payload shape is not publicly documented: read the
+      # candidate status keys, and treat an explicit text payload as proof
+      # of completion regardless of the status wording.
+      local poll_response="$SPEECH_V2_WORK/poll.json"
+      local max_attempts=40 interval=5 payload status text=''
+      local attempt
+
+      for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        if ! engine_v2_http "$poll_url" "$poll_response" true "$SPEECH_V2_KEY"; then
+          if [[ ${ENGINE_V2_HTTP_CODE:-} == 404 ]]; then
+            speech_v2_error "Batch '$batch_id' is unknown or expired; no retry."
+            return 1
+          fi
+          speech_v2_warn "Poll attempt $attempt failed (HTTP ${ENGINE_V2_HTTP_CODE:-none}); retrying."
+          sleep "$interval"
+          continue
+        fi
+
+        payload=$(cat "$poll_response")
+        # An immediate transcript beats any status wording.
+        text=$(jq -r '.text // .data.text // empty' <<<"$payload" 2>/dev/null)
+        if [[ -n $text ]]; then break; fi
+
+        status=$(jq -r '.state // .status // .data.state // .data.status // empty' <<<"$payload" 2>/dev/null)
+        case "$status" in
+          error|failed|cancelled)
+            speech_v2_error "Batch '$batch_id' failed on the provider side (state: '$status')."
+            return 1
+          ;;
+          success|done|completed|finished)
+            # Fetch the output from the documented download path.
+            engine_v2_http "$download_url" "$poll_response" true "$SPEECH_V2_KEY" || {
+              speech_v2_error "Result download failed (HTTP ${ENGINE_V2_HTTP_CODE:-none})."
+              return 1
+            }
+            payload=$(cat "$poll_response")
+            text=$(jq -r '.text // .data.text // empty' <<<"$payload" 2>/dev/null)
+            [[ -n $text ]] && break
+            speech_v2_error "Batch '$batch_id' completed but the download carries no transcript."
+            return 1
+          ;;
+          *) : ;;   # pending/processing/queued/unknown → keep polling
+        esac
+
+        sleep "$interval"
+      done
+
+      (( attempt <= max_attempts )) || {
+        speech_v2_error "Polling limit reached for batch '$batch_id'; the batch still exists, DO NOT resubmit blindly."
+        return 1
+      }
+
+      # ── Step 5: normalise to the publish contract ({text: …}) ──────────
+      printf '%s\n' "$text" > "$SPEECH_V2_WORK/response.json"
+      return 0
     ;;
   esac
 }

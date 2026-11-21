@@ -73,16 +73,26 @@ normalize_history() {
           | { role: "tool", tool_call_id: (.tool_use_id // ""), name: "tool",
               content: (if (.content | type) == "string" then .content else (.content | tostring) end) } ]
       elif has("role") then
-        # Chat/completions-shaped message: passes through as-is, EXCEPT tool_calls
-        # arguments, which are coerced to a JSON string. A poisoned messages.json
-        # therefore self-heals on load, and heal_history_file stays a no-op on
-        # healthy files (the transform is idempotent).
-        if (.role == "assistant") and ((.tool_calls | type) == "array") then
-          [ .tool_calls = [ .tool_calls[]
-              | .function.arguments = (if (.function.arguments | type) == "string"
-                                       then .function.arguments
-                                       else ((.function.arguments // {}) | tostring) end) ] ]
-        else [.] end
+        if .role == "assistant" then
+          . as $m | ((($m.tool_calls // []) | length) > 0) as $tc |
+          [ ({ role: "assistant",
+               content: (if $tc and (($m.content // "") | length) == 0 then null
+                          else ($m.content // null) end) }
+             + (if $tc then
+                  { tool_calls: [ $m.tool_calls[] | { id: .id, type: "function",
+                      function: { name: .function.name,
+                        arguments: (if ((.function.arguments // null) | type) == "string"
+                                    then .function.arguments
+                                    else ((.function.arguments // {}) | tostring) end) } } ] }
+                else {} end)) ]
+        elif .role == "tool" then
+          [ { role: "tool", tool_call_id: (.tool_call_id // ""),
+              name: (.name // "tool"),
+              content: (if (.content | type) == "string" then .content
+                        else (.content | tostring) end) } ]
+        elif (.role == "user") or (.role == "system") or (.role == "developer") then
+          [ { role: .role, content: .content } ]
+        else [] end
       elif .type == "function_call_output" then
         [{ role: "tool", tool_call_id: (.call_id // ""), name: (.name // "tool"), content: (.output // "") }]
       elif .type == "function_call" then

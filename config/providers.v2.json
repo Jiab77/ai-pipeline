@@ -85,9 +85,7 @@
       "t2i": {
         "endpoint": "https://api.cyberneurova.ai/v1/images/generations",
         "default": "artemis-img",
-        "models": [
-          "artemis-img"
-        ]
+        "models": ["artemis-img"]
       }
     },
     "video": {
@@ -95,9 +93,7 @@
         "endpoint": "https://api.cyberneurova.ai/v1/videos/generations",
         "protocol": "async",
         "default": "artemis-vid",
-        "models": [
-          "artemis-vid"
-        ]
+        "models": ["artemis-vid"]
       }
     }
   },
@@ -160,7 +156,12 @@
     },
     "voice": {
       "tts": {
-        "endpoint": "https://api.groq.com/openai/v1/audio/speech"
+        "endpoint": "https://api.groq.com/openai/v1/audio/speech",
+        "voices": {
+          "male": "troy",
+          "female": "autumn",
+          "neutral": "austin"
+        }
       },
       "stt": {
         "endpoint": "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -221,6 +222,53 @@
       "stt": {
         "endpoint": "https://router.huggingface.co/hf-inference/models",
         "protocol": "binary"
+      }
+    }
+  },
+  "infomaniak": {
+    "name": "Infomaniak",
+    "status": "experimental",
+    "api": "https://developer.infomaniak.com/getting-started",
+    "url": "https://api.infomaniak.com/2/ai/product_id/openai/v1/chat/completions",
+    "models": "https://api.infomaniak.com/1/ai/models",
+    "auth": true,
+    "keys": "https://manager.infomaniak.com/v3/ng/accounts/token/list",
+    "docs": {
+      "base": "https://developer.infomaniak.com",
+      "intro": "/getting-started",
+      "models": "/docs/api/get/1/ai/models",
+      "chat": "/docs/api/post/2/ai/%7Bproduct_id%7D/openai/v1/chat/completions",
+      "images": [
+        "/docs/api/post/1/ai/%7Bproduct_id%7D/openai/images/generations",
+        "/docs/api/post/1/ai/%7Bproduct_id%7D/images/generations/photo_maker"
+      ],
+      "voice": "/docs/api/post/1/ai/%7Bproduct_id%7D/openai/audio/transcriptions"
+    },
+    "default": {
+      "memory": "index",
+      "model": "moonshotai/Kimi-K2.6",
+      "vision": true,
+      "image": true,
+      "edit": false,
+      "video": false,
+      "voice": false,
+      "speech": false,
+      "zdr": false
+    },
+    "image": {
+      "t2i": {
+        "endpoint": "https://api.infomaniak.com/1/ai/product_id/openai/images/generations",
+        "default": "flux",
+        "models": ["flux"]
+      }
+    },
+    "voice": {
+      "stt": {
+        "endpoint": "https://api.infomaniak.com/1/ai/product_id/openai/audio/transcriptions",
+        "results": "https://api.infomaniak.com/1/ai/product_id/results",
+        "protocol": "async-json",
+        "default": "whisper",
+        "models": ["whisper"]
       }
     }
   },
@@ -295,6 +343,7 @@
     "api": "https://docs.mistral.ai/api",
     "url": "https://api.mistral.ai/v1/chat/completions",
     "models": "https://api.mistral.ai/v1/models",
+    "voices": "https://api.mistral.ai/v1/audio/voices",
     "auth": true,
     "keys": "https://console.mistral.ai/api-keys",
     "docs": {
@@ -320,6 +369,23 @@
       "voice": true,
       "speech": true,
       "zdr": false
+    },
+    "voice": {
+      "tts": {
+        "endpoint": "https://api.mistral.ai/v1/audio/speech",
+        "default": "voxtral-mini-tts-latest",
+        "models": ["voxtral-mini-tts-latest"],
+        "voices": {
+          "male": "voice_3150",
+          "female": "voice_447",
+          "neutral": "voice_3149"
+        }
+      },
+      "stt": {
+        "endpoint": "https://api.mistral.ai/v1/audio/transcriptions",
+        "default": "voxtral-mini-transcribe-latest",
+        "models": ["voxtral-mini-transcribe-latest"]
+      }
     }
   },
   "openai": {
@@ -716,6 +782,7 @@
     "api": "https://docs.x.ai/developers/rest-api-reference/inference",
     "url": "https://api.x.ai/v1/responses",
     "models": "https://api.x.ai/v1/models",
+    "voices": "https://api.x.ai/v1/tts/voices",
     "auth": true,
     "keys": "https://console.x.ai/team/default/api-keys",
     "docs": {
@@ -763,9 +830,7 @@
       "t2i": {
         "endpoint": "https://api.x.ai/v1/images/generations",
         "default": "grok-imagine-image-2.0",
-        "models": [
-          "grok-imagine-image-2.0"
-        ]
+        "models": ["grok-imagine-image-2.0"]
       }
     },
     "video": {
@@ -773,25 +838,29 @@
         "endpoint": "https://api.x.ai/v1/videos/generations",
         "protocol": "async",
         "default": "grok-imagine-video-1.5",
-        "models": [
-          "grok-imagine-video-1.5"
-        ]
+        "models": ["grok-imagine-video-1.5"]
       },
       "i2v": {
         "endpoint": "https://api.x.ai/v1/videos/generations",
         "protocol": "async",
         "default": "grok-imagine-video-1.5",
-        "models": [
-          "grok-imagine-video-1.5"
-        ]
+        "models": ["grok-imagine-video-1.5"]
       }
     },
     "voice": {
       "tts": {
-        "endpoint": "https://api.x.ai/v1/tts"
+        "endpoint": "https://api.x.ai/v1/tts",
+        "voices": {
+          "female": "eve",
+          "male": "rex",
+          "neutral": "eve"
+        }
       },
       "stt": {
-        "endpoint": "https://api.x.ai/v1/stt"
+        "endpoint": "https://api.x.ai/v1/stt",
+        "protocol": "multipart",
+        "default": "grok-voice-transcribe-2.0",
+        "models": ["grok-voice-transcribe-2.0"]
       }
     }
   },
@@ -854,9 +923,7 @@
       "t2i": {
         "endpoint": "https://api.z.ai/api/paas/v4/images/generations",
         "default": "glm-image",
-        "models": [
-          "glm-image"
-        ]
+        "models": ["glm-image"]
       }
     },
     "video": {
@@ -864,17 +931,13 @@
         "endpoint": "https://api.z.ai/api/paas/v4/videos/generations",
         "protocol": "async",
         "default": "cogvideox-3",
-        "models": [
-          "cogvideox-3"
-        ]
+        "models": ["cogvideox-3"]
       },
       "i2v": {
         "endpoint": "https://api.z.ai/api/paas/v4/videos/generations",
         "protocol": "async",
         "default": "cogvideox-3",
-        "models": [
-          "cogvideox-3"
-        ]
+        "models": ["cogvideox-3"]
       }
     },
     "voice": {
@@ -882,9 +945,7 @@
         "endpoint": "https://api.z.ai/api/paas/v4/audio/transcriptions",
         "protocol": "multipart",
         "default": "glm-asr-2512",
-        "models": [
-          "glm-asr-2512"
-        ]
+        "models": ["glm-asr-2512"]
       }
     }
   }

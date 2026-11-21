@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck shell=bash
+# shellcheck shell=bash disable=SC2034
 # ==============================================================================
 # lib/helpers.sh — Shared helpers functions
 # ==============================================================================
@@ -7,7 +7,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 2.0.0
+# Version: 0.0.0
 #
 # Contract: LIB_DEPS
 #
@@ -25,6 +25,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 fi
 
 HELPERS_SH_LOADED=1
+IFM_PID_CACHE=""
 
 # -----------------------------------------------------------------------------
 # Log and exit helper
@@ -48,6 +49,46 @@ curl_wrapper() {
     curl-impersonate --compressed --impersonate "chrome150" "$@"
   else
     curl "$@"
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Specific provider helpers
+# -----------------------------------------------------------------------------
+
+get_infomaniak_product_id() {
+  local -a curl_opts ; curl_opts=("-sSL")
+  local url="https://api.infomaniak.com/1/ai"
+  local key="${1:-$PROVIDER_API_KEY}"
+  local payload prod_id status
+
+  [[ -z $key ]] && error "Can't get product ID without Infomaniak API key."
+
+  # Add required arguments when TOR is enabled
+  [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
+
+  # Make product id request
+  payload=$(curl_wrapper "${curl_opts[@]}" "${url}" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${PROVIDER_API_KEY}" \
+    -A "$USER_AGENT" | jq -rc . 2>/dev/null
+  )
+
+  # Check payload
+  [[ -z $payload || $payload == "null" ]] && error "Payload for Infomaniak product id request is invalid or empty."
+
+  # Get status
+  status=$(jq -rc .result <<<"$payload" 2>/dev/null)
+
+  # Check response
+  [[ ! $status == "success" ]] && error "Failed to get Infomaniak product ID."
+
+  # Return product id
+  prod_id=$(jq -rc .data[0].product_id <<<"$payload" 2>/dev/null)
+  if [[ -n $prod_id && ! $prod_id == "null" ]]; then
+    echo -n "$prod_id"
+  else
+    error "Invalid or empty Infomaniak product id returned."
   fi
 }
 
@@ -153,6 +194,25 @@ filter_provider_models() {
     jq '.data |= map(select(
       .model_spec.capabilities.supportsVideoInput == true
     ))'
+  ;;
+
+  # ── Infomaniak ──────────────────────────────────────────────────────
+  # reads: type (llm|image|embedding|reranker|stt)
+  #
+  # Every direction is filtered locally, even the ones core.sh already
+  # narrows with ?type=. The local filter is the authoritative one: the
+  # URL mapping has no ?type= branch for stt, so trusting the query would
+  # return the whole catalogue as if it were speech-to-text.
+  infomaniak:chat)
+    jq '.data |= map(select(.type == "llm"))'
+  ;;
+
+  infomaniak:t2i)
+    jq '.data |= map(select(.type == "image"))'
+  ;;
+
+  infomaniak:stt)
+    jq '.data |= map(select(.type == "stt"))'
   ;;
 
   # ── OpenRouter ──────────────────────────────────────────────────────
@@ -459,6 +519,9 @@ normalize_provider_models() {
         ([ (if .downloads then "dl:" + ((.downloads / 1000000 * 10 | round / 10 | tostring) + "M") else "" end),
             (if .likes then "♥" + (.likes | tostring) else "" end) ] | join(" ")) ] | @tsv'
     ;;
+    infomaniak)
+      jq -r '.data[] | [ .name, .description, (.max_token_input // "-"), "-", "-" ] | @tsv'
+    ;;
     kimi)
       jq -r '.data[] | [ .id, .id, (.context_length // "-"), "-", "-",
         ([ (if .supports_image_in then "V" else "" end),
@@ -520,7 +583,7 @@ normalize_provider_models() {
     *)
       # Unknown structure: best-effort extraction on universal keys.
       jq -r 'if type == "object" then (.data // .models // [.] )[] else .[] end |
-        [ (.id // .modelId // "?"), "-", "-", "-", "-", "-" ] | @tsv'
+        [ (.id // .modelId // "?"), (.name // "-"), "-", "-", "-", "-" ] | @tsv'
     ;;
   esac
 }
@@ -731,6 +794,18 @@ engine_v2_http() {
   local rc
   shift 4
 
+  # Rewrite provider url for Infomaniak
+  if [[ $url == *product_id* ]]; then
+    # Get user product id and cache it
+    [[ -n $IFM_PID_CACHE ]] || IFM_PID_CACHE=$(get_infomaniak_product_id "$key") || return 1
+
+    # Check product id
+    [[ $IFM_PID_CACHE != null ]] || return 1
+
+    # Rewrite URL with gathered product id
+    url="${url//product_id/$IFM_PID_CACHE}"
+  fi
+
   ENGINE_V2_HTTP_CODE=''
   [[ $url == https://* ]] || return 1
 
@@ -755,7 +830,6 @@ engine_v2_http() {
   code=$(curl_wrapper "${options[@]}" "$@" "$url")
   rc=$?
   # Read by every caller to report the failing status; not used here.
-  # shellcheck disable=SC2034
   ENGINE_V2_HTTP_CODE="$code"
   [[ $rc -eq 0 ]] || return 1
   case "$code" in 2??) return 0 ;; *) return 1 ;; esac

@@ -559,9 +559,11 @@ EOF
         unset PROVIDER_API_AUTH   # Remove previous provider API auth boolean
         unset PROVIDER_API_ZDR    # Remove previous provider API zdr boolean
         local active_provider="${USER_MSG#"/provider "}"
-        if [[ $active_provider == "groq" ]]; then
+
+        # Disable Tor routing explicitely for Groq and Infomaniak (They hates it the vilains lol)
+        if [[ $active_provider == "groq" || $active_provider == "infomaniak" ]]; then
           USE_TOR=false
-          log_warn "Tor privacy tunnel disabled for Groq."
+          log_warn "Tor privacy tunnel disabled for this provider."
         fi
         change_provider "$active_provider"
       ;;

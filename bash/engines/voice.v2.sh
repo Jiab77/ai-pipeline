@@ -9,7 +9,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.2.0
+# Version: 0.2.1
 #
 # Contract:
 #   generate_speech — text -> audio file
@@ -93,22 +93,26 @@ voice_v2_deps() {
 
 voice_v2_allowlist() {
   case "$1" in
-    openai)          printf '%s' 'https://api.openai.com/v1/' ;;
-    groq)            printf '%s' 'https://api.groq.com/openai/v1/' ;;
-    openrouter)      printf '%s' 'https://openrouter.ai/api/v1/' ;;
-    venice)          printf '%s' 'https://api.venice.ai/api/v1/' ;;
-    vercel|vercel_free) printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/' ;;
+    groq)                   printf '%s' 'https://api.groq.com/openai/v1/' ;;
+    mistral)                printf '%s' 'https://api.mistral.ai/v1/' ;;
+    openai)                 printf '%s' 'https://api.openai.com/v1/' ;;
+    openrouter)             printf '%s' 'https://openrouter.ai/api/v1/' ;;
+    venice)                 printf '%s' 'https://api.venice.ai/api/v1/' ;;
+    vercel|vercel_free)     printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/' ;;
+    xai)                    printf '%s' 'https://api.x.ai/v1/' ;;
     *) return 1 ;;
   esac
 }
 
 voice_v2_documented_endpoint() {
   case "$1" in
-    openai)          printf '%s' 'https://api.openai.com/v1/audio/speech' ;;
-    groq)            printf '%s' 'https://api.groq.com/openai/v1/audio/speech' ;;
-    openrouter)      printf '%s' 'https://openrouter.ai/api/v1/audio/speech' ;;
-    venice)          printf '%s' 'https://api.venice.ai/api/v1/audio/speech' ;;
-    vercel|vercel_free) printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/speech-model' ;;
+    groq)                   printf '%s' 'https://api.groq.com/openai/v1/audio/speech' ;;
+    mistral)                printf '%s' 'https://api.mistral.ai/v1/audio/speech' ;;
+    openai)                 printf '%s' 'https://api.openai.com/v1/audio/speech' ;;
+    openrouter)             printf '%s' 'https://openrouter.ai/api/v1/audio/speech' ;;
+    venice)                 printf '%s' 'https://api.venice.ai/api/v1/audio/speech' ;;
+    vercel|vercel_free)     printf '%s' 'https://ai-gateway.vercel.sh/v4/ai/speech-model' ;;
+    xai)                    printf '%s' 'https://api.x.ai/v1/tts' ;;
     *) return 1 ;;
   esac
 }
@@ -184,6 +188,8 @@ voice_v2_resolve_remote() {
   elif [[ -n $static ]]; then
     VOICE_V2_MODEL="$default"
     [[ -n $VOICE_V2_MODEL ]] || { voice_v2_error "No default TTS model for '$provider'."; return 1; }
+  elif [[ $provider == "xai" ]]; then
+    VOICE_V2_MODEL=''   # /v1/tts does not take model argument — voice_id only
   else
     VOICE_V2_MODEL=$(voice_v2_discover_model "$provider") || return 1
   fi
@@ -198,8 +204,8 @@ voice_v2_resolve_remote() {
       '.[$p].voice.tts.voices[$g] // .[$p].voice.tts.voices["neutral"] // empty' "$PROVIDERS_CONFIG" 2>/dev/null)
     if [[ -z $VOICE_V2_VOICE ]]; then
       case "$provider" in
-        openai) VOICE_V2_VOICE=alloy ;;
-        venice) VOICE_V2_VOICE=af_alloy ;;
+        openai) VOICE_V2_VOICE="alloy" ;;
+        venice) VOICE_V2_VOICE="af_alloy" ;;
       esac
     fi
   fi
@@ -342,25 +348,41 @@ voice_v2_local_run() {
 voice_v2_build_request() {
   local request="$VOICE_V2_WORK/request.json"
 
-  if [[ $VOICE_V2_PROVIDER == vercel || $VOICE_V2_PROVIDER == vercel_free ]]; then
-    jq -n --rawfile text "$VOICE_V2_WORK/text" --arg format "$VOICE_V2_FORMAT" '
-      {text:$text} + (if $format != "" then {outputFormat:$format} else {} end)
-    ' > "$request"
-  else
-    jq -n --arg model "$VOICE_V2_MODEL" --rawfile input "$VOICE_V2_WORK/text" \
-      --arg voice "$VOICE_V2_VOICE" --arg format "$VOICE_V2_FORMAT" '
-      {model:$model, input:$input}
-      + (if $voice != "" then {voice:$voice} else {} end)
-      + (if $format != "" then {response_format:$format} else {} end)
-    ' > "$request"
-  fi
+  case $VOICE_V2_PROVIDER in
+    vercel|vercel_free)
+      jq -n --rawfile text "$VOICE_V2_WORK/text" --arg format "$VOICE_V2_FORMAT" '
+        {text:$text} + (if $format != "" then {outputFormat:$format} else {} end)
+      ' > "$request"
+    ;;
+    mistral)
+      jq -n --rawfile input "$VOICE_V2_WORK/text" --arg format "$VOICE_V2_FORMAT" \
+        --arg voice "$VOICE_V2_VOICE" '
+        {text:$input} + (if $voice != "" then {voice:$voice} else {} end)
+      ' > "$request"
+    ;;
+    xai)
+      jq -n --rawfile input "$VOICE_V2_WORK/text" --arg format "$VOICE_V2_FORMAT" \
+        --arg voice "$VOICE_V2_VOICE" --arg lang "${AUDIO_LANG:-auto}" '
+        {text:$input, language:$lang}
+        + (if $voice != "" then {voice_id:$voice} else {} end)
+      ' > "$request"
+    ;;
+    *)
+      jq -n --arg model "$VOICE_V2_MODEL" --rawfile input "$VOICE_V2_WORK/text" \
+        --arg voice "$VOICE_V2_VOICE" --arg format "$VOICE_V2_FORMAT" '
+        {model:$model, input:$input}
+        + (if $voice != "" then {voice:$voice} else {} end)
+        + (if $format != "" then {response_format:$format} else {} end)
+      ' > "$request"
+    ;;
+  esac
 }
 
 voice_v2_send() {
   local response="$VOICE_V2_WORK/response"
   local -a headers ; headers=(-H 'Content-Type: application/json' --data-binary "@$VOICE_V2_WORK/request.json")
 
-  if [[ $VOICE_V2_PROVIDER == vercel || $VOICE_V2_PROVIDER == vercel_free ]]; then
+  if [[ $VOICE_V2_PROVIDER == "vercel" || $VOICE_V2_PROVIDER == "vercel_free" ]]; then
     headers+=(
       -H "ai-model-id:$VOICE_V2_MODEL"
       -H 'ai-gateway-protocol-version: 0.0.1'
@@ -374,8 +396,8 @@ voice_v2_send() {
   }
 
   # The Gateway answers JSON with base64 audio, not raw bytes.
-  if [[ $VOICE_V2_PROVIDER == vercel || $VOICE_V2_PROVIDER == vercel_free ]]; then
-    jq -er '.audio | select(type == "string" and length > 0)' "$response" | b64d > "$VOICE_V2_WORK/audio" || {
+  if [[ $VOICE_V2_PROVIDER == "vercel" || $VOICE_V2_PROVIDER == "vercel_free" || $VOICE_V2_PROVIDER == "mistral" ]]; then
+    jq -er '.audio // .audio_data | select(type == "string" and length > 0)' "$response" | b64d > "$VOICE_V2_WORK/audio" || {
       voice_v2_error 'The Gateway response carries no base64 audio.'
       return 1
     }
@@ -534,7 +556,7 @@ generate_speech() (
     # pico2wave is excluded on purpose: it selects by locale (fr-FR) and no
     if [[ $VOICE_V2_BACKEND != pico2wave && -z $VOICE_V2_VOICE ]]; then
       VOICE_V2_VOICE=$(voice_v2_local_language) || return 1
-      if [[ $VOICE_V2_VOICE == auto ]]; then
+      if [[ $VOICE_V2_VOICE == "auto" ]]; then
         VOICE_V2_VOICE=''
         voice_v2_warn 'No audio language: neither LANG nor /lang gave one; espeak keeps its own default voice.'
       else

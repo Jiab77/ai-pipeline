@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 0.2.2
+# Version: 0.2.3
 #
 # Contract:
 #   generate_image — text -> image
@@ -78,7 +78,6 @@ img_v2_deps() {
 }
 
 # img_v2_operation <generate|edit> — the catalogue operation name (t2i/i2i).
-# img_v2_operation <generate|edit> — the catalogue operation name (t2i/i2i).
 img_v2_operation() {
   case "$1" in
     generate) IMG_V2_OPERATION=t2i ;;
@@ -126,10 +125,28 @@ img_v2_allowlist() {
     openrouter|openrouter_free)   printf '%s' 'https://openrouter.ai/api/v1/' ;;
     venice)                       printf '%s' 'https://api.venice.ai/api/v1/' ;;
     zai)                          printf '%s' 'https://api.z.ai/api/paas/v4/' ;;
+    xai)                          printf '%s' 'https://api.x.ai/v1/' ;;
     cyberneurova)                 printf '%s' 'https://api.cyberneurova.ai/v1/' ;;
     mammouth)                     printf '%s' 'https://api.mammouth.ai/v1/' ;;
     vercel|vercel_free)           printf '%s' 'https://ai-gateway.vercel.sh/v1/' ;;
     huggingface)                  printf '%s' 'https://router.huggingface.co/' ;;
+    infomaniak)                   printf '%s' 'https://api.infomaniak.com/' ;;
+    *) return 1 ;;
+  esac
+}
+
+# TODO: Add required code for ':operation'
+img_v2_documented_endpoint() {
+  case "$1" in
+    openai)                       printf '%s' 'https://api.openai.com/v1/images/generations' ;;
+    openrouter|openrouter_free)   printf '%s' 'https://openrouter.ai/api/v1/images' ;;
+    venice)                       printf '%s' 'https://api.venice.ai/api/v1/image/generate' ;;
+    zai)                          printf '%s' 'https://api.z.ai/api/paas/v4/images/generations' ;;
+    xai)                          printf '%s' 'https://api.x.ai/v1/images/generations' ;;
+    cyberneurova)                 printf '%s' 'https://api.cyberneurova.ai/v1/images/generations' ;;
+    vercel|vercel_free)           printf '%s' 'https://ai-gateway.vercel.sh/v1/images/edits' ;;
+    huggingface)                  printf '%s' 'https://router.huggingface.co/hf-inference/models' ;;
+    infomaniak)                   printf '%s' 'https://api.infomaniak.com/1/ai/product_id/openai/images/generations' ;;
     *) return 1 ;;
   esac
 }
@@ -246,20 +263,30 @@ img_v2_resolve() {
     ;;
 
     # ── Opaque catalogues: the registry is the only model source ────────
+    xai:generate)
+      model="${model:-$IMG_V2_DEFAULT}"
+      IMG_V2_ADAPTER="xai"
+      img_v2_endpoint 'https://api.x.ai/v1/images/generations' || return 1
+    ;;
     zai:generate)
       model="${model:-$IMG_V2_DEFAULT}"
-      IMG_V2_ADAPTER=zai
+      IMG_V2_ADAPTER="zai"
       img_v2_endpoint 'https://api.z.ai/api/paas/v4/images/generations' || return 1
     ;;
     cyberneurova:generate)
       model="${model:-$IMG_V2_DEFAULT}"
-      IMG_V2_ADAPTER=cyberneurova
+      IMG_V2_ADAPTER="cyberneurova"
       img_v2_endpoint 'https://api.cyberneurova.ai/v1/images/generations' || return 1
+    ;;
+    infomaniak:generate)
+      model="${model:-$IMG_V2_DEFAULT}"
+      IMG_V2_ADAPTER="infomaniak"
+      img_v2_endpoint 'https://api.infomaniak.com/1/ai/product_id/openai/images/generations' || return 1
     ;;
     mammouth:generate)
       model="${model:-$IMG_V2_DEFAULT}"
       [[ $IMG_V2_PROTOCOL == chat ]] || { img_v2_error "Mammouth image protocol must be 'chat'."; return 1; }
-      IMG_V2_ADAPTER=mammouth_chat
+      IMG_V2_ADAPTER="mammouth_chat"
       IMG_V2_CONFIGURED=''
       img_v2_endpoint "$(engine_v2_documentation mammouth url)" || return 1
     ;;
@@ -277,7 +304,7 @@ img_v2_resolve() {
       }
       kind=$(jq -r '.type // empty' <<< "$record")
       if [[ $kind == language ]]; then
-        IMG_V2_ADAPTER=vercel_chat
+        IMG_V2_ADAPTER="vercel_chat"
         base=$(jq -r --arg p "$provider" '.[$p].url // empty' "$PROVIDERS_CONFIG")
         IMG_V2_CONFIGURED=''
         img_v2_endpoint "$base" || return 1
@@ -286,7 +313,7 @@ img_v2_resolve() {
           img_v2_error "Model '$model' is not an image-producing Gateway model."
           return 1
         }
-        IMG_V2_ADAPTER=vercel_images
+        IMG_V2_ADAPTER="vercel_images"
         IMG_V2_CONFIGURED=''
         base=$(jq -r --arg p "$provider" '.[$p].url // empty' "$PROVIDERS_CONFIG")
         base="${base%/chat/completions}/images/generations"
@@ -323,7 +350,7 @@ img_v2_resolve() {
         img_v2_error "Invalid Hugging Face model id."
         return 1
       }
-      IMG_V2_ADAPTER=huggingface
+      IMG_V2_ADAPTER="huggingface"
       IMG_V2_CONFIGURED=$(engine_v2_block_field "$provider" "$block" endpoint)
       IMG_V2_CONFIGURED="${IMG_V2_CONFIGURED%/}/$model"
       img_v2_endpoint "https://router.huggingface.co/hf-inference/models/$model" || return 1
@@ -382,11 +409,11 @@ img_v2_prepare_mask() {
   local mask="$1"
 
   [[ -n $mask ]] || return 0
-  if [[ $IMG_V2_ADAPTER != openai_edits ]]; then
+  if [[ $IMG_V2_ADAPTER != "openai_edits" ]]; then
     img_v2_error 'Mask inpainting is only documented for the OpenAI Images Edits path; refusing a whole-image edit.'
     return 1
   fi
-  [[ $(file -b --mime-type "$mask") == image/png ]] || { img_v2_error 'Mask must be PNG.'; return 1; }
+  [[ $(file -b --mime-type "$mask") == "image/png" ]] || { img_v2_error 'Mask must be PNG.'; return 1; }
 
   local info="$IMG_V2_WORK/mask-info"
   ffprobe -v error -select_streams v:0 -show_entries stream=width,height,pix_fmt -of json "$mask" > "$info" 2>/dev/null || {
@@ -436,19 +463,35 @@ img_v2_options() {
 
   # Reject a parameter the adapter does not document instead of dropping it.
   case "$IMG_V2_ADAPTER" in
-    openai_images|zai|cyberneurova|vercel_images) [[ -z $IMG_V2_RATIO ]] || {
-      img_v2_error "This adapter takes --size, not --ratio."
-      return 1
-    } ;;
-    openai_edits|vercel_edits) [[ -z $IMG_V2_RATIO ]] || {
-      img_v2_error "Multipart edits take --size, not --ratio."
-      return 1
-    } ;;
+    openai_images|zai|cyberneurova|vercel_images)
+      [[ -z $IMG_V2_RATIO ]] || {
+        img_v2_error "This adapter takes --size, not --ratio."
+        return 1
+      }
+    ;;
+    openai_edits|vercel_edits)
+      [[ -z $IMG_V2_RATIO ]] || {
+        img_v2_error "Multipart edits take --size, not --ratio."
+        return 1
+      }
+    ;;
+    xai)
+      [[ -z $IMG_V2_SIZE && -z $IMG_V2_FORMAT ]] || {
+        img_v2_error 'This adapter takes --ratio, not exact dimensions.'
+        return 1
+      }
+    ;;
     venice|venice_edit)
-      [[ -z $IMG_V2_SIZE ]] || { img_v2_error 'Venice accepts --ratio, not exact pixel dimensions.'; return 1; }
+      [[ -z $IMG_V2_SIZE ]] || {
+        img_v2_error 'This adapter takes --ratio, not exact dimensions.'
+        return 1
+      }
     ;;
     openrouter)
-      [[ -z $IMG_V2_SIZE ]] || { img_v2_error 'OpenRouter takes --ratio/--format, not exact dimensions.'; return 1; }
+      [[ -z $IMG_V2_SIZE ]] || {
+        img_v2_error 'This adapter takes --ratio/--format, not exact dimensions.'
+        return 1
+      }
     ;;
     vercel_chat|mammouth_chat|huggingface)
       [[ -z $IMG_V2_SIZE && -z $IMG_V2_RATIO && -z $IMG_V2_FORMAT ]] || {
@@ -481,6 +524,7 @@ img_v2_options() {
     IMG_V2_SIZE="${IMG_V2_INPUT_W}x${IMG_V2_INPUT_H}"
   fi
 }
+
 # Venice publishes its ratios and prompt ceiling in the model constraints.
 img_v2_venice_options() {
   local constraints="$IMG_V2_CONSTRAINTS"
@@ -578,8 +622,21 @@ img_v2_build_request() {
         + (if $s != "" then {size:$s} else {} end)
       ' > "$request" || return 1
     ;;
+    xai)
+      jq -n --arg m "$model" --rawfile p "$prompt_file" --arg r "$IMG_V2_RATIO" --arg f "$IMG_V2_FORMAT" '
+        {model:$m, prompt:$p, response_format:"b64_json"}
+        + (if $r != "" then {aspect_ratio:$r} else {} end)
+      ' > "$request" || return 1
+    ;;
     huggingface)
       jq -n --rawfile p "$prompt_file" '{inputs:$p}' > "$request" || return 1
+    ;;
+    infomaniak)
+      jq -n --arg m "$model" --rawfile p "$prompt_file" --arg s "$IMG_V2_SIZE" '
+        {model:$m, prompt:$p}
+        + (if $s != "" then {size:$s} else {} end)
+        + {response_format:"b64_json"}
+      ' > "$request" || return 1
     ;;
     openai_edits|vercel_edits)
       # Multipart: the form fields are the request body, there is no JSON.

@@ -32,7 +32,7 @@ SERVER_MODE="${SERVER_MODE:-web}"
 BACKEND="${BACKEND:-external}"
 
 # Providers
-PROVIDER="${PROVIDER:-openrouter_free}"
+PROVIDER="${PROVIDER:-proton}"
 PROVIDER_API_KEY=""
 
 # Memory
@@ -983,11 +983,8 @@ get_provider_models() {
   local -a curl_opts ; curl_opts=("-fsSL" "--connect-timeout" "10" "--max-time" "30")
   local url key version
 
-  # Groq blocks Tor (Cloudflare 403) — direct connection only.
-  # Same exception as init_core(), applied to catalogue lookups too.
-  if [[ $target_provider == "groq" ]]; then
-    USE_TOR=false
-  fi
+  # Disable Tor routing explicitely for Groq and Infomaniak (They hates it the vilains lol)
+  [[ $target_provider == "groq" || $target_provider == "infomaniak" ]] && USE_TOR=false
 
   # Add required arguments when TOR is enabled
   [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
@@ -1066,9 +1063,15 @@ get_provider_models() {
 list_provider_models() {
   local provider="${1:-$PROVIDER}" raw=false
   [[ "${2:-}" == "--raw" ]] && raw=true
-  local models total_models
+  local filtered_models models total_models
 
   models=$(get_provider_models "$provider") || true
+
+  # Pre-filter models for Infomaniak provider
+  if [[ -n $models && $provider == "infomaniak" ]]; then
+    filtered_models=$(jq -rc '[ .data[] | select(.type == "llm") ]' <<<"$models" 2>/dev/null)
+    models=$(jq -rc --argjson models "$filtered_models" '.data = $models' <<<"$models" 2>/dev/null)
+  fi
 
   if [[ -n $models ]]; then
     total_models=$(jq -rc '(if type == "object" then (.data // .models // [.]) else . end) | length' <<<"$models" 2>/dev/null)
@@ -2428,14 +2431,14 @@ init_core() {
 
   [[ ! -r $BASE_TOOLS ]] && error "Missing '$BASE_TOOLS' file."
 
-  # Disable Tor explicitely for Groq (They hates it the vilains lol)
-  if [[ $BACKEND == "external" && $PROVIDER == "groq" ]]; then
-    USE_TOR=false
-    log_warn "Tor privacy tunnel disabled for Groq."
-  fi
-
   # Call Tor network handler
   [[ $USE_TOR == true ]] && handle_tor
+
+  # Disable Tor routing explicitely for Groq and Infomaniak (They hates it the vilains lol)
+  if [[ $BACKEND == "external" && ( $PROVIDER == "groq" || $PROVIDER == "infomaniak" ) ]]; then
+    USE_TOR=false
+    log_warn "Tor privacy tunnel disabled for this provider."
+  fi
 
   # Load API keys only for external backend
   if [[ $BACKEND == "external" && $PROVIDER_API_AUTH == true ]]; then

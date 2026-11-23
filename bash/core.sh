@@ -202,44 +202,6 @@ OLLAMA_JUDGE="hf.co/${LLAMA_CPP_JUDGE}"
 OLLAMA_CACHE="${MODELS_DIR}/ollama"
 
 # -----------------------------------------------------------------------------
-# Cleanups & Process Resets
-# -----------------------------------------------------------------------------
-
-cleanup_the_mess() {
-  unset AUTH_TAG
-
-  # Remove temporary files
-  rm -f "$TEMP_MEMORY_SYSTEM" \
-        "$TEMP_MEMORY_USER" \
-        "$TEMP_BASE64_OUTPUT" \
-        "$TEMP_TOOLS_OUTPUT" \
-        "$TEMP_TOOLS_HISTORY" \
-        "$TEMP_PAYLOAD_ASSISTANT" \
-        "$TEMP_PAYLOAD_ASSISTANT_HISTORY" \
-        "$TEMP_PAYLOAD_MESSAGES" \
-        "$TEMP_PAYLOAD_SYSTEM" \
-        "$TEMP_PAYLOAD_USER" \
-        "$TEMP_STATE_FILE" \
-        "$VENICE_BALANCE_FILE" \
-        "$TOR_LOG" \
-        "$TOOLS_OUTPUT" \
-        "${TOOLS_OUTPUT}.safe" \
-        "${TOOLS_OUTPUT}.clean"
-
-  # Kill running background services
-  if [[ $KILL_ON_EXIT == true ]]; then
-    # Killing JarNet service
-    [[ -x $NET_HANDLER ]] && "$NET_HANDLER" down &>/dev/null
-
-    # Killing Tor service
-    kill_tor_svc
-  fi
-}
-
-# Avoid blocking image creation process (damn tricky to find it...)
-[[ "${BASH_SOURCE[0]}" == "${0}" ]] && trap cleanup_the_mess EXIT TERM
-
-# -----------------------------------------------------------------------------
 # High-Fidelity Terminal Formatting & Styles
 # -----------------------------------------------------------------------------
 
@@ -293,6 +255,41 @@ ICON_INTENT="🔍"
 ICON_DEBUG="🔍"
 ICON_USER="👤 "
 ICON_AI="🤖"
+
+# -----------------------------------------------------------------------------
+# Cleanups & Process Resets
+# -----------------------------------------------------------------------------
+
+cleanup_the_mess() {
+  unset AUTH_TAG
+
+  # Remove temporary files
+  rm -f "$TEMP_MEMORY_SYSTEM" \
+        "$TEMP_MEMORY_USER" \
+        "$TEMP_BASE64_OUTPUT" \
+        "$TEMP_TOOLS_OUTPUT" \
+        "$TEMP_TOOLS_HISTORY" \
+        "$TEMP_PAYLOAD_ASSISTANT" \
+        "$TEMP_PAYLOAD_ASSISTANT_HISTORY" \
+        "$TEMP_PAYLOAD_MESSAGES" \
+        "$TEMP_PAYLOAD_SYSTEM" \
+        "$TEMP_PAYLOAD_USER" \
+        "$TEMP_STATE_FILE" \
+        "$VENICE_BALANCE_FILE" \
+        "$TOR_LOG" \
+        "$TOOLS_OUTPUT" \
+        "${TOOLS_OUTPUT}.safe" \
+        "${TOOLS_OUTPUT}.clean"
+
+  # Kill running background services
+  if [[ $KILL_ON_EXIT == true ]]; then
+    # Killing JarNet service
+    [[ -x $NET_HANDLER ]] && "$NET_HANDLER" down &>/dev/null
+
+    # Killing Tor service
+    kill_tor_svc
+  fi
+}
 
 # -----------------------------------------------------------------------------
 # Core Functions
@@ -511,22 +508,32 @@ set_listen_interface() {
   fi
 }
 
-set_temp_files() {
+set_temp_dir() {
+  # shellcheck disable="SC2153"
   if is_termux; then
-    TOR_LOG="${TMPDIR}/tor.log"
-    TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
-    TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
-    TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
-    TEMP_BASE64_OUTPUT="${TMPDIR}/image_output.b64"
-    TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
-    TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
-    TEMP_PAYLOAD_ASSISTANT_HISTORY="${TMPDIR}/payload_assistant_history.json"
-    TEMP_TOOLS_HISTORY="${TMPDIR}/tools_history.json"
-    TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
-    TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
-    TEMP_PAYLOAD_USER="${TMPDIR}/payload_user.txt"
-    VENICE_BALANCE_FILE="${TMPDIR}/venice-balance.txt"
+    [[ -z $TMPDIR ]] && TMPDIR="${PREFIX}/tmp"
+  else
+    [[ -z $TMPDIR ]] && TMPDIR="/tmp"
   fi
+
+  export TMPDIR
+}
+
+set_temp_files() {
+  TOR_LOG="${TMPDIR}/tor.log"
+  TOOLS_OUTPUT="${TMPDIR}/tools_output.txt"
+  TEMP_MEMORY_SYSTEM="${TMPDIR}/memory_sys.txt"
+  TEMP_MEMORY_USER="${TMPDIR}/memory_usr.txt"
+  TEMP_BASE64_OUTPUT="${TMPDIR}/image_output.b64"
+  TEMP_TOOLS_OUTPUT="${TMPDIR}/tools_output.json"
+  TEMP_PAYLOAD_ASSISTANT="${TMPDIR}/payload_assistant.json"
+  TEMP_PAYLOAD_ASSISTANT_HISTORY="${TMPDIR}/payload_assistant_history.json"
+  TEMP_TOOLS_HISTORY="${TMPDIR}/tools_history.json"
+  TEMP_PAYLOAD_MESSAGES="${TMPDIR}/payload_messages.json"
+  TEMP_PAYLOAD_SYSTEM="${TMPDIR}/payload_system.txt"
+  TEMP_PAYLOAD_USER="${TMPDIR}/payload_user.txt"
+  TEMP_STATE_FILE="${CONFIG_DIR}/temp_state.json"
+  VENICE_BALANCE_FILE="${TMPDIR}/venice-balance.txt"
 }
 
 set_cpu_cores() {
@@ -2162,29 +2169,6 @@ run_agent() {
   done
 }
 
-
-# -----------------------------------------------------------------------------
-# Initializing
-# -----------------------------------------------------------------------------
-
-# Export project root
-export AIDE_ROOT
-
-# Check required dependencies
-check_deps
-
-# Load required libraries
-load_libs
-
-# Load config
-load_config_file
-
-# Load tor config
-load_tor_config
-
-# Set terminal dimensions
-set_term_width
-
 # -----------------------------------------------------------------------------
 # Help / Usage Functions
 # -----------------------------------------------------------------------------
@@ -2405,12 +2389,10 @@ init_core() {
   create_local_data_store
 
   # Setup core
-  load_tor_config
   set_console_title "${SCRIPT_FILE}: Initializing..."
   set_listen_interface
   set_keep_alive
   set_cpu_cores
-  set_temp_files
   set_base_tools
   set_api_provider
 
@@ -2522,12 +2504,38 @@ init_core() {
 # Direct Execution Logic
 # -----------------------------------------------------------------------------
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  # Set Tor config (indempotent)
-  load_tor_config
+# Export project root
+export AIDE_ROOT
 
+# Check required dependencies
+check_deps
+
+# Load required libraries
+load_libs
+
+# Load config
+load_config_file
+
+# Load tor config
+load_tor_config
+
+# Set terminal dimensions
+set_term_width
+
+# Set temp dir and files
+set_temp_dir
+set_temp_files
+
+# Detect window resize
+trap set_term_width WINCH
+
+# Decide what to do
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # Parse received flags
   parse_cli_args "$@"
+
+  # Arm cleanup ONLY for real runs (--help/parse errors exit above, Tor untouched)
+  trap cleanup_the_mess EXIT TERM
 
   # Self-explanatory :P
   init_core

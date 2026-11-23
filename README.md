@@ -815,8 +815,8 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](bash/core.sh) | v1.9.5 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
-| [`cli.sh`](bash/cli.sh) | v1.8.3 | Interactive terminal client — slash commands, session loop, reasoning display |
+| [`core.sh`](bash/core.sh) | v2.0.0 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`cli.sh`](bash/cli.sh) | v2.0.0 | Interactive terminal client — slash commands, session loop, reasoning display |
 | [`tools.sh`](bash/tools.sh) | v0.8.6 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
 | [`image.v2.sh`](bash/engines/image.v2.sh) | v0.2.2 | v2 Image engine — config-driven providers, quality & format constraints |
 | [`video.v2.sh`](bash/engines/video.v2.sh) | v0.2.1 | v2 Video engine — t2v / i2v generation, asynchronous polling |
@@ -870,11 +870,11 @@ data/memory/
 
 ## ⚖️ License & Roadmap
 
-MIT License. **v1.9.5 — Stable & Production-Ready.**
+MIT License. **v1.9.7 — Stable & Production-Ready.**
 
 Roadmap:
 
-- **v1.9.5 (current)**: Media generation engine, Voice / Speech engines, JarNet Agent-2-Agent communication protocol.
+- **v1.9.7 (current)**: Media generation engine, Voice / Speech engines, JarNet Agent-2-Agent communication protocol.
 - **v2.0.0 (horizon)**: A.I.D.E. Web dashboard, Cognitive Router & Proxy (CRP) Gateway, charmbracelet/gum UI modernization.
 
 ## ⭐ Star History

@@ -32,10 +32,14 @@ TAG_SH_LOADED=1
 
 compute_device_tag() {
   local machine_id hostname session_ts
-  machine_id=$(cat /etc/machine-id 2>/dev/null \
-            || cat /var/lib/dbus/machine-id 2>/dev/null \
-            || settings get secure android_id 2>/dev/null \
-            || echo "unknown")
+  if is_termux; then
+    machine_id=$(cat "${PREFIX}/var/lib/dbus/machine-id" 2>/dev/null \
+              || echo "unknown")
+  else
+    machine_id=$(cat /etc/machine-id 2>/dev/null \
+              || cat /var/lib/dbus/machine-id 2>/dev/null \
+              || echo "unknown")
+  fi
   hostname=$(hostname 2>/dev/null || echo "unknown")
   session_ts=$(date +%s)
   echo -n "${machine_id}:${hostname}:aide:${session_ts}" | _sha256sum | cut -c1-16

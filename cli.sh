@@ -32,9 +32,8 @@ fi
 # Import engines files
 load_engines
 
-# Set the 'trap' to the right place
+# Redirect '[Ctrl + C]' (SIGINT) to a no-op
 trap ':' INT
-trap cleanup_the_mess EXIT TERM
 
 # Override default RUN_MODE to start in chat mode by default
 RUN_MODE="chat"
@@ -684,6 +683,9 @@ load_config_file
 
 # Parse command line overrides
 parse_cli_args "$@"
+
+# Arm cleanup ONLY once args are validated (early exits above leave Tor untouched)
+trap cleanup_the_mess EXIT TERM
 
 # Bootstrap core configurations and model settings
 init_core

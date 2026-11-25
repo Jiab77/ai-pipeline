@@ -18,9 +18,9 @@
 #   [MIN]  web_search: added local for titles/raw_urls/snippets
 #   [MIN]  logging: echo -e → printf (FUNC_ARGS backslashes were interpreted)
 #   [MIN]  edit_file/apply_diff guards: same prefix removal as exec_command
-#   [FEAT] create_image: JSON→flags wrapper for image.sh (anti-loop guard, keyless fallback inherited)
-#   [FEAT] edit_image: JSON→flags wrapper for image.sh /images/edits (anti-loop guard shared with create_image, inpainting via --mask)
-#   [REFACTOR] create_image: sources core.sh + image.sh in-process — draw.sh subprocess removed, provider resolution delegated to image.sh, output survives dispatcher capture
+#   [FEAT] create_image: JSON→flags wrapper for image.v2.sh (anti-loop guard, keyless fallback inherited)
+#   [FEAT] edit_image: JSON→flags wrapper for image.v2.sh /images/edits (anti-loop guard shared with create_image, inpainting via --mask)
+#   [REFACTOR] create_image: sources core.sh + image.v2.sh in-process — draw.sh subprocess removed, provider resolution delegated to image.v2.sh, output survives dispatcher capture
 #   [REFACTOR] web_browse: now using hybrid mobile/desktop script
 # ------------------------------------------------------------------------------
 
@@ -723,9 +723,9 @@ web_browse() {
   "$WEB_BROWSE" "$updated_args"
 }
 
-# 12. Generate an image via the image.sh engine (autonomous generation path)
+# 12. Generate an image via the image.v2.sh engine (autonomous generation path)
 #     Maps tool-call JSON args to CLI flags and runs create_image().
-#     Provider resolution is fully delegated to image.sh load_image_config():
+#     Provider resolution is fully delegated to image.v2.sh load_image_config():
 #       --provider > $IMAGE_PROVIDER > config/state.json > $PROVIDER > pollinations
 #     Anti-loop guard is HERE (wrapper level): /draw stays unlimited, only the
 #     autonomous path is capped. Counting real files under data/images =
@@ -749,7 +749,7 @@ create_image() {
 
   [[ -z $prompt_val || $prompt_val == "null" ]] && die "The prompt parameter is required."
 
-  # Import the image engine into THIS process. Order matters: image.sh calls
+  # Import the image engine into THIS process. Order matters: image.v2.sh calls
   # core.sh helpers (logging, keyring, paths). Both are definitions-only when
   # sourced (idempotent guards) — no init side effects.
   load_engine "image"
@@ -772,9 +772,9 @@ create_image() {
   generate_image "${img_args[@]}"
 }
 
-# 13. Edit an existing image via the image.sh engine (OpenAI /images/edits)
+# 13. Edit an existing image via the image.v2.sh engine (OpenAI /images/edits)
 #     Maps tool-call JSON args to CLI flags and runs edit_image().
-#     Provider resolution is delegated to image.sh load_image_config(), then
+#     Provider resolution is delegated to image.v2.sh load_image_config(), then
 #     load_edit_config() for the edit surface. Anti-loop guard shared with
 #     create_image (same output folder).
 edit_image() {
@@ -817,9 +817,9 @@ edit_image() {
   modify_image "${img_args[@]}"
 }
 
-# 14. Generate a video via the video.sh engine (autonomous generation path)
+# 14. Generate a video via the video.v2.sh engine (autonomous generation path)
 #     Maps tool-call JSON args to CLI flags and runs generate_video().
-#     Provider resolution is fully delegated to video.sh load_video_config():
+#     Provider resolution is fully delegated to video.v2.sh load_video_config():
 #       --provider > config/state.json (.video // .provider) > $PROVIDER
 #     Anti-loop guard is HERE (wrapper level): /imagine stays unlimited, only
 #     the autonomous path is capped. Counts finished media files only
@@ -871,7 +871,7 @@ create_video() {
 
 # 15. Read an image with vision (deliberate media analysis — image-to-text)
 #     Maps tool-call JSON args to analyze_media() (core.sh). Stateless fork:
-#     everything is resolved from DISK (state.json / providers.json / keyring).
+#     everything is resolved from DISK (state.json / providers.v2.json / keyring).
 #     NO anti-loop guard by design: reading generates nothing — a guard here
 #     would be dead code for an impossible case.
 #     OPSEC §6: only a named path, never a broad listing (every read is

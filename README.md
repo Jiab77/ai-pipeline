@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-4EAA25.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Backend Supported](https://img.shields.io/badge/Backends-Ollama%20%7C%20llama.cpp%20%7C%2017%20external%20providers-orange.svg)]()
-[![Status](https://img.shields.io/badge/Status-Stable--v1.9.7-blue.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable--v1.9.8-blue.svg)]()
 
 </div>
 
@@ -72,7 +72,7 @@
 ```
                       ┌─────────────────────────────────────────┐
                       │             Static Registries           │
-                      │  (config/models.json, providers.json)   │
+                      │ (config/models.json, providers.v2.json) │
                       └────────────────────┬────────────────────┘
                                            │
                                            ▼
@@ -584,7 +584,7 @@ set_system_prompt()
   ├─ data/learn/ exists?           → "Your learning resources are here..."
   ├─ data/docs/ exists?            → "Your shared documents are here..."
   │
-  └─ Protected files / folders warning (core.sh, cli.sh, tools.sh, image.sh, config/, keys/, lib/, engines/, plugins/)
+  └─ Protected files / folders warning (core.sh, cli.sh, tools.sh, config/, keys/, lib/, engines/, plugins/)
 
 get_system_prompt()
   ├─ Base prompt assembled above
@@ -798,12 +798,11 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 | 6 | Kimi (Moonshot AI) | https://moonshot.ai |
 | 7 | Mammouth AI | https://mammouth.ai |
 | 8 | OpenAI | https://openai.com |
-| 9 | OpenRoute (CyberNeurova) | https://openroute.cyberneurova.com |
-| 10-11 | OpenRouter (Free / Paid) | https://openrouter.ai |
-| 12 | Venice AI | https://venice.ai |
-| 13-14 | Vercel AI Gateway (Free / Paid) | https://ai-gateway.vercel.sh |
-| 15 | X.AI (Grok API) | https://x.ai |
-| 16-17 | Z.AI (API / Coding Plan) | https://z.ai |
+| 9-10 | OpenRouter (Free / Paid) | https://openrouter.ai |
+| 11 | Venice AI | https://venice.ai |
+| 12-13 | Vercel AI Gateway (Free / Paid) | https://ai-gateway.vercel.sh |
+| 14 | X.AI (Grok API) | https://x.ai |
+| 15-16 | Z.AI (API / Coding Plan) | https://z.ai |
 
 >[!NOTE]
 > All use the same OpenAI-compatible API. Vision fallback works across any text-only → vision-capable pair.
@@ -815,7 +814,7 @@ Both Ollama and llama.cpp support multi-agent roles with RAM-aware model selecti
 
 | File | Version | Role |
 |:---|:---|:---|
-| [`core.sh`](core.sh) | v1.9.7 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
+| [`core.sh`](core.sh) | v1.9.8 | Sovereign Cognitive Core — 3 backends, OPSEC, memory, tool loop, fallback |
 | [`cli.sh`](cli.sh) | v1.8.4 | Interactive terminal client — slash commands, session loop, reasoning display |
 | [`tools.sh`](tools.sh) | v0.8.6 | Tool execution bridge — 31 tools, anti-XPIA wrapping, protected-files guard |
 | [`image.v2.sh`](engines/image.v2.sh) | v0.2.2 | v2 Image engine — config-driven providers, quality & format constraints |
@@ -870,11 +869,11 @@ data/memory/
 
 ## ⚖️ License & Roadmap
 
-MIT License. **v1.9.7 — Stable & Production-Ready.**
+MIT License. **v1.9.8 — Stable & Production-Ready.**
 
 Roadmap:
 
-- **v1.9.7 (current)**: Media generation engine, Voice / Speech engines, JarNet Agent-2-Agent communication protocol.
+- **v1.9.8 (current)**: Media generation engine, Voice / Speech engines, JarNet Agent-2-Agent communication protocol.
 - **v2.0.0 (horizon)**: A.I.D.E. Web dashboard, Cognitive Router & Proxy (CRP) Gateway, charmbracelet/gum UI modernization.
 
 ## ⭐ Star History

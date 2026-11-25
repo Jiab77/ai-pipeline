@@ -1,0 +1,7 @@
+keys/
+data/
+.git/
+.githold
+.env*
+*.bak
+*.log

@@ -135,7 +135,7 @@
     "type": "function",
     "function": {
       "name": "get_providers",
-      "description": "Discover the active provider and the providers currently usable by this pipeline, rather than merely listing entries defined in providers.json. Return provider identifiers, active/usable status, and declared capability flags needed for routing. Keep active, usable, and catalogue availability distinct; none of them implies credit availability or guarantees successful generation. Read-only. Never return or infer API keys, credentials, credit balances, usage or other user-specific financial data. Respect an explicitly selected provider and never substitute another one silently.",
+      "description": "Discover the active provider and the providers currently usable by this pipeline, rather than merely listing entries defined in providers.v2.json. Return provider identifiers, active/usable status, and declared capability flags needed for routing. Keep active, usable, and catalogue availability distinct; none of them implies credit availability or guarantees successful generation. Read-only. Never return or infer API keys, credentials, credit balances, usage or other user-specific financial data. Respect an explicitly selected provider and never substitute another one silently.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -146,7 +146,7 @@
     "type": "function",
     "function": {
       "name": "get_models",
-      "description": "List models actually exposed at execution time by an active or usable provider, optionally filtered by the requested operation, with provider-supplied modalities and constraints when available. Use provider-facing discovery rather than treating providers.json as a model catalogue. Read-only: never submit a generation, perform a balance lookup, or infer financial availability. Fail clearly for an unknown or unusable provider, a disabled capability, or an unsupported filter. A failed catalogue lookup means availability is unknown, not that the provider has zero models. Never invent model IDs, guess unsupported capabilities from model names, or silently switch providers.",
+      "description": "List models actually exposed at execution time by an active or usable provider, optionally filtered by the requested operation, with provider-supplied modalities and constraints when available. Use provider-facing discovery rather than treating providers.v2.json as a model catalogue. Read-only: never submit a generation, perform a balance lookup, or infer financial availability. Fail clearly for an unknown or unusable provider, a disabled capability, or an unsupported filter. A failed catalogue lookup means availability is unknown, not that the provider has zero models. Never invent model IDs, guess unsupported capabilities from model names, or silently switch providers.",
       "parameters": {
         "type": "object",
         "properties": {

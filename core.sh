@@ -8,7 +8,7 @@
 #
 # Author: Jiab77
 # Collaborator: Jarvis
-# Version: 1.9.7
+# Version: 1.9.8
 # ==============================================================================
 
 # Idempotent sourcing guard — allow safe re-sourcing (composition root pattern)
@@ -827,6 +827,7 @@ verify_nightmare_key() {
 
   # Encrypt original legacy key (base64 encoded)
   ct=$(printf '%s' "$canary" | openssl enc -aes-256-cbc -pbkdf2 -iter 1000 -e -pass fd:3 -in - 3<<<"$legacy_key" 2>/dev/null | b64e) || return 1
+
   # Decrypt key from Nightmare
   pt=$(printf '%s' "$ct" | b64d | openssl enc -aes-256-cbc -pbkdf2 -iter 1000 -d -pass fd:3 -in - 3<<<"$decoded_key" 2>/dev/null) || return 1
 
@@ -928,8 +929,8 @@ probe_keyring_cipher() {
     if [[ $use_pbkdf2 == 1 ]]; then kdf=(-pbkdf2 -iter "$PBKDF_ITERATIONS"); else kdf=(); fi
     probe="probe-$RANDOM-$RANDOM"
     probe_back=$(printf '%s' "$probe" \
-      | openssl "$cipher" "${kdf[@]}" -e -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null \
-      | openssl "$cipher" "${kdf[@]}" -d -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null)
+      | openssl enc -"$cipher" "${kdf[@]}" -e -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null \
+      | openssl enc -"$cipher" "${kdf[@]}" -d -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null)
     if [[ $probe_back == "$probe" ]]; then
       KEYRING_CIPHER="$cipher"
       KEYRING_PBKDF2="$use_pbkdf2"
@@ -959,7 +960,7 @@ encrypt_provider_key() {
   local master_key ; master_key=$(read_master_key) || return 1
   keyring_kdf
   echo -n "$raw_key" | \
-  openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -e -pass fd:3 -in - 3<<<"$master_key" | \
+  openssl enc -"$KEYRING_CIPHER" "${KDF_ARGS[@]}" -e -pass fd:3 -in - 3<<<"$master_key" | \
   b64e > "${KEYS_DIR}/${provider}.key"
   chmod 600 "${KEYS_DIR}/${provider}.key"
 }
@@ -972,7 +973,7 @@ decrypt_provider_key() {
     local master_key ; master_key=$(read_master_key) || return 1
     keyring_kdf
     b64d < "${KEYS_DIR}/${provider}.key" | \
-    openssl "$KEYRING_CIPHER" "${KDF_ARGS[@]}" -d -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null
+    openssl enc -"$KEYRING_CIPHER" "${KDF_ARGS[@]}" -d -pass fd:3 -in - 3<<<"$master_key" 2>/dev/null
   fi
 }
 
@@ -1278,7 +1279,7 @@ get_vision_model() {
 # Called by the read_image / read_video tool wrappers (forked, stateless context).
 # The fork does NOT run init_core() — everything is resolved from DISK:
 #   provider  -> state.json (.provider)
-#   model     -> providers.json (.${P}.vision.model, fallback .${P}.default.model)
+#   model     -> providers.v2.json (.${P}.vision.model, fallback .${P}.default.model)
 #   key       -> keyring (has_provider_key + decrypt_provider_key)
 # E2BIG: base64 media travels via temp file + --rawfile, NEVER via --arg/argv.
 # Output: TEXT description only — media bytes never reach the tool result.
@@ -1570,6 +1571,7 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 ## Your Origin
 **Creator:** https://github.com/jiab77
 **Source:** https://github.com/jiab77/ai-pipeline
+**Local:** $SCRIPT_DIR
 **Birth:** 2026-05-30 (1st commit)
 
 ## Your Core Files
@@ -1590,7 +1592,7 @@ Generated at bootstrap by \`generate_self_architecture()\`.
 ## Your Providers
 **Total:** $(jq -rc 'keys | length' "${PROVIDERS_CONFIG}")
 **List:** $(jq -rc 'keys | join(", ")' "${PROVIDERS_CONFIG}")
-**Config file:** \`${CONFIG_DIR##*/}/providers.json\`
+**Config file:** \`${CONFIG_DIR##*/}/${PROVIDERS_CONFIG##*/}\`
 
 ## Your Constraints
 - **Rules** (\`${CONFIG_DIR##*/}/rules.md\`) — Non-negotiable safety boundaries
@@ -2054,8 +2056,13 @@ api_call_type_completions() {
 
     # CyberNeurova (same as generic but rate-limited)
     cyberneurova)
+      # Show ZDR policy warning when enabled
+      if [[ $ZDR_ENFORCED == true ]]; then
+        log ; log_warn "🔒 ${CLR_B_CYAN}[ZDR]${ANSI_RESET} Zero Data Retention policy not supported on this provider." ; log
+      fi
+
       # Add minor delay to avoid triggering the rate limiter
-      sleep 1
+      # sleep 1
 
       # Send generic payload
       curl "${curl_opts[@]}" "${url}" \
@@ -2236,7 +2243,7 @@ api_call_type_responses() {
   # Add required arguments when TOR is enabled
   [[ $USE_TOR == true ]] && curl_opts+=("-x" "$TOR_PROXY")
 
-  # Override URL when necessary (providers.json already points to /v1/responses for openai)
+  # Override URL when necessary (providers.v2.json already points to /v1/responses for openai)
   [[ -z $url ]] && url="$PROVIDER_API_URL"
 
   # Reshape Chat Completions payload into Responses shape
@@ -2652,10 +2659,10 @@ get_credit_balance() {
               -A "$USER_AGENT" | jq -rc .data.usage 2>/dev/null
       ;;
       cyberneurova)
-        curl "${curl_opts[@]}" "https://api.cyberneurova.ai/v1/usage" \
+        curl "${curl_opts[@]}" "https://openroute.cyberneurova.com/v1/key" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer ${provider_key}" \
-              -A "$USER_AGENT" | jq -rc .data.tokens.input.remaining 2>/dev/null
+              -A "$USER_AGENT" | jq -rc .data.balance_usd 2>/dev/null
       ;;
       deepseek)
         curl "${curl_opts[@]}" "https://api.deepseek.com/user/balance" \
@@ -2775,10 +2782,13 @@ normalize_provider_models() {
         (if .lifecycle == "deprecated" then "D" else "" end) ] | @tsv'
     ;;
     cyberneurova)
-      jq -r '.data[] | [ .id, (.display_name // "-"), (.context_length // "-"), "-", "-",
-        ([ (if .supports_image_in then "V" else "" end),
+      jq -r '.data[] | [ .id, (.display_name // "-"), (.context_length // "-"),
+        (if .pricing.prompt then ((.pricing.prompt | tonumber) * 1000000) else "-" end),
+        (if .pricing.completion then ((.pricing.completion | tonumber) * 1000000) else "-" end),
+        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
             (if .supports_reasoning then "R" else "" end),
-            (if .supports_tool_use then "T" else "" end) ] | join("")) ] | @tsv'
+            (if .supports_tool_use then "T" else "" end),
+            (if ((.badges // []) | index("uncensored")) then "U" else "" end) ] | join("")) ] | @tsv'
     ;;
     deepseek)
       jq -r '.data[] | [ .id, (.name // "-"), (.context_window // "-"), "-", "-",
@@ -2812,15 +2822,6 @@ normalize_provider_models() {
     openai)
       jq -r '.data[] | [ .id, .id, "-", "-", "-",
         (if .shutdown_date then "D:" + .shutdown_date else "" end) ] | @tsv'
-    ;;
-    openroute)
-      jq -r '.data[] | [ .id, (.display_name // "-"), (.context_length // "-"),
-        (if .pricing.prompt then ((.pricing.prompt | tonumber) * 1000000) else "-" end),
-        (if .pricing.completion then ((.pricing.completion | tonumber) * 1000000) else "-" end),
-        ([ (if ((.input_modalities // []) | index("image")) then "V" else "" end),
-            (if .supports_reasoning then "R" else "" end),
-            (if .supports_tool_use then "T" else "" end),
-            (if ((.badges // []) | index("uncensored")) then "U" else "" end) ] | join("")) ] | @tsv'
     ;;
     openrouter*)
       # jq -r '.data[] | [ .id, (.name // "-"), (.context_length // "-"),
@@ -2972,17 +2973,12 @@ list_provider_balance() {
 
   for p in $(jq -rc '. | keys | @tsv' "$PROVIDERS_CONFIG" 2>/dev/null); do
     if has_provider_key "$p"; then
-      if [[ $p == "cyberneurova" ]]; then
-        currency="Tokens"
-      else
-        currency="$default_currency"
-      fi
       balance=$(get_credit_balance "$p")
       if [[ -n $balance && $balance != null ]]; then
         if jq -en --arg balance "$balance" '$balance | tonumber | . > 0' >/dev/null 2>&1; then
-          log "  • $(to_upper "$p"): [ ${CLR_B_GREEN}🟢 ${balance} ${currency}${ANSI_RESET} ]"
+          log "  • $(to_upper "$p"): [ ${CLR_B_GREEN}🟢 ${balance} ${default_currency}${ANSI_RESET} ]"
         else
-          log "  • $(to_upper "$p"): [ ${CLR_B_RED}🔴 ${balance} ${currency}${ANSI_RESET} ]"
+          log "  • $(to_upper "$p"): [ ${CLR_B_RED}🔴 ${balance} ${default_currency}${ANSI_RESET} ]"
         fi
       else
         log "  • $(to_upper "$p"): [ ${CLR_B_YELLOW}🟠 N/A${ANSI_RESET} ]"
@@ -3340,7 +3336,6 @@ run_inference_loop() {
           [[ -n $cost && ! "$cost" == "null" ]] && echo -e "${CLR_B_CYAN}Cost:${ANSI_RESET} ${CLR_B_GREEN}${cost}${ANSI_RESET}"
           if [[ -n $balance && ! "$balance" == "null" ]]; then
             case $PROVIDER in
-              cyberneurova) echo -e "${CLR_B_CYAN}Tokens Remaining:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
               openrouter*) echo -e "${CLR_B_CYAN}Total Usage:${ANSI_RESET} ${CLR_B_GREEN}${balance}${ANSI_RESET}" ;;
               *) echo -e "${CLR_B_CYAN}Credits:${ANSI_RESET} ${CLR_B_GREEN}${balance} USD${ANSI_RESET}" ;;
             esac
@@ -4307,10 +4302,31 @@ parse_cli_args() {
       --no-tor|no-tor) USE_TOR=false ; shift ;;
       --zdr|zdr) ZDR_ENFORCED=true ; shift ;;
       --clear|clear) clear_memory ; exit 0 ;;
-      --launch|launch) launch_ext_app "$2" "$3" ; exit $? ;;
+      --launch|launch)
+        # Call Tor network handler
+        [[ $USE_TOR == true ]] && handle_tor
+
+        # Launch external app
+        launch_ext_app "$2" "$3"
+        exit $?
+      ;;
       --commit|commit) check_and_trigger_heartbeat "true" ; exit 0 ;;
-      --balance|balance) list_provider_balance ; exit 0 ;;
-      --models|models) list_provider_models "$2" "$3" ; exit 0 ;;
+      --balance|balance)
+        # Call Tor network handler
+        [[ $USE_TOR == true ]] && handle_tor
+
+        # Show available balance
+        list_provider_balance
+        exit 0
+      ;;
+      --models|models)
+        # Call Tor network handler
+        [[ $USE_TOR == true ]] && handle_tor
+
+        # Show available models
+        list_provider_models "$2" "$3"
+        exit 0
+      ;;
       --lang|lang) AUDIO_LANG="${2:-}" ; shift 2 ;;
       --backend|backend) BACKEND="${2:-}" ; shift 2 ;;
       --provider|provider) PROVIDER="${2:-}" ; shift 2 ;;

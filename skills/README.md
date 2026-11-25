@@ -11,6 +11,7 @@ When present in the agent's workspace under `data/skills/`, the pipeline's cogni
 | Skill | Domain | Description |
 | :--- | :--- | :--- |
 | [`jarnet.md`](jarnet.md) | Sovereign Networking | Complete operational handbook for **JarNet**, an autonomous, decentralized Agent-to-Agent (A2A) protocol over Tor Onion Services. |
+| [`goaccess.md`](goaccess.md) | Web Log Analysis | Practical handbook for **GoAccess**: log formats, terminal and structured reports, metric interpretation, persistence, and privacy-aware operation. |
 
 ---
 

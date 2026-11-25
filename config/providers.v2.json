@@ -66,13 +66,20 @@
     "name": "CyberNeurova",
     "status": "experimental",
     "api": "https://cyberneurova.com/api",
-    "url": "https://api.cyberneurova.ai/v1/chat/completions",
-    "models": "https://api.cyberneurova.ai/v1/models",
+    "url": "https://openroute.cyberneurova.com/v1/chat/completions",
+    "models": "https://openroute.cyberneurova.com/v1/models",
     "auth": true,
-    "keys": "https://platform.cyberneurova.com/keys",
+    "keys": "https://openroute.cyberneurova.com/account/keys",
+    "docs": {
+      "base": "https://cyberneurova.com/docs",
+      "intro": "/getting-started",
+      "models": "/models",
+      "chat": "/chat",
+      "vision": "/vision"
+    },
     "default": {
       "memory": "index",
-      "model": "glm5.3",
+      "model": "cyberneurova/glm5.3",
       "vision": true,
       "image": true,
       "edit": false,
@@ -268,7 +275,7 @@
       "model": "mammouth-recommended",
       "vision": true,
       "image": true,
-      "edit": false,
+      "edit": true,
       "video": false,
       "voice": false,
       "speech": false,
@@ -370,29 +377,6 @@
           "gpt-live-transcribe"
         ]
       }
-    }
-  },
-  "openroute": {
-    "name": "OpenRoute (CyberNeurova)",
-    "status": "experimental",
-    "url": "https://openroute.cyberneurova.com/v1/chat/completions",
-    "models": "https://openroute.cyberneurova.com/v1/models",
-    "auth": true,
-    "keys": "https://openroute.cyberneurova.com/account/keys",
-    "docs": {
-      "base": "https://openroute.cyberneurova.com/docs",
-      "models": "https://openroute.cyberneurova.com/models"
-    },
-    "default": {
-      "memory": "index",
-      "model": "cyberneurova/qwen3.8-flash",
-      "vision": true,
-      "image": false,
-      "edit": false,
-      "video": false,
-      "voice": false,
-      "speech": false,
-      "zdr": false
     }
   },
   "openrouter": {

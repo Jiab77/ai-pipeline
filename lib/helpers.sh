@@ -319,23 +319,14 @@ filter_provider_models() {
   ;;
 
   cyberneurova:i2t|cyberneurova:vision)
-    jq '.data |= map(select(.supports_image_in == true))'
+    jq '.data |= map(select(
+      ((.input_modalities // []) | index("image")) != null
+    ))'
   ;;
 
   cyberneurova:v2t)
-    jq '.data |= map(select(.supports_video_in == true))'
-  ;;
-
-  # ── OpenRoute ───────────────────────────────────────────────────────
-  # reads: supports_image_in / input_modalities
-  openroute:chat)
-    cat
-  ;;
-
-  openroute:i2t|openroute:vision)
     jq '.data |= map(select(
-      .supports_image_in == true or
-      ((.input_modalities // []) | index("image")) != null
+      ((.input_modalities // []) | index("video")) != null
     ))'
   ;;
 
